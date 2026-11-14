@@ -1,5 +1,7 @@
 {
-  // Cloudflare Worker config. See README → "Deploy to Cloudflare".
+  // Cloudflare Worker config template. See docs/agents/operations.md → "Automatic deploys".
+  // Your real IDs never go in this file: local deploys use the git-ignored wrangler.local.jsonc, and Workers Builds
+  // generates wrangler.ci.jsonc from this file (tools/ci_config.mjs) with D1_DATABASE_ID from its build variables.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "family-tree",
   "main": "worker/index.js",
@@ -9,23 +11,23 @@
     "binding": "ASSETS",
     "run_worker_first": ["/api/*", "/media/*"]
   },
-  // Turn off the public workers.dev URL; serve only on your Access-protected custom domain.
+  // Serve only on your Access-protected custom domain: no workers.dev URL, no public version/preview URLs.
   "workers_dev": false,
+  "preview_urls": false,
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "family-tree",
+      "migrations_dir": "migrations",
       "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
     }
   ],
-  // Optional: photos/documents. Remove this block if you don't use R2.
   "r2_buckets": [
     { "binding": "MEDIA", "bucket_name": "family-tree-media" }
   ],
-  "vars": {
-    // Your Zero Trust team domain, e.g. "yourteam.cloudflareaccess.com"
-    "ACCESS_TEAM_DOMAIN": "",
-    // The Application Audience (AUD) tag of the Access application protecting this Worker
-    "ACCESS_AUD": ""
-  }
+  // Runtime variables live in the Cloudflare dashboard (Workers & Pages → family-tree → Settings → Variables and
+  // Secrets), not here: ACCESS_TEAM_DOMAIN, ACCESS_AUD, OWNER_EMAIL, and optionally CF_ACCOUNT_ID, ACCESS_GROUP_ID
+  // plus the CF_API_TOKEN secret (automatic Access invites). keep_vars stops deploys from deleting them. Don't add a
+  // "vars" block: any variable listed here would overwrite the dashboard value on every deploy.
+  "keep_vars": true
 }

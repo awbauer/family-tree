@@ -64,8 +64,21 @@ Free to do without asking: read anything, run `tools/build.py`, `tools/serve.py`
 - Python tools: standard library only, Python 3.9+. Site: plain JS/CSS with no build step. Worker: plain ES modules.
 - Test against the fictional family: `python3 tools/build.py --data example --out build-example && python3 tools/serve.py --data example`. If the owner's data exists locally, also run `python3 tools/build.py` and check the counts and issue summary didn't change unexpectedly.
 - The site shell in `site/` is public static content. It must never contain family data. Data comes only from `/api/tree`.
-- Keep `wrangler.jsonc` a placeholder template. Real values live in the git-ignored `wrangler.local.jsonc`, and all npm scripts use `-c wrangler.local.jsonc`.
+- Keep `wrangler.jsonc` a placeholder template with **no `vars` block** (runtime variables live in the Cloudflare dashboard; `keep_vars` protects them). Real IDs live in the git-ignored `wrangler.local.jsonc` for manual deploys; Workers Builds generates `wrangler.ci.jsonc` via `npm run deploy:ci`.
 - Branch, commit and open PRs against `main`. Keep PR text generic ("fix date parsing for dual-dated years"), never "fix Grandpa X's birth date".
+
+## After cutover: the app is the source of truth
+
+Once `meta.source_of_truth = 'app'` (see docs/agents/operations.md → Cutover), research no longer goes into `family-data/research.json`. Work the shared queue instead, through `tools/agent_api.py` with an Access service token:
+
+1. `python3 tools/agent_api.py queue`: to-dos assigned to you (`agent:<name>` / your service token), then unassigned ones.
+2. `python3 tools/agent_api.py claim <id>`, then research it following docs/agents/research-protocol.md.
+3. Write the batch file as before (outside the repo, or in `family-data/batches/`), check it with `merge_research.py --check`, then `python3 tools/agent_api.py submit batch.json --todo <id> --rationale "..."`.
+4. The to-do moves to needs_review. An editor approves or rejects it. A rejection comes back to you with a note; read it with `todos --assignee me` and the to-do's history.
+5. Use `comment <id> "..."` for progress notes, or `release <id>` if you can't finish.
+6. To fix the tree itself (wrong parents, duplicates, a wrong date), propose **edit ops** (docs/design/edit-ops.md) with `python3 tools/agent_api.py suggest-edit ops.json --reason "<evidence>" --todo <id>`. An editor reviews them like research. Cite the record in `sources`. Never propose deleting people; merging duplicates (`person.merge`) is the way.
+
+You can't close to-dos, approve suggestions, or see trees you have no grant for. Don't try to work around those limits; they're the point.
 
 ## Multiple agents at once
 

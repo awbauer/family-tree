@@ -55,19 +55,21 @@ npm run db:load                                # loads build/seed.sql into D1 (f
 npm run db:counts                              # check people / families / findings
 ```
 
-All npm scripts pass `-c wrangler.local.jsonc`, so the tracked `wrangler.jsonc` stays a placeholder template.
+All npm scripts pass `-c wrangler.local.jsonc`, so the tracked `wrangler.jsonc` stays a placeholder template. To deploy automatically on every push from Cloudflare (Workers Builds), see [operations.md → Automatic deploys](docs/agents/operations.md#automatic-deploys-from-github-workers-builds). Runtime variables (Access settings, owner email) are set in the dashboard and survive deploys.
 
 Then protect it with **Cloudflare Access** (Zero Trust → Access → Applications → *Self-hosted*):
 
 1. Create an application for the hostname you'll use (e.g. `family.example.com`) and add a policy allowing your family's emails.
-2. Copy the application's **Audience (AUD) tag** and your **team domain** (`<team>.cloudflareaccess.com`) into `ACCESS_AUD` and `ACCESS_TEAM_DOMAIN` in `wrangler.local.jsonc`.
+2. Copy the application's **Audience (AUD) tag** and your **team domain** (`<team>.cloudflareaccess.com`) into the `ACCESS_AUD` and `ACCESS_TEAM_DOMAIN` variables in the dashboard (Workers & Pages → family-tree → Settings → Variables and Secrets). Deploys keep them (`keep_vars`).
 3. Add the hostname as a custom domain for the Worker (Workers → family-tree → Settings → Domains), then run `npm run deploy`.
 
 Prefer **Worker-level Access** (Workers & Pages → family-tree → Access), which covers every domain and preview URL the Worker has. Why the Worker still checks the JWT itself instead of using `ctx.access` is explained in [docs/agents/operations.md → Deployment considerations](docs/agents/operations.md#deployment-considerations-how-the-worker-checks-access).
 
 `workers_dev` is off, so the only way in is the Access-protected domain. Even if it were on, the Worker verifies the Access JWT itself (signature, audience, issuer, expiry) and answers **403** to anything else. The static app shell is public-safe because it contains no data.
 
-**Updating:** re-export the GEDCOM → `python3 tools/build.py` → `npm run db:load`. The load replaces everything, and research survives because it lives in `research.json`, keyed by GEDCOM IDs (Ancestry keeps them stable across exports). If you merge two people in your tree software, move research from the vanished ID to the survivor.
+**Making the app the source of truth (recommended once you're happy with the import):** see [docs/agents/operations.md → Cutover](docs/agents/operations.md#cutover-the-app-becomes-the-source-of-truth-one-time). After cutover, people edit, assign to-dos and review suggestions in the app; the steps below are for the import phase only.
+
+**Updating (import phase):** re-export the GEDCOM → `python3 tools/build.py` → `npm run db:load`. The load replaces everything, and research survives because it lives in `research.json`, keyed by GEDCOM IDs (Ancestry keeps them stable across exports). If you merge two people in your tree software, move research from the vanished ID to the survivor.
 
 **Photos:** `npx wrangler r2 object put family-tree-media/photos/grandma.jpg --file grandma.jpg --remote`, then add `"I123": [{"file": "photos/grandma.jpg", "portrait": true, "caption": "…"}]` under `media` in `research.json`. For local preview, put the same files in `family-data/media/photos/`.
 
@@ -101,7 +103,7 @@ The repo is set up for agents (Claude Code, Codex, Cursor and others) to do both
 
 - **[AGENTS.md](AGENTS.md)**: the rules every agent follows (privacy, no invented records, what needs your OK). `CLAUDE.md` imports it.
 - **[docs/agents/research-protocol.md](docs/agents/research-protocol.md)**: how to research, weigh evidence, cite, and record results as batches.
-- **[docs/agents/operations.md](docs/agents/operations.md)**: build, load, deploy, Access, photos, backups.
+- **[docs/agents/operations.md](docs/agents/operations.md)**: build, load, deploy, Access, photos, restore.
 - **`.claude/skills/`**: `research` and `publish` skills for Claude Code. **`.claude/settings.json`** asks before remote loads, deploys and pushes.
 - **`tools/check_privacy.py`** runs as a pre-commit and commit-msg hook. It blocks private paths, Cloudflare IDs, and the full name of anyone in your private GEDCOM. Run it on PR text too: `echo "$BODY" | python3 tools/check_privacy.py --file -`.
 

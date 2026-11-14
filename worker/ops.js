@@ -1,0 +1,311 @@
+// The edit engine: apply a list of ops (docs/design/edit-ops.md) to the raw tree, in memory, atomically.
+// Returns the touched entities with before/after snapshots, so the caller can write them with version checks
+// and record an audit trail that can be reverted.
+
+export class OpError extends Error {
+  constructor(message, index) { super(index != null ? `op ${index + 1}: ${message}` : message); this.index = index; }
+}
+
+const clone = (x) => (x === undefined ? undefined : structuredClone(x));
+const SEX = new Set(["M", "F", "U", ""]);
+const EVENT_FIELDS = ["type", "date", "place", "note", "value", "age", "subtype", "address"];
+const NAME_FIELDS = ["given", "surname", "suffix", "type"];
+const REVIEW = new Set(["unverified", "verified", "disputed"]);
+
+/** Give every event and name a stable fact id (used at import and for anything created without one). */
+export function assignFids(entity) {
+  let e = maxFid(entity.events, "e"), n = maxFid(entity.names, "n");
+  for (const ev of entity.events || []) if (!ev.fid) ev.fid = `e${++e}`;
+  for (const nm of entity.names || []) if (!nm.fid) nm.fid = `n${++n}`;
+  return entity;
+}
+function maxFid(list, p) {
+  let m = 0;
+  for (const x of list || []) { const k = String(x.fid || "").match(new RegExp(`^${p}(\\d+)$`)); if (k) m = Math.max(m, +k[1]); }
+  return m;
+}
+
+/**
+ * state: {people, families, sources, media_map, aliases} (raw; not mutated).
+ * Returns {state: newState, touched: [{type, id, before, after}], created: {tempId: realId}}.
+ */
+export function applyOps(state, ops, { actor = "unknown", now = new Date().toISOString(), newId } = {}) {
+  if (!Array.isArray(ops) || !ops.length) throw new OpError("ops must be a non-empty list");
+  if (ops.length > 500) throw new OpError("too many ops in one edit (max 500)");
+  const S = { people: { ...state.people }, families: { ...state.families }, sources: { ...state.sources }, media_map: { ...(state.media_map || {}) }, aliases: { ...(state.aliases || {}) } };
+  const before = new Map(); // key -> snapshot before first touch
+  const key = (t, id) => `${t}:${id}`;
+  const coll = { person: "people", family: "families", source: "sources", media_map: "media_map" };
+  const touch = (t, id) => {
+    const k = key(t, id), c = S[coll[t]];
+    if (!before.has(k)) before.set(k, { type: t, id, before: clone(c[id]) });
+    if (c[id] !== undefined) c[id] = clone(c[id]); // copy-on-write
+    return c[id];
+  };
+  const counter = { n: 0 };
+  const mkId = (prefix, c) => {
+    if (newId) return newId(prefix);
+    let id;
+    do { id = `N${prefix}${Date.now().toString(36)}${(counter.n++).toString(36)}`; } while (c[id]);
+    return id;
+  };
+  const alias = (id) => S.aliases[id] || id;
+  const P = (id, i) => { const x = S.people[alias(id)]; if (!x) throw new OpError(`no person ${JSON.stringify(id)}`, i); return alias(id); };
+  const F = (id, i) => { if (!S.families[id]) throw new OpError(`no family ${JSON.stringify(id)}`, i); return id; };
+  const entityOf = (o, i) => {
+    if (o.entity === "person") return ["person", P(o.id, i)];
+    if (o.entity === "family") return ["family", F(o.id, i)];
+    throw new OpError('entity must be "person" or "family"', i);
+  };
+  const findFact = (list, fid, i, what = "fact") => {
+    const idx = (list || []).findIndex((x) => x.fid === fid);
+    if (idx < 0) throw new OpError(`no ${what} ${JSON.stringify(fid)}`, i);
+    return idx;
+  };
+  const cleanEvent = (ev, i) => {
+    if (!ev || typeof ev !== "object" || !String(ev.type || "").trim()) throw new OpError("event needs a type", i);
+    const out = {};
+    for (const k of EVENT_FIELDS) if (ev[k] != null && ev[k] !== "") out[k] = String(ev[k]).slice(0, 2000);
+    if (ev.citations) out.citations = ev.citations.map((c) => cleanCitation(c, i));
+    return out;
+  };
+  const cleanCitation = (c, i) => {
+    if (!c || (!c.source && !c.url && !c.note)) throw new OpError("citation needs a source id, url or note", i);
+    if (c.source && !S.sources[c.source]) throw new OpError(`no source ${JSON.stringify(c.source)}`, i);
+    const out = {};
+    for (const k of ["source", "page", "url", "note", "text", "apid"]) if (c[k]) out[k] = String(c[k]).slice(0, 4000);
+    return out;
+  };
+  const cleanName = (n, i) => {
+    if (!n || (!String(n.given || "").trim() && !String(n.surname || "").trim())) throw new OpError("a name needs a given name or surname", i);
+    const out = {};
+    for (const k of NAME_FIELDS) out[k] = String(n[k] || "").trim().slice(0, 200);
+    return out;
+  };
+  const created = {};
+  const ref = (id) => (id && created[id]) || id; // allow later ops to refer to "$new1"-style temp ids
+
+  ops.forEach((raw, i) => {
+    const o = JSON.parse(JSON.stringify(raw, (k, v) => (typeof v === "string" && v.startsWith("$") && created[v] ? created[v] : v)));
+    switch (o.op) {
+      case "person.create": {
+        const id = o.id && !o.id.startsWith("$") ? o.id : mkId("I", S.people);
+        if (S.people[id]) throw new OpError(`person ${id} already exists`, i);
+        if (o.id && o.id.startsWith("$")) created[o.id] = id;
+        const names = (o.names || []).map((n) => cleanName(n, i));
+        if (!names.length) throw new OpError("person.create needs at least one name", i);
+        if (o.sex != null && !SEX.has(o.sex)) throw new OpError("sex must be M, F or U", i);
+        touch("person", id);
+        S.people[id] = assignFids({ id, names, sex: o.sex || "", famc: [], fams: [], events: (o.events || []).map((e) => cleanEvent(e, i)), notes: [], citations: [], media: [], created: { by: actor, at: now } });
+        break;
+      }
+      case "person.update": {
+        const id = P(o.id, i), p = touch("person", id);
+        const set = o.set || {};
+        if ("sex" in set) { if (!SEX.has(set.sex)) throw new OpError("sex must be M, F or U", i); p.sex = set.sex; }
+        if ("notes" in set) p.notes = [].concat(set.notes || []).map((x) => String(x).slice(0, 8000));
+        break;
+      }
+      case "person.delete": {
+        const id = P(o.id, i), p = S.people[id];
+        if ((p.famc || []).length || (p.fams || []).length) throw new OpError("unlink this person from their families first", i);
+        touch("person", id);
+        delete S.people[id];
+        if (S.media_map[id]) { touch("media_map", id); delete S.media_map[id]; }
+        break;
+      }
+      case "person.merge": {
+        const keep = P(o.keep, i), drop = P(o.drop, i);
+        if (keep === drop) throw new OpError("keep and drop are the same person", i);
+        const k = touch("person", keep), d = touch("person", drop);
+        const have = new Set(k.names.map((n) => `${n.given}|${n.surname}`));
+        for (const n of d.names) if (!have.has(`${n.given}|${n.surname}`)) k.names.push({ ...n, fid: undefined, type: n.type || "alternate" });
+        const ek = (e) => `${e.type}|${(e.date || "").toLowerCase()}|${(e.place || "").toLowerCase()}|${e.value || ""}`;
+        const he = new Set(k.events.map(ek));
+        for (const e of d.events) if (!he.has(ek(e))) k.events.push({ ...e, fid: undefined });
+        for (const f of ["citations", "media", "notes"]) k[f] = (k[f] || []).concat((d[f] || []).filter((x) => !JSON.stringify(k[f] || []).includes(JSON.stringify(x))));
+        assignFids(k);
+        for (const fid of d.famc || []) { const f = touch("family", fid); f.children = [...new Set(f.children.map((c) => (c === drop ? keep : c)))]; if (!k.famc.includes(fid)) k.famc.push(fid); }
+        for (const fid of d.fams || []) { const f = touch("family", fid); if (f.husband === drop) f.husband = keep; if (f.wife === drop) f.wife = keep; if (!k.fams.includes(fid)) k.fams.push(fid); }
+        k.mergedFrom = (k.mergedFrom || []).concat(drop);
+        delete S.people[drop];
+        S.aliases[drop] = keep;
+        for (const [a, b] of Object.entries(S.aliases)) if (b === drop) S.aliases[a] = keep;
+        before.set("aliases:*", before.get("aliases:*") || { type: "aliases", id: "*", before: clone(state.aliases || {}) });
+        if (S.media_map[drop]) {
+          touch("media_map", drop); touch("media_map", keep);
+          S.media_map[keep] = (S.media_map[keep] || []).concat(S.media_map[drop]);
+          delete S.media_map[drop];
+        }
+        break;
+      }
+      case "name.add": { const id = P(o.person, i), p = touch("person", id); p.names.push(cleanName(o.name, i)); assignFids(p); break; }
+      case "name.update": {
+        const id = P(o.person, i), p = touch("person", id), j = findFact(p.names, o.fid, i, "name");
+        p.names[j] = { ...p.names[j], ...cleanName({ ...p.names[j], ...(o.set || {}) }, i), fid: o.fid };
+        break;
+      }
+      case "name.remove": {
+        const id = P(o.person, i), p = touch("person", id), j = findFact(p.names, o.fid, i, "name");
+        if (p.names.length < 2) throw new OpError("a person keeps at least one name", i);
+        p.names.splice(j, 1);
+        break;
+      }
+      case "event.add": { const [t, id] = entityOf(o, i), x = touch(t, id); x.events = x.events || []; x.events.push(cleanEvent(o.event, i)); assignFids(x); break; }
+      case "event.update": {
+        const [t, id] = entityOf(o, i), x = touch(t, id), j = findFact(x.events, o.fid, i, "event");
+        const merged = cleanEvent({ ...x.events[j], ...(o.set || {}) }, i);
+        x.events[j] = { ...merged, fid: o.fid, citations: x.events[j].citations, review: x.events[j].review };
+        if (!x.events[j].citations) delete x.events[j].citations;
+        if (!x.events[j].review) delete x.events[j].review;
+        break;
+      }
+      case "event.remove": { const [t, id] = entityOf(o, i), x = touch(t, id); x.events.splice(findFact(x.events, o.fid, i, "event"), 1); break; }
+      case "fact.review": {
+        const [t, id] = entityOf(o, i), x = touch(t, id), j = findFact(x.events, o.fid, i, "event");
+        if (!REVIEW.has(o.status)) throw new OpError("status must be unverified, verified or disputed", i);
+        x.events[j].review = { status: o.status, by: actor, at: now, note: String(o.note || "").slice(0, 2000), sources: (o.sources || []).slice(0, 20) };
+        break;
+      }
+      case "citation.add": {
+        const [t, id] = entityOf(o, i), x = touch(t, id), c = cleanCitation(o.citation, i);
+        if (o.fid) { const j = findFact(x.events, o.fid, i, "event"); (x.events[j].citations = x.events[j].citations || []).push(c); }
+        else (x.citations = x.citations || []).push(c);
+        break;
+      }
+      case "citation.remove": {
+        const [t, id] = entityOf(o, i), x = touch(t, id);
+        const list = o.fid ? x.events[findFact(x.events, o.fid, i, "event")].citations : x.citations;
+        if (!list || !(o.index >= 0 && o.index < list.length)) throw new OpError("no citation at that index", i);
+        list.splice(o.index, 1);
+        break;
+      }
+      case "family.create": {
+        const id = o.id && !o.id.startsWith("$") ? o.id : mkId("F", S.families);
+        if (S.families[id]) throw new OpError(`family ${id} already exists`, i);
+        if (o.id && o.id.startsWith("$")) created[o.id] = id;
+        const h = o.husband ? P(ref(o.husband), i) : null, w = o.wife ? P(ref(o.wife), i) : null;
+        const kids = (o.children || []).map((c) => P(ref(c), i));
+        if (!h && !w && kids.length < 1) throw new OpError("a family needs at least one member", i);
+        touch("family", id);
+        S.families[id] = assignFids({ id, husband: h, wife: w, children: kids, events: (o.events || []).map((e) => cleanEvent(e, i)) });
+        for (const s of [h, w].filter(Boolean)) { const p = touch("person", s); if (!p.fams.includes(id)) p.fams.push(id); }
+        for (const c of kids) { const p = touch("person", c); if (!p.famc.includes(id)) p.famc.push(id); }
+        break;
+      }
+      case "family.set_spouse": {
+        const fid = F(o.family, i), f = touch("family", fid);
+        if (!["husband", "wife"].includes(o.role)) throw new OpError('role must be "husband" or "wife"', i);
+        const old = f[o.role], nu = o.person ? P(ref(o.person), i) : null;
+        if (old && old !== f[o.role === "husband" ? "wife" : "husband"]) { const p = touch("person", old); p.fams = p.fams.filter((x) => x !== fid); }
+        f[o.role] = nu;
+        if (nu) { const p = touch("person", nu); if (!p.fams.includes(fid)) p.fams.push(fid); }
+        break;
+      }
+      case "family.swap_spouses": { const fid = F(o.family, i), f = touch("family", fid); [f.husband, f.wife] = [f.wife, f.husband]; break; }
+      case "family.add_child": {
+        const fid = F(o.family, i), pid = P(ref(o.person), i), f = touch("family", fid), p = touch("person", pid);
+        if (!f.children.includes(pid)) f.children.push(pid);
+        if (!p.famc.includes(fid)) p.famc.push(fid);
+        break;
+      }
+      case "family.remove_child": {
+        const fid = F(o.family, i), pid = P(o.person, i), f = touch("family", fid), p = touch("person", pid);
+        f.children = f.children.filter((c) => c !== pid);
+        p.famc = p.famc.filter((x) => x !== fid);
+        break;
+      }
+      case "family.delete": {
+        const fid = F(o.family, i), f = S.families[fid];
+        for (const pid of [f.husband, f.wife, ...f.children].filter(Boolean)) {
+          if (!S.people[pid]) continue;
+          const p = touch("person", pid);
+          p.famc = p.famc.filter((x) => x !== fid); p.fams = p.fams.filter((x) => x !== fid);
+        }
+        touch("family", fid); delete S.families[fid];
+        break;
+      }
+      case "family.merge": {
+        const keep = F(o.keep, i), drop = F(o.drop, i);
+        if (keep === drop) throw new OpError("keep and drop are the same family", i);
+        const fk = touch("family", keep), fd = touch("family", drop);
+        for (const r of ["husband", "wife"]) {
+          if (fk[r] && fd[r] && fk[r] !== fd[r]) throw new OpError(`the ${r}s differ; merge those people first`, i);
+          fk[r] = fk[r] || fd[r];
+        }
+        fk.children = [...new Set([...fk.children, ...fd.children])];
+        const ek = (e) => `${e.type}|${(e.date || "").toLowerCase()}|${(e.place || "").toLowerCase()}`;
+        const he = new Set(fk.events.map(ek));
+        for (const e of fd.events) if (!he.has(ek(e))) fk.events.push({ ...e, fid: undefined });
+        assignFids(fk);
+        for (const pid of [fd.husband, fd.wife, ...fd.children].filter(Boolean)) {
+          const p = touch("person", pid);
+          p.famc = [...new Set(p.famc.map((x) => (x === drop ? keep : x)))];
+          p.fams = [...new Set(p.fams.map((x) => (x === drop ? keep : x)))];
+        }
+        delete S.families[drop];
+        break;
+      }
+      case "source.upsert": {
+        const id = o.id || mkId("S", S.sources);
+        if (!o.data || !String(o.data.title || "").trim()) throw new OpError("a source needs a title", i);
+        touch("source", id);
+        const d = {};
+        for (const k of ["title", "author", "publication", "url", "repository", "apid", "note"]) if (o.data[k]) d[k] = String(o.data[k]).slice(0, 2000);
+        S.sources[id] = { ...(S.sources[id] || {}), ...d, id };
+        break;
+      }
+      case "media.attach": {
+        const pid = P(o.person, i);
+        if (!o.file || o.file.startsWith("/") || o.file.includes("..")) throw new OpError("file must be an R2 key like uploads/…", i);
+        touch("media_map", pid);
+        const list = S.media_map[pid] = [...(S.media_map[pid] || [])];
+        if (!list.some((m) => m.file === o.file)) {
+          const m = { file: o.file };
+          for (const k of ["caption", "date", "source"]) if (o[k]) m[k] = String(o[k]).slice(0, 1000);
+          if (o.portrait) m.portrait = true;
+          list.push(m);
+        }
+        break;
+      }
+      case "media.detach": {
+        const pid = P(o.person, i);
+        touch("media_map", pid);
+        S.media_map[pid] = (S.media_map[pid] || []).filter((m) => m.file !== o.file);
+        if (!S.media_map[pid].length) delete S.media_map[pid];
+        break;
+      }
+      default:
+        throw new OpError(`unknown op ${JSON.stringify(o.op)}`, i);
+    }
+  });
+
+  // integrity: every link points at something that exists, both directions agree
+  for (const [fid, f] of Object.entries(S.families)) {
+    for (const pid of [f.husband, f.wife, ...f.children].filter(Boolean)) if (!S.people[pid]) throw new OpError(`family ${fid} points at missing person ${pid}`);
+  }
+  const touched = [];
+  for (const [k, b] of before) {
+    const c = b.type === "aliases" ? null : S[coll[b.type]];
+    touched.push({ type: b.type, id: b.id, before: b.before, after: b.type === "aliases" ? clone(S.aliases) : clone(c[b.id]) });
+  }
+  return { state: S, touched: touched.filter((t) => JSON.stringify(t.before) !== JSON.stringify(t.after)), created };
+}
+
+/** Every person/family id an op list reads or writes (for scope checks). */
+export function referencedIds(ops) {
+  const people = new Set(), families = new Set();
+  for (const o of ops || []) {
+    for (const k of ["id", "person", "keep", "drop", "husband", "wife"]) {
+      const v = o[k];
+      if (typeof v !== "string" || v.startsWith("$")) continue;
+      if (o.op && o.op.startsWith("family.") && (k === "keep" || k === "drop")) families.add(v);
+      else if (k === "id" && (o.entity === "family" || o.op === "family.create" || o.op === "source.upsert")) { if (o.entity === "family") families.add(v); }
+      else if (k !== "id" || o.entity === "person" || o.op.startsWith("person.")) people.add(v);
+    }
+    if (o.family) families.add(o.family);
+    for (const c of o.children || []) if (!String(c).startsWith("$")) people.add(c);
+    if (o.op === "person.create" && o.id) people.delete(o.id);
+  }
+  return { people, families };
+}

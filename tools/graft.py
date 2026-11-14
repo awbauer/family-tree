@@ -107,7 +107,7 @@ def graft(main, other, cfg):
     keep = {x for x in keep if x not in stop or x in join}
 
     pmap = {}
-    for x in keep:
+    for x in sorted(keep):
         if x in join:
             pmap[x] = join[x]
         else:
@@ -141,7 +141,7 @@ def graft(main, other, cfg):
 
     # 3. people
     added, merged, ev_added = 0, 0, 0
-    for x in keep:
+    for x in sorted(keep):
         p = OP[x]
         famc = [fmap[f] for f in p["famc"] if f in fmap]
         fams = [fmap[f] for f in p["fams"] if f in fmap]

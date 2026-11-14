@@ -1,6 +1,6 @@
 # Design: the app as the source of truth
 
-Status: **accepted, not yet built**. Phases below are tracked as GitHub issues.
+Status: **all phases built** (PRs #14 and the follow-up for #5–#10, plus graph queries #15); cutover not yet run. Phases are tracked as GitHub issues.
 
 ## Decision
 
@@ -34,7 +34,7 @@ One database can hold several **trees**: for example your family and your spouse
 
   | Role | Can (within the granted tree) |
   |---|---|
-  | owner | global: everything, plus define trees and views, manage grants, restore backups, change site settings |
+  | owner | global: everything, plus define trees and views, manage grants, restore the database, change site settings |
   | editor | edit people in this tree directly, approve or reject suggestions about them, revert changes, review facts |
   | member | view (through the view), suggest changes, comment, upload media as a suggestion |
   | agent | (an Access service token) submit suggestions and findings for people in its granted trees |
@@ -106,12 +106,9 @@ Structural operations need care and get their own UI: **merge two people**, **at
 - Members can link themselves to their own person in the tree (`members.person_id`) for "my relationship to this person".
 - No public share links, by decision. GEDCOM export is owner/editor only.
 
-## Backups (the database is now the only copy)
+## Recovery
 
-- **D1 Time Travel**: point-in-time restore for the last 30 days, built in. Document the restore command.
-- **Nightly Cron Trigger** writes `backups/YYYY-MM-DD.json` (full export) and `.ged` to the private R2 bucket, keeping 30 daily and 12 monthly copies.
-- `npm run backup` downloads the latest export to a git-ignored local folder.
-- GEDCOM export (`/api/export.ged`) for portability, owner/editor only.
+D1 Time Travel provides automatic point-in-time restore (30 days on Workers Paid, 7 on Free). The `changes` audit log lets a single bad edit be found and reverted without a full restore. No separate backup job (decided).
 
 ## Cutover plan
 
@@ -119,6 +116,10 @@ Structural operations need care and get their own UI: **merge two people**, **at
 2. **Migration** `0002_source_of_truth.sql` (via `wrangler d1 migrations`): add version columns and the `members`, `changes`, `proposals` and `comments` tables; set `meta.source_of_truth = 'app'`; insert the owner's `members` row.
 3. **Lock the old path.** `npm run db:load` checks `meta.source_of_truth` and refuses, so a full replace can never wipe app edits again.
 4. `family-data/` becomes an archive of the original import. Research batches go in through `--submit`.
+
+## To-dos and the work queue (added during phase 1)
+
+To-dos are first-class rows (`todos`, with history in `todo_events`): priority, status (`open`, `in_progress`, `needs_review`, `done`, `wont_do`), assignee (an email or an agent principal), outcome. People and agents share one queue. Agents claim work, submit research as a proposal linked to the to-do, and the to-do waits in `needs_review` until an editor approves (closes it) or rejects (sends it back). See `GET /api/queue`, `POST /api/todos/:id/claim` and `tools/agent_api.py`.
 
 ## Phases
 
@@ -128,7 +129,7 @@ Structural operations need care and get their own UI: **merge two people**, **at
 | 2 | Editing | edit person, events, names and relationships; change log with history per person; undo/revert; conflict handling |
 | 3 | Review | per-fact review status, suggestions queue (suggest → approve/reject), comments on facts, `merge_research.py --submit` with service tokens |
 | 4 | Sources and media | source and citation editor; R2 upload from the browser with EXIF/GPS stripping; attach media to facts; merge-people tool |
-| 5 | Backups and export | nightly cron to R2, GEDCOM and JSON export, restore runbook |
+| 5 | Export | GEDCOM and JSON export for portability (backups: D1 Time Travel, decided) |
 | 6 | Sharing | admin UI for trees, views and grants; invites via the Access API (optional token); "link me to my person"; tree switcher |
 | 7 | Ancestry hints | `import_hints.py` diff → proposals |
 
@@ -138,7 +139,7 @@ The AI agent and MCP server ([#3](https://github.com/awbauer/family-tree/issues/
 
 - **Derivation drift** while `build.py` and `derive.js` both exist: covered by parity tests until `build.py` is reduced to the importer.
 - **Concurrent edits**: optimistic locking plus a visible 409 "someone changed this, here's the new version".
-- **Losing the database**: Time Travel plus nightly R2 exports plus periodic local downloads.
+- **Losing the database**: D1 Time Travel only (30 days on Paid, 7 on Free); the audit log covers single bad edits.
 - **An over-broad Access API token** for invites: scope it to groups only, or skip automation.
 - **Living people**: everything stays behind Access, views can reduce living people to names-only or hide them, and exports are role-gated and scoped.
 - **Scope leaks** (the biggest new risk): derived text such as issue messages, relationship labels and story bodies can mention people outside a viewer's scope. Filtering happens after derivation, on the final payload, and phase 1 includes leak tests: build a scoped bundle and assert that no out-of-scope person ID or name appears anywhere in the JSON.
