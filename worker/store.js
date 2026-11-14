@@ -46,6 +46,21 @@ export function commitStatements(env, { touched, versions, state, actor, actorKi
     st.push(env.DB.prepare("INSERT INTO changes (at, actor, actor_kind, entity_type, entity_id, op, before, after, reason, proposal_id, batch_id, version_after) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
       .bind(t, actor, actorKind, x.type, x.id, op, x.before == null ? null : J(x.before), x.after == null ? null : J(x.after), reason || null, proposalId || null, batchId, vAfter));
   }
+  // A merge (person.merge) adds an alias drop -> keep. Re-point the research rows filed under the dropped person in the
+  // same batch, so findings, to-dos, log entries, statuses and comments follow them to the surviving record.
+  if (aliasesTouched) {
+    const al = touched.find((x) => x.type === "aliases");
+    for (const [drop, keep] of Object.entries(al.after || {})) {
+      if ((al.before || {})[drop] === keep) continue;
+      st.push(env.DB.prepare("UPDATE findings SET person_id = ?, data = json_set(data, '$.person', ?) WHERE person_id = ?").bind(keep, keep, drop));
+      st.push(env.DB.prepare("UPDATE todos SET person_id = ?, updated_at = ?, updated_by = ? WHERE person_id = ?").bind(keep, t, actor, drop));
+      st.push(env.DB.prepare("UPDATE research_log SET person_id = ?, data = json_set(data, '$.person', ?) WHERE person_id = ?").bind(keep, keep, drop));
+      st.push(env.DB.prepare("UPDATE comments SET entity_id = ? WHERE entity_type = 'person' AND entity_id = ?").bind(keep, drop));
+      // keep the surviving person's own status if it has one; otherwise take the dropped person's
+      st.push(env.DB.prepare("INSERT OR IGNORE INTO statuses (person_id, data, updated_at, updated_by) SELECT ?, data, ?, ? FROM statuses WHERE person_id = ?").bind(keep, t, actor, drop));
+      st.push(env.DB.prepare("DELETE FROM statuses WHERE person_id = ?").bind(drop));
+    }
+  }
   for (const [key, flag, value] of [["media_map", mediaTouched, state.media_map], ["aliases", aliasesTouched, state.aliases]]) {
     if (!flag) continue;
     const v = versions[`config:${key}`];
