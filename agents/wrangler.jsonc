@@ -1,0 +1,32 @@
+{
+  // The private agents Worker. It has NO public URL: the site Worker reaches it through a service binding (AGENTS).
+  // Same rules as the site's wrangler.jsonc: no real ids here (tools/ci_config.mjs fills the D1 id in Workers Builds;
+  // local deploys use the git-ignored wrangler.local.jsonc), and no "vars" block (keep_vars protects dashboard values).
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "family-tree-agents",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  // Workers AI binding: Claude through AI Gateway, Cloudflare's Web Search API, and page-to-Markdown conversion.
+  "ai": { "binding": "AI" },
+  // The same database as the site: agents read the tree through the site's own scoping code and write only
+  // suggestions, run status, usage and AI profiles.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "family-tree",
+      "migrations_dir": "../migrations",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+    }
+  ],
+  // One Durable Object class per Flue agent (Flue generates the classes and bindings; migrations are ours).
+  // Append new entries, never edit deployed ones.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["FlueResearcherAgent", "FlueProfileWriterAgent", "FlueStoryReviewerAgent"] }
+  ],
+  // Nightly content job (src/cloudflare.js). Does nothing unless CONTENT_JOB_ENABLED=true.
+  "triggers": { "crons": ["23 3 * * *"] },
+  "observability": { "enabled": true },
+  "keep_vars": true
+}

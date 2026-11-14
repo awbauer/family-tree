@@ -42,6 +42,13 @@ if (cfg.vars && Object.keys(cfg.vars).length) console.warn(`ci_config: dropping 
 delete cfg.vars;
 for (const env of Object.values(cfg.env || {})) delete env.vars;
 cfg.keep_vars = true;
+// Optional service binding to the private agents Worker (agents/). Only added when the AGENTS_SERVICE build variable
+// names it, so the site keeps deploying before the agents Worker exists (a binding to a missing Worker fails deploys).
+const agents = (process.env.AGENTS_SERVICE || "").trim();
+if (agents) {
+  if (!/^[a-z0-9-]+$/.test(agents)) { console.error("ci_config: AGENTS_SERVICE must be a Worker name"); process.exit(1); }
+  cfg.services = [...(cfg.services || []).filter((s) => s.binding !== "AGENTS"), { binding: "AGENTS", service: agents }];
+}
 cfg.$schema = "node_modules/wrangler/config-schema.json";
 writeFileSync(out, JSON.stringify(cfg, null, 2) + "\n");
 console.log(`ci_config: wrote ${out.replace(ROOT + "/", "")} (D1 bound by id, no vars, keep_vars on)`);

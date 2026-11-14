@@ -1,7 +1,7 @@
 // Research batches (findings, research log, statuses, stories, new to-dos, closed to-dos) arrive as proposals and
 // are applied when an editor approves them. Validation mirrors tools/merge_research.py so local and web paths agree.
 
-import { J, now, audit } from "./db.js";
+import { J, now, audit, parse } from "./db.js";
 
 export const RANK = { unverified: 0, "partly-verified": 1, verified: 2, disputed: 3 };
 const KINDS = new Set(["confirmed", "correction", "conflict", "data-error", "new-fact", "new-person"]);
@@ -41,6 +41,16 @@ export function validateBatch(b, visible) {
     if (!String(s.title || "").trim()) errs.push(`stories[${i}]: missing title`);
     sources(s.sources, `stories[${i}]`);
   });
+  // revisions of existing stories (the content job proposes these when a story's facts change; web-only for now)
+  (b.story_updates || []).forEach((s, i) => {
+    const w = `story_updates[${i}]`;
+    if (!String(s.slug || "").trim()) errs.push(`${w}: missing slug`);
+    if (!String(s.body || "").trim()) errs.push(`${w}: empty body`);
+    (s.people || []).forEach((p) => person(p, w));
+    for (const m of String(s.body || "").matchAll(/\[\[([^|\]]+)/g)) person(m[1], `${w}.body link`);
+    // a revision carries the story's existing citations forward; it must keep some, but they were already accepted
+    if (!(s.sources || []).length) errs.push(`${w}: no sources. Keep the story's citations`);
+  });
   (b.todo || []).forEach((t, i) => {
     person(t.person, `todo[${i}]`, false);
     if (!LEVELS.has(t.priority)) errs.push(`todo[${i}]: priority must be high, medium or low`);
@@ -78,6 +88,14 @@ export async function researchStatements(env, b, { actor, actorKind, proposalId,
   for (const s of b.stories || []) {
     const slug = s.slug || slugify(s.title);
     st.push(env.DB.prepare("INSERT OR IGNORE INTO stories (slug, data, updated_at, updated_by) VALUES (?, ?, ?, ?)").bind(slug, J(Object.assign({ branch: b.branch || null }, s, { slug })), t, actor));
+  }
+  for (const s of b.story_updates || []) {
+    const cur = await env.DB.prepare("SELECT data FROM stories WHERE slug = ?").bind(s.slug).first();
+    if (!cur) continue; // the story was removed meanwhile
+    const before = parse(cur.data, {});
+    const after = Object.assign({}, before, { title: s.title || before.title, body: s.body, people: s.people || before.people, sources: s.sources || before.sources, revised: t.slice(0, 10) });
+    st.push(env.DB.prepare("UPDATE stories SET data = ?, updated_at = ?, updated_by = ?, version = version + 1 WHERE slug = ?").bind(J(after), t, actor, s.slug));
+    st.push(audit(env, { actor, actorKind, entityType: "story", entityId: s.slug, op: "revise", before, after, reason: s.reason || null, proposalId }));
   }
   const openTodos = (await env.DB.prepare("SELECT id, person_id, task, status FROM todos WHERE status NOT IN ('done','wont_do')").all()).results;
   const seenTasks = new Set(openTodos.map((r) => `${r.person_id}|${r.task}`));

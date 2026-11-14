@@ -42,6 +42,8 @@ export async function loadState(env) {
     q("SELECT slug, data FROM stories ORDER BY rowid"), q("SELECT id, data FROM research_log ORDER BY id"),
     q("SELECT * FROM todos ORDER BY id"),
   ]);
+  // AI-written profiles (migration 0003). Optional, so a database that hasn't been migrated yet still loads.
+  const profiles = await q("SELECT person_id, text, generated_at, model FROM profiles").catch(() => []);
   const byId = (rows) => Object.fromEntries(rows.map((r) => [r.id, parse(r.data)]));
   const cfg = Object.fromEntries(config.map((r) => [r.key, parse(r.value)]));
   const open = todos.filter((t) => !["done", "wont_do"].includes(t.status));
@@ -59,7 +61,7 @@ export async function loadState(env) {
   };
   return {
     raw: { people: byId(people), families: byId(families), sources: byId(sources), media: byId(media) },
-    research, places: cfg.places || {}, aliases: cfg.aliases || {},
+    research, places: cfg.places || {}, aliases: cfg.aliases || {}, profiles,
   };
 }
 

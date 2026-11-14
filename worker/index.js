@@ -12,6 +12,7 @@
  *   GET  /api/proposals?tree=&status=    suggestions queue
  *   POST /api/proposals                  {tree, kind: "research", payload, rationale?, todo_id?}
  *   POST /api/proposals/:id/approve|reject|withdraw
+ *   /api/agent/runs, /api/profiles/:id/refresh, /api/content/refresh   cloud research agents (worker/agent/routes.js)
  *   GET  /api/admin, PUT /api/admin/{trees,views,members}/:id, PUT|DELETE /api/admin/grants   (owner only)
  *   GET  /media/<key>                    photos/documents from R2, only if attached to someone you can see
  *   everything else                      static app from ./site (contains no family data)
@@ -19,11 +20,12 @@
  * Privacy: every /api and /media request needs a verified Cloudflare Access identity (fails closed), and data is
  * filtered per tree and view in worker/scope.js before it leaves the Worker.
  */
-import * as Derive from "./derive.js";
 import { identify, resolveAccess, grantFor, can } from "./auth.js";
-import { scopeBundle } from "./scope.js";
+import { HttpError, fail, json } from "./http.js";
+import { scopeFor } from "./bundle.js";
+import * as Agent from "./agent/routes.js";
 import { validateBatch, researchStatements } from "./research.js";
-import { J, now, parse, dataVersion, loadState, todoOut, write, audit, meta } from "./db.js";
+import { J, now, parse, loadState, todoOut, write, audit, meta } from "./db.js";
 import { OpError, referencedIds, applyOps } from "./ops.js";
 import { loadEditable, applyAndCommit, revertBatch, isConflict } from "./store.js";
 import * as Graph from "./graph.js";
@@ -54,11 +56,6 @@ export default {
     }
   },
 };
-
-class HttpError extends Error {
-  constructor(status, message, extra) { super(message); this.status = status; this.extra = extra; }
-}
-const fail = (status, message, extra) => { throw new HttpError(status, message, extra); };
 
 async function route(c) {
   const { request, url } = c;
@@ -91,6 +88,12 @@ async function route(c) {
   if (p === "/api/media/upload" && m === "POST") return upload(c);
   if ((r = p.match(/^\/api\/graph\/(path|ancestors|descendants)$/)) && m === "GET") return graph(c, r[1]);
   if (p === "/api/me/person" && m === "PUT") return linkMe(c);
+  if (p === "/api/agent/runs" && m === "POST") return Agent.startRun(c, await body(c), { grantOrFail, scoped, loadTodo });
+  if (p === "/api/agent/runs" && m === "GET") return Agent.listRuns(c, { grantOrFail });
+  if ((r = p.match(/^\/api\/agent\/runs\/([\w-]+)$/)) && m === "GET") return Agent.getRun(c, r[1]);
+  if ((r = p.match(/^\/api\/agent\/runs\/([\w-]+)\/cancel$/)) && m === "POST") return Agent.cancel(c, r[1]);
+  if ((r = p.match(/^\/api\/profiles\/([^/]+)\/refresh$/)) && m === "POST") return Agent.refreshProfileRoute(c, decodeURIComponent(r[1]), { grantOrFail, scoped });
+  if (p === "/api/content/refresh" && m === "POST") return Agent.refreshContent(c);
   if (p === "/api/admin" && m === "GET") return admin(c);
   if ((r = p.match(/^\/api\/admin\/(trees|views|members)\/([^/]+)$/)) && m === "PUT") return adminPut(c, r[1], decodeURIComponent(r[2]));
   if (p === "/api/admin/grants" && (m === "PUT" || m === "DELETE")) return adminGrant(c, m);
@@ -98,49 +101,13 @@ async function route(c) {
 }
 
 // ---------------------------------------------------------------- reading
-let derivedCache = { version: -1, full: null };
-const scopedCache = new Map();
-
-async function fullBundle(env) {
-  const v = await dataVersion(env);
-  if (derivedCache.version !== v) {
-    const state = await loadState(env);
-    if (!state.research.home_person && !Object.keys(state.raw.people).length) fail(404, "The database is empty. Run the one-time import (README → Deploy).");
-    const full = Derive.derive({ raw: state.raw, research: state.research, places: state.places }, { today: now().slice(0, 10) });
-    full.aliases = state.aliases;
-    // to-dos keep their workflow fields (derive passes research through)
-    derivedCache = { version: v, full };
-    scopedCache.clear();
-  }
-  return derivedCache;
-}
-
 function grantOrFail(c, treeId) {
   const g = grantFor(c.access, treeId || c.url.searchParams.get("tree"));
   if (!g) fail(403, c.access.grants.length ? "You don't have access to that tree." : "No family trees have been shared with you yet. Ask the owner to invite you.");
   return g;
 }
 
-async function scoped(c, grant) {
-  const { version, full } = await fullBundle(c.env);
-  const key = `${version}|${grant.tree_id}|${grant.view_id || ""}|${c.access.personId || ""}|${c.access.isOwner}|${grant.role}`;
-  if (scopedCache.has(key)) return scopedCache.get(key);
-  const t = c.access.treeById[grant.tree_id];
-  const tree = { id: t.id, name: t.name, definition: parse(t.definition, { branches: ["*"] }) };
-  let view = null;
-  if (grant.view_id) {
-    const vr = await c.env.DB.prepare("SELECT filter FROM views WHERE id = ?").bind(grant.view_id).first();
-    view = vr ? parse(vr.filter, {}) : { living: "hidden", research: false, notes: false, media: false, sources: false }; // missing view fails closed
-  }
-  const out = scopeBundle(full, {
-    tree, view, viewerPersonId: c.access.personId, isOwner: c.access.isOwner,
-    helpers: { relationLabels: Derive.relationLabels, checkIssues: Derive.checkIssues },
-  });
-  out.me = { principal: c.access.principal, role: grant.role, tree: grant.tree_id, isOwner: c.access.isOwner };
-  if (scopedCache.size > 50) scopedCache.clear();
-  scopedCache.set(key, out);
-  return out;
-}
+const scoped = (c, grant) => scopeFor(c.env, c.access, grant);
 
 async function me(c) {
   const a = c.access;
@@ -148,6 +115,7 @@ async function me(c) {
     principal: a.principal, kind: a.kind, displayName: a.displayName, isOwner: a.isOwner, personId: a.personId,
     trees: a.grants.map((g) => ({ id: g.tree_id, name: g.tree_name, role: g.role, view: g.view_id })),
     sourceOfTruth: await meta(c.env, "source_of_truth"),
+    ai: Agent.enabled(c.env), // research runs and AI profiles are available
   });
 }
 
@@ -681,8 +649,4 @@ async function media(c) {
   obj.writeHttpMetadata(headers);
   headers.set("etag", obj.httpEtag);
   return new Response(obj.body, { headers });
-}
-
-function json(obj, status = 200, extra = {}) {
-  return new Response(JSON.stringify(obj), { status, headers: Object.assign({ "Content-Type": "application/json; charset=utf-8", "X-Robots-Tag": "noindex" }, extra) });
 }
