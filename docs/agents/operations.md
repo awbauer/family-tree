@@ -71,7 +71,12 @@ One-time setup in the dashboard (owner):
 
 Things to know:
 
-- **Schema migrations are not applied by the build.** Before merging code that needs a new file in `migrations/`, run `npm run db:migrate` ⚠ ask. Otherwise the new code deploys against the old schema.
+- **Schema migrations are applied by a GitHub Action**, `.github/workflows/d1-migrations.yml`. It runs on any push to `main` that changes `migrations/`, or by hand from the Actions tab. Cloudflare's deploy step (`tools/wait_migrations.mjs`) waits up to 10 minutes for pending migrations to be applied, so code never goes live ahead of its schema. If the Action fails, the deploy fails too; fix it, re-run the Action, then retry the build. The Action needs three repository secrets:
+  - `CLOUDFLARE_API_TOKEN`: create it under My Profile → API Tokens → Create Token → Custom, with **Account → D1 → Edit** on this account only, and nothing else.
+  - `CLOUDFLARE_ACCOUNT_ID`.
+  - `D1_DATABASE_ID`.
+
+  Set them with `gh secret set NAME`, which prompts for the value. Optionally add a required reviewer to the `production` environment so every migration waits for your approval. Write migrations so the *current* code still works after they run (add columns or tables first, remove old ones in a later change); then the order of the two never matters.
 - **The build deploys `main` as-is.** Merging is deploying, so review PRs accordingly.
 - **Never add a `vars` block** to `wrangler.jsonc` or `wrangler.local.jsonc`; listed variables overwrite dashboard values on deploy. Local development uses `.dev.vars`.
 - Manual deploys (`npm run deploy`) use `wrangler.local.jsonc`, which also has `keep_vars` and no vars, so they're safe too.
