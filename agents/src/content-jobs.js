@@ -1,4 +1,4 @@
-// Plans the content job and hands each item to its own agent conversation. Called nightly from src/cloudflare.js
+// Plans the content job and hands each item to its own agent conversation. Called weekly from src/cloudflare.js
 // and on demand through the site (owner: "refresh content"; editors: "rewrite this profile").
 import { env } from "cloudflare:workers";
 import { dispatch } from "@flue/runtime";

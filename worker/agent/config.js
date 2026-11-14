@@ -19,7 +19,7 @@ export function settings(env) {
     maxMinutes: int(env.AGENT_MAX_MINUTES, 45),            // wall clock per run (Flue durability timeout)
     maxRunsPerDay: int(env.AGENT_MAX_RUNS_PER_DAY, 10),
     dailyTokens: int(env.AI_DAILY_TOKEN_BUDGET, 4000000),  // all AI work together
-    contentPerRun: int(env.CONTENT_MAX_PER_RUN, 20),
+    contentPerRun: int(env.CONTENT_MAX_PER_RUN, 50),
     contentEnabled: env.CONTENT_JOB_ENABLED === "true",
   };
 }

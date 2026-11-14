@@ -13,7 +13,7 @@ import { useUsage } from "./usage.js";
 const S = settings(env);
 const spendOnly = (u) => env.DB.batch([recordUsage(env, u)]);
 
-/** Insist on the one tool call, once; then give up quietly (the next nightly run tries again). */
+/** Insist on the one tool call, once; then give up quietly (the next weekly run tries again). */
 function useMustCall(tool, nudge) {
   const [nudged, setNudged] = usePersistentState("nudged", false);
   useAgentFinish(async ({ response, append }) => {

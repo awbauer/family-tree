@@ -1,4 +1,4 @@
-// Worker-level handlers that aren't HTTP: the nightly content job (cron in wrangler.jsonc).
+// Worker-level handlers that aren't HTTP: the weekly content job (cron in wrangler.jsonc).
 import { settings } from "../../worker/agent/config.js";
 import { runContentJob } from "./content-jobs.js";
 

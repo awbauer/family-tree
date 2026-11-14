@@ -147,7 +147,7 @@ To-dos live in D1 (`/api/todos`). Each has a priority, a status (`open → in_pr
 
 ## Cloud research agents (agents/)
 
-Editors can hand a to-do or a person to a research agent that runs in Cloudflare, not on anyone's laptop. It reads the tree, searches and reads the web, and files its results as a **suggestion**. Nothing reaches the tree until an editor approves it, exactly as with research from people. A nightly job also keeps **AI profiles** (short biographies of people who have died) and **stories** in step with the facts.
+Editors can hand a to-do or a person to a research agent that runs in Cloudflare, not on anyone's laptop. It reads the tree, searches and reads the web, and files its results as a **suggestion**. Nothing reaches the tree until an editor approves it, exactly as with research from people. A weekly job also keeps **AI profiles** (short biographies of people who have died) and **stories** in step with the facts.
 
 **How it's built.** A second, private Worker, `family-tree-agents`, in `agents/`:
 
@@ -174,7 +174,7 @@ Editors can hand a to-do or a person to a research agent that runs in Cloudflare
 | `AI_DAILY_TOKEN_BUDGET` | 4,000,000 | all AI work together; tools stop when it's used up |
 | `AGENT_MAX_SEARCHES` / `AGENT_MAX_FETCHES` | 25 / 40 | per run |
 | `AGENT_MAX_MINUTES` | 45 | per run (Flue's durability timeout); stale runs are closed on the next read |
-| `CONTENT_MAX_PER_RUN` | 20 | profiles and story checks per nightly job |
+| `CONTENT_MAX_PER_RUN` | 50 | profiles and story checks per weekly job; for the first backfill, run it on demand a few times |
 
 Also set a **spend limit and rate limit on the AI Gateway itself** (dashboard → AI → AI Gateway → your gateway → Settings). That is the hard stop if anything here misbehaves. Other variables: `AI_MODEL`, `AI_EFFORT` (`high`), `AI_CONTENT_EFFORT` (`medium`), `AI_GATEWAY_ID` (`default`), `WEB_SEARCH_PROVIDER` (`exa`), `CONTENT_JOB_ENABLED` (`false`).
 
@@ -195,7 +195,7 @@ Also set a **spend limit and rate limit on the AI Gateway itself** (dashboard �
 
 - **Start a run** from a to-do ("Research with AI"), a person page, or Research → Agent runs. A run started from a to-do assigns it to `agent:cloud`. On submission the to-do moves to `needs_review` with the suggestion linked. If the run fails or is stopped, the to-do goes back to the list with a note.
 - **Watch** progress in Agent runs: status, the searches and pages it read, tokens, and the resulting suggestion. **Stop** aborts the Flue conversation.
-- **Content job:** nightly at 03:23 UTC when `CONTENT_JOB_ENABLED=true`, or on demand (owner) with `POST /api/content/refresh`.
+- **Content job:** weekly, Sundays at 03:23 UTC, when `CONTENT_JOB_ENABLED=true`, or on demand (owner) with `POST /api/content/refresh`.
   - It rewrites profiles whose facts changed, direct ancestors first. Profiles are labelled as AI-written on the page, hidden from views without notes, and editors can "Rewrite now".
   - It re-checks stories whose people's facts changed. An out-of-date story becomes a **story revision** suggestion: the editor sees the reason and the revised text, and approving replaces the story (history keeps the old version).
 
