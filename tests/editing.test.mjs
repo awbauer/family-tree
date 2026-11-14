@@ -112,12 +112,23 @@ test("create a person and link them as a child, then merge a duplicate", async (
   const t = (await call("GET", "/api/tree?tree=all")).data;
   assert.ok(t.families[fam.id].children.includes(k));
   assert.deepEqual(t.people[k].famc, [fam.id]);
+  // research filed under the duplicate must follow the merge
+  await call("POST", "/api/todos?tree=all", { body: { person: d, task: "Check the duplicate's baptism", priority: "low" } });
+  await call("POST", "/api/comments", { body: { tree: "all", type: "person", id: d, body: "Probably the same Edith." } });
+  env.DB.db.prepare("INSERT INTO findings (person_id, data, created_at, created_by) VALUES (?, ?, ?, ?)").run(d, JSON.stringify({ person: d, kind: "new-fact", finding: "dup finding", confidence: "low", sources: [{ title: "x", note: "y" }] }), "2026-01-01", "test");
+  env.DB.db.prepare("INSERT INTO statuses (person_id, data) VALUES (?, ?)").run(d, JSON.stringify({ status: "partly-verified", note: "from dup" }));
   const m = await call("POST", "/api/edit", { as: OWNER, body: { tree: "all", reason: "same person", ops: [{ op: "person.merge", keep: k, drop: d }] } });
   assert.equal(m.status, 200, JSON.stringify(m.data));
   const t2 = (await call("GET", "/api/tree?tree=all")).data;
   assert.ok(!t2.people[d]);
   assert.ok(t2.people[k].names.some((n) => n.given === "Edie"));
   assert.equal(t2.aliases[d], k);
+  assert.ok(t2.research.todo.some((x) => x.person === k && x.task.startsWith("Check the duplicate")), "to-do follows the merge");
+  assert.ok(t2.research.findings.some((f) => f.person === k && f.finding === "dup finding"), "finding follows the merge");
+  assert.equal(t2.people[k].status, "partly-verified", "status follows the merge");
+  const cm = await call("GET", `/api/comments?tree=all&type=person&id=${k}`);
+  assert.ok(cm.data.comments.some((x) => x.body === "Probably the same Edith."), "comment follows the merge");
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) n FROM findings WHERE person_id = ?").bind(d).first()).n, 0);
 });
 
 test("comments on people and facts, resolved by author or editor", async () => {
