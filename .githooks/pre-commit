@@ -1,0 +1,3 @@
+#!/bin/sh
+# Blocks private family data, real Cloudflare IDs and real names from being committed.
+exec python3 "$(git rev-parse --show-toplevel)/tools/check_privacy.py"

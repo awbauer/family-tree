@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git commit --no-verify:*)",
+      "Bash(git commit -n:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git add -f:*)",
+      "Bash(git add --force:*)"
+    ],
+    "ask": [
+      "Bash(npm run db:load:*)",
+      "Bash(npm run deploy:*)",
+      "Bash(npx wrangler deploy:*)",
+      "Bash(npx wrangler d1 execute:*)",
+      "Bash(npx wrangler r2 object put:*)",
+      "Bash(npx wrangler r2 object delete:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr merge:*)"
+    ]
+  }
+}

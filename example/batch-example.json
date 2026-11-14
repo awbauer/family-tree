@@ -1,0 +1,56 @@
+{
+  "_comment": "A research batch for the fictional example family. Copy this shape; save real batches in family-data/batches/ (never in example/). Validate with: RESEARCH=example/research.json python3 tools/merge_research.py --check example/batch-example.json",
+  "branch": "novak",
+  "agent": "example-agent",
+  "findings": [
+    {
+      "person": "I10",
+      "personName": "Josef Novák",
+      "kind": "new-fact",
+      "field": "death",
+      "claim": "Tree has no death date.",
+      "finding": "Burial register entry dated 3 March 1931 names Josef Novák, cabinetmaker, aged 64, of house no. 12. Age and occupation match the 1921 census entry already cited.",
+      "confidence": "medium",
+      "sources": [
+        {
+          "title": "Plzeň, St Bartholomew parish, burials 1925–1935, p. 41, entry 18 (fictional)",
+          "url": "https://example.org/registers/plzen-bartholomew-burials-1925-1935#p41",
+          "note": "Image viewed online; entry is the 18th on the page. Same house number as the census."
+        }
+      ]
+    }
+  ],
+  "people_status": {
+    "I10": { "status": "partly-verified", "note": "Birth and death from parish registers; parents still unproven." }
+  },
+  "todo": [
+    {
+      "person": "I10",
+      "task": "Find Josef Novák's parents in the baptism entry implied by the burial age (about 1867).",
+      "where": "Same parish, baptisms 1865–1869",
+      "priority": "medium"
+    }
+  ],
+  "todo_done": [
+    {
+      "person": "I10",
+      "task": "Find Josef Novák's death record",
+      "outcome": "Found: burial register 1931 (see finding)."
+    }
+  ],
+  "log": [
+    {
+      "person": "I10",
+      "question": "When did Josef Novák die?",
+      "searched": "Plzeň civil death registers 1925–1935, name index",
+      "result": "nil",
+      "note": "Not indexed under Novák or Nowak; may predate civil registration in that district."
+    },
+    {
+      "person": "I10",
+      "question": "When did Josef Novák die?",
+      "searched": "Plzeň, St Bartholomew parish burials 1925–1935, page by page",
+      "result": "found"
+    }
+  ]
+}
