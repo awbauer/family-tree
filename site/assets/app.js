@@ -6,6 +6,29 @@ function startFamilyApp(D) {
   const HOME = D.home;
   const HOME_FIRST = (P[HOME] && P[HOME].given.split(" ")[0]) || "the home person";
   const app = document.getElementById("app");
+  // who is looking, and in which tree (null when previewing locally with tools/serve.py)
+  const ME = D.me || null, ACCOUNT = D.account || null, TREE = ME ? ME.tree : null;
+  const ROLE = ME ? ME.role : "owner";
+  const EDITOR = ROLE === "owner" || ROLE === "editor";
+  const LIVE = !!ME; // the API supports writes
+  async function api(method, path, body) {
+    const sep = path.includes("?") ? "&" : "?";
+    const r = await fetch(`api/${path}${TREE ? `${sep}tree=${encodeURIComponent(TREE)}` : ""}`, {
+      method, credentials: "same-origin",
+      headers: Object.assign({ Accept: "application/json" }, body ? { "Content-Type": "application/json" } : {}),
+      body: body ? JSON.stringify(Object.assign({ tree: TREE }, body)) : undefined,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { const e = new Error(data.error || `The server answered ${r.status}.`); e.status = r.status; e.data = data; throw e; }
+    return data;
+  }
+  if (ACCOUNT && ACCOUNT.trees.length > 1) {
+    const sel = document.createElement("select");
+    sel.className = "tree-switch"; sel.setAttribute("aria-label", "Family tree");
+    sel.innerHTML = ACCOUNT.trees.map((t) => `<option value="${esc0(t.id)}"${t.id === TREE ? " selected" : ""}>${esc0(t.name)}</option>`).join("");
+    sel.onchange = () => { try { localStorage.setItem("tree", sel.value); } catch {} location.reload(); };
+    document.querySelector(".header-inner").insertBefore(sel, document.querySelector(".search"));
+  }
   const SITE = Object.assign({ title: "Family History", familyName: "Our Family", eyebrow: "A family history, in progress", lede: "" }, R.site || {});
   // brand + per-branch colours from config
   document.querySelector(".brand-text").innerHTML = `${esc0(SITE.familyName.replace(/^The /, "").replace(/ Family$/, ""))} <em>Family History</em>`;
@@ -449,7 +472,7 @@ function startFamilyApp(D) {
             <h2>Research</h2>
             ${findings.length ? `<h3>Findings</h3>${findings.map(findingHtml).join("")}` : `<p class="muted small">No independent research recorded yet beyond the Ancestry citations below.</p>`}
             ${issues.length ? `<h3 style="margin-top:18px">Automatic data checks</h3>${issues.map(issueHtml).join("")}` : ""}
-            ${todos.length ? `<h3 style="margin-top:18px">Next steps</h3><ul>${todos.map((t) => `<li><span class="prio-${t.priority}">[${esc(t.priority)}]</span> ${esc(t.task)}${t.where ? ` <span class="muted small">— ${linkify(t.where)}</span>` : ""}</li>`).join("")}</ul>` : ""}
+            ${todos.length ? `<h3 style="margin-top:18px">Next steps</h3><ul>${todos.map((t) => `<li><span class="prio-${t.priority}">[${esc(t.priority)}]</span> ${esc(t.task)}${t.status && t.status !== "open" ? ` <span class="small muted">· ${esc((t.status || "").replace("_", " "))}${t.assignee ? ` · ${who(t.assignee)}` : ""}</span>` : t.assignee ? ` <span class="small muted">· ${who(t.assignee)}</span>` : ""}${t.where ? ` <span class="muted small">— ${linkify(t.where)}</span>` : ""}</li>`).join("")}</ul>` : ""}
           </section>
 
           <section class="card" style="margin-top:20px">
@@ -810,7 +833,7 @@ function startFamilyApp(D) {
     tab = tab || "overview";
     setTitle("Research");
     const findings = R.findings || [], todos = R.todo || [], issues = D.issues;
-    const tabs = [["overview", "Overview"], ["review", "Data problems", issues.filter((i) => i.severity !== "info").length], ["findings", "Findings", findings.length], ["todo", "To-do", todos.length], ["status", "Verification", null], ["sources", "Sources", Object.keys(S).length]];
+    const tabs = [["overview", "Overview"], ["review", "Data problems", issues.filter((i) => i.severity !== "info").length], ["findings", "Findings", findings.length], ["todo", "To-do", todos.length], ...(LIVE ? [["queue", "Suggestions", null]] : []), ["status", "Verification", null], ["sources", "Sources", Object.keys(S).length]];
     let body = "";
     if (tab === "overview") {
       const k = {}; findings.forEach((f) => (k[f.kind] = (k[f.kind] || 0) + 1));
@@ -833,6 +856,21 @@ function startFamilyApp(D) {
       body = `<div class="filters"><select id="ff-k"><option value="">All kinds</option>${[...new Set(findings.map((f) => f.kind))].map((k) => `<option>${esc(k)}</option>`).join("")}</select>
         <select id="ff-b"><option value="">All branches</option>${(R.branches || []).map((b) => `<option value="${b.key}">${esc(b.label)}</option>`).join("")}</select>
         <select id="ff-c"><option value="">Any confidence</option><option>high</option><option>medium</option><option>low</option></select></div><div id="ff-out"></div>`;
+    } else if (tab === "todo" && LIVE) {
+      body = `<div class="filters" id="td-filters">${[["active", "Active"], ["mine", "Assigned to me"], ["unassigned", "Unassigned"], ["needs_review", "Needs review"], ["done", "Done"], ["all", "All"]].map(([k, l]) => `<button class="btn${k === "active" ? " primary" : ""}" data-f="${k}">${l}</button>`).join("")}
+        <button class="btn" id="td-new" style="margin-left:auto">+ New to-do</button></div>
+        <form id="td-form" class="card" hidden style="margin-bottom:16px"><div class="filters">
+          <input name="task" placeholder="What needs doing?" required style="flex:2;min-width:240px">
+          <input name="person" list="td-people" placeholder="Person (optional)" style="flex:1;min-width:180px">
+          <datalist id="td-people">${people.filter((p) => !isUnknown(p)).map((p) => `<option value="${esc(p.name)} (${p.id})">`).join("")}</datalist>
+          <input name="where" placeholder="Where to look" style="flex:1;min-width:180px">
+          <select name="priority"><option>high</option><option selected>medium</option><option>low</option></select>
+          <label class="small"><input type="checkbox" name="mine" checked> assign to me</label>
+          <button class="btn primary">Add</button></div></form>
+        <div id="td-out"><p class="muted">Loading…</p></div>`;
+    } else if (tab === "queue" && LIVE) {
+      body = `<p class="muted">Research from relatives and AI agents waits here until an editor approves it. Approved findings, log entries and to-dos are added to the tree; nothing is applied without review.</p>
+        <div class="filters">${[["open", "Waiting"], ["approved", "Approved"], ["rejected", "Rejected"], ["all", "All"]].map(([k, l]) => `<button class="btn${k === "open" ? " primary" : ""}" data-q="${k}">${l}</button>`).join("")}</div><div id="q-out"><p class="muted">Loading…</p></div>`;
     } else if (tab === "todo") {
       const pr = { high: 0, medium: 1, low: 2 };
       body = todos.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Priority</th><th>Person</th><th>Task</th><th>Where to look</th></tr></thead><tbody>${todos.slice().sort((a, b) => pr[a.priority] - pr[b.priority]).map((t) => `<tr><td class="prio-${t.priority}">${esc(t.priority)}</td><td>${t.person && P[t.person] ? plink(t.person) : "—"}</td><td>${esc(t.task)}</td><td class="small">${linkify(t.where || "")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">No tasks yet.</div>`;
@@ -846,6 +884,8 @@ function startFamilyApp(D) {
       body = `<p class="muted">Every record collection cited in the Ancestry export, with the people who cite it. Indexes (e.g. “Find a Grave Index”, “Public Records Index”) are pointers, not proof — follow them to the underlying record.</p><div class="table-wrap"><table class="data"><thead><tr><th>Collection</th><th>People</th></tr></thead><tbody>${list.map((s) => `<tr><td>${esc(s.title)}<br><span class="small muted">${esc(s.author || "")}</span></td><td class="small">${(use[s.id] || []).map((id) => plink(id)).join(", ") || "—"}</td></tr>`).join("")}</tbody></table></div>`;
     }
     app.innerHTML = `<div class="wrap page"><h1>Research</h1><nav class="tabs">${tabs.map(([k, l, n]) => `<a href="#/research/${k}" class="${k === tab ? "on" : ""}">${l}${n != null ? `<span class="count">${n}</span>` : ""}</a>`).join("")}</nav>${body}</div>`;
+    if (tab === "todo" && LIVE) wireTodos();
+    if (tab === "queue" && LIVE) wireQueue();
     if (tab === "findings") {
       const draw = () => {
         const k = document.getElementById("ff-k").value, b = document.getElementById("ff-b").value, c = document.getElementById("ff-c").value;
@@ -857,6 +897,122 @@ function startFamilyApp(D) {
       ["ff-k", "ff-b", "ff-c"].forEach((x) => document.getElementById(x).addEventListener("input", draw));
       draw();
     }
+  }
+
+  // ---------------------------------------------------------------- to-dos (live, from /api/todos)
+  const STATUS_TXT = { open: "Open", in_progress: "In progress", needs_review: "Needs review", done: "Done", wont_do: "Won’t do" };
+  const who = (x) => !x ? "—" : x === (ME && ME.principal) ? "me" : x.startsWith("service:") || x.startsWith("agent:") ? `🤖 ${esc(x.replace(/^(service|agent):/, ""))}` : esc(x.split("@")[0]);
+  function wireTodos() {
+    const out = document.getElementById("td-out");
+    let filter = "active";
+    const query = { active: "status=active", mine: "assignee=me&status=active", unassigned: "assignee=unassigned&status=open", needs_review: "status=needs_review", done: "status=done,wont_do", all: "" };
+    async function load() {
+      out.innerHTML = `<p class="muted">Loading…</p>`;
+      try {
+        const { todos } = await api("GET", `todos?${query[filter]}`);
+        out.innerHTML = todos.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Priority</th><th>Person</th><th>Task</th><th>Status</th><th>Assigned</th><th></th></tr></thead><tbody>${todos.map(row).join("")}</tbody></table></div>` : `<div class="empty">Nothing here.</div>`;
+        out.querySelectorAll("[data-act]").forEach((b) => b.onclick = () => act(b.dataset.act, todos.find((t) => t.id === +b.dataset.id), b));
+        out.querySelectorAll("select[data-status]").forEach((sel) => sel.onchange = () => act("status", todos.find((t) => t.id === +sel.dataset.status), sel));
+      } catch (e) { out.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    }
+    function row(t) {
+      const mine = ME && t.assignee === ME.principal;
+      const statuses = EDITOR ? Object.keys(STATUS_TXT) : mine ? ["open", "in_progress", "needs_review"] : [];
+      const status = statuses.length && !(statuses.indexOf(t.status) < 0 && !EDITOR)
+        ? `<select data-status="${t.id}">${statuses.map((x) => `<option value="${x}"${x === t.status ? " selected" : ""}>${STATUS_TXT[x]}</option>`).join("")}</select>`
+        : `<span class="badge st-${t.status === "done" ? "verified" : t.status === "needs_review" ? "partly-verified" : "unverified"}">${STATUS_TXT[t.status]}</span>`;
+      const acts = [];
+      if (!t.assignee && !["done", "wont_do"].includes(t.status)) acts.push(`<button class="btn" data-act="claim" data-id="${t.id}">Take it</button>`);
+      if (EDITOR) acts.push(`<button class="btn" data-act="assign" data-id="${t.id}" title="Assign to someone (an email, or agent:name)">Assign…</button>`);
+      acts.push(`<button class="btn" data-act="history" data-id="${t.id}">History</button>`);
+      return `<tr id="td-${t.id}"><td class="prio-${t.priority}">${esc(t.priority)}</td><td>${t.person && P[t.person] ? plink(t.person) : "—"}</td>
+        <td>${esc(t.task)}${t.where ? `<br><span class="small muted">${linkify(t.where)}</span>` : ""}${t.outcome ? `<br><span class="small"><b>Outcome:</b> ${esc(t.outcome)}</span>` : ""}</td>
+        <td>${status}</td><td class="small">${who(t.assignee)}</td><td><div class="btn-row">${acts.join("")}</div></td></tr>`;
+    }
+    async function act(kind, t, el) {
+      try {
+        if (kind === "claim") await api("POST", `todos/${t.id}/claim`);
+        else if (kind === "assign") {
+          const a = prompt("Assign to (an email, \"me\", \"agent:name\", or empty to unassign):", t.assignee || "me");
+          if (a === null) return;
+          await api("PATCH", `todos/${t.id}`, { version: t.version, assignee: a.trim() || null });
+        } else if (kind === "status") {
+          const body = { version: t.version, status: el.value };
+          if (["done", "wont_do", "needs_review"].includes(el.value)) {
+            const o = prompt("Outcome (what was found, or why it was dropped):", t.outcome || "");
+            if (o === null) { el.value = t.status; return; }
+            body.outcome = o;
+          }
+          await api("PATCH", `todos/${t.id}`, body);
+        } else if (kind === "history") {
+          const { events } = await api("GET", `todos/${t.id}/events`);
+          const tr = document.getElementById(`td-${t.id}`);
+          const nx = tr.nextElementSibling;
+          if (nx && nx.classList.contains("td-hist")) { nx.remove(); return; }
+          tr.insertAdjacentHTML("afterend", `<tr class="td-hist"><td colspan="6" class="small">${events.map((e) => `<div>${esc(e.at.slice(0, 16).replace("T", " "))} · ${who(e.actor)} · ${esc(e.kind)} ${esc(e.data.text || e.data.outcome || (e.data.to !== undefined ? `→ ${e.data.to || "unassigned"}` : "") || (e.data.proposal ? `suggestion #${e.data.proposal}` : ""))}</div>`).join("")}
+            <form class="filters" style="margin-top:6px"><input name="c" placeholder="Add a comment" style="flex:1"><button class="btn">Comment</button></form></td></tr>`);
+          tr.nextElementSibling.querySelector("form").onsubmit = async (ev) => { ev.preventDefault(); await api("PATCH", `todos/${t.id}`, { comment: ev.target.c.value }); load(); };
+          return;
+        }
+        load();
+      } catch (e) { alert(e.status === 409 ? "Someone else changed this to-do; the list will refresh." : e.message); load(); }
+    }
+    document.querySelectorAll("#td-filters [data-f]").forEach((b) => b.onclick = () => {
+      filter = b.dataset.f;
+      document.querySelectorAll("#td-filters [data-f]").forEach((x) => x.classList.toggle("primary", x === b));
+      load();
+    });
+    const form = document.getElementById("td-form");
+    document.getElementById("td-new").onclick = () => (form.hidden = !form.hidden);
+    form.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const f = form.elements, m = (f.person.value.match(/\(([^)]+)\)\s*$/) || [])[1];
+      try {
+        await api("POST", "todos", { task: f.task.value, person: m || undefined, where: f.where.value || undefined, priority: f.priority.value, assignee: f.mine.checked ? "me" : undefined });
+        form.reset(); form.hidden = true; load();
+      } catch (e) { alert(e.message); }
+    };
+    load();
+  }
+
+  function wireQueue() {
+    const out = document.getElementById("q-out");
+    let status = "open";
+    async function load() {
+      out.innerHTML = `<p class="muted">Loading…</p>`;
+      try {
+        const { proposals } = await api("GET", `proposals?status=${status}`);
+        out.innerHTML = proposals.length ? proposals.map(card).join("") : `<div class="empty">Nothing ${status === "open" ? "waiting for review" : "here"}.</div>`;
+        out.querySelectorAll("[data-pa]").forEach((b) => b.onclick = () => decide(+b.dataset.id, b.dataset.pa));
+      } catch (e) { out.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    }
+    function card(pr) {
+      const b = pr.payload || {};
+      const parts = [];
+      if ((b.findings || []).length) parts.push(`<h4>Findings</h4>${b.findings.map((f) => findingHtml(Object.assign({}, f, { branch: f.branch || b.branch }))).join("")}`);
+      if (Object.keys(b.people_status || {}).length) parts.push(`<h4>Status changes</h4><ul>${Object.entries(b.people_status).map(([id, s]) => `<li>${P[id] ? plink(id) : esc(id)}: <b>${esc(s.status)}</b> ${esc(s.note || "")}</li>`).join("")}</ul>`);
+      if ((b.todo || []).length) parts.push(`<h4>New to-dos</h4><ul>${b.todo.map((t) => `<li>[${esc(t.priority)}] ${t.person && P[t.person] ? plink(t.person) + ": " : ""}${esc(t.task)}</li>`).join("")}</ul>`);
+      if ((b.todo_done || []).length) parts.push(`<h4>Closes</h4><ul>${b.todo_done.map((t) => `<li>${esc(t.task || `to-do #${t.id}`)}: ${esc(t.outcome || "")}</li>`).join("")}</ul>`);
+      if ((b.log || []).length) parts.push(`<details><summary>${b.log.length} searches logged</summary><ul>${b.log.map((l) => `<li>${esc(l.result)}: ${esc(l.searched)}${l.note ? ` <span class="muted">(${esc(l.note)})</span>` : ""}</li>`).join("")}</ul></details>`);
+      const btns = pr.status === "open" ? [
+        EDITOR ? `<button class="btn primary" data-pa="approve" data-id="${pr.id}">Approve</button><button class="btn" data-pa="reject" data-id="${pr.id}">Reject…</button>` : "",
+        ME && pr.author === ME.principal ? `<button class="btn" data-pa="withdraw" data-id="${pr.id}">Withdraw</button>` : "",
+      ].join("") : `<span class="small muted">${esc(pr.status)} by ${who(pr.reviewed_by)}${pr.review_note ? `: ${esc(pr.review_note)}` : ""}</span>`;
+      return `<section class="card" style="margin-bottom:14px"><div class="eyebrow">Suggestion #${pr.id} · ${who(pr.author)} · ${esc(pr.created_at.slice(0, 10))}${pr.todo_id ? ` · for to-do #${pr.todo_id}` : ""}</div>
+        ${pr.rationale ? `<p>${esc(pr.rationale)}</p>` : ""}${parts.join("")}<div class="btn-row" style="margin-top:10px">${btns}</div></section>`;
+    }
+    async function decide(id, action) {
+      let note;
+      if (action === "reject") { note = prompt("Why? (the author sees this)"); if (note === null) return; }
+      try { await api("POST", `proposals/${id}/${action}`, { note }); if (action === "approve") location.reload(); else load(); }
+      catch (e) { alert(e.message); }
+    }
+    document.querySelectorAll("[data-q]").forEach((b) => b.onclick = () => {
+      status = b.dataset.q;
+      document.querySelectorAll("[data-q]").forEach((x) => x.classList.toggle("primary", x === b));
+      load();
+    });
+    load();
   }
 
   // ---------------------------------------------------------------- about
@@ -885,11 +1041,21 @@ function startFamilyApp(D) {
 (function boot() {
   const app = document.getElementById("app");
   app.innerHTML = `<div class="wrap page"><p class="muted">Loading the family tree…</p></div>`;
-  fetch("api/tree", { credentials: "same-origin", headers: { Accept: "application/json" } })
-    .then(async (r) => {
-      const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(body.error || `The server answered ${r.status}.`);
-      return body;
+  const get = (path) => fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } })
+    .then(async (r) => ({ ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) }));
+  get("api/me")
+    .then(async (me) => {
+      let tree = null, account = null;
+      if (me.ok) { // the Cloudflare Worker (tools/serve.py has no /api/me)
+        account = me.body;
+        if (!account.trees.length) throw new Error("No family trees have been shared with you yet. Ask the owner to invite you.");
+        let saved = null; try { saved = localStorage.getItem("tree"); } catch {}
+        tree = (account.trees.find((t) => t.id === saved) || account.trees[0]).id;
+      } else if (me.status === 403) throw new Error(me.body.error || "Not signed in.");
+      const r = await get(`api/tree${tree ? `?tree=${encodeURIComponent(tree)}` : ""}`);
+      if (!r.ok) throw new Error(r.body.error || `The server answered ${r.status}.`);
+      r.body.account = account;
+      return r.body;
     })
     .then(startFamilyApp)
     .catch((e) => {

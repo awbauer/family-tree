@@ -2,18 +2,24 @@
   "name": "family-tree",
   "private": true,
   "description": "Private family-history site on Cloudflare Workers + D1, built from a GEDCOM export.",
+  "type": "module",
   "scripts": {
     "build": "python3 tools/build.py",
     "preview": "python3 tools/build.py && python3 tools/serve.py",
-    "db:load": "wrangler d1 execute family-tree -c wrangler.local.jsonc --remote --file build/seed.sql",
-    "db:load:local": "wrangler d1 execute family-tree -c wrangler.local.jsonc --local --file build/seed.sql",
+    "db:load": "python3 tools/guard_load.py --remote --legacy && wrangler d1 execute family-tree -c wrangler.local.jsonc --remote --file build/seed.sql",
+    "db:load:local": "python3 tools/guard_load.py --local --legacy && wrangler d1 execute family-tree -c wrangler.local.jsonc --local --file build/seed.sql",
     "dev": "wrangler dev -c wrangler.local.jsonc",
     "deploy": "wrangler deploy -c wrangler.local.jsonc",
     "db:counts": "wrangler d1 execute family-tree -c wrangler.local.jsonc --remote --command \"SELECT (SELECT COUNT(*) FROM people) AS people, (SELECT COUNT(*) FROM families) AS families, (SELECT COUNT(*) FROM findings) AS findings\"",
     "prepare": "git config core.hooksPath .githooks || true",
     "check:privacy": "python3 tools/check_privacy.py",
     "check:batch": "python3 tools/merge_research.py --check",
-    "merge": "python3 tools/merge_research.py"
+    "merge": "python3 tools/merge_research.py",
+    "db:migrate": "wrangler d1 migrations apply family-tree -c wrangler.local.jsonc --remote",
+    "db:migrate:local": "wrangler d1 migrations apply family-tree -c wrangler.local.jsonc --local",
+    "db:import": "python3 tools/guard_load.py --remote && wrangler d1 execute family-tree -c wrangler.local.jsonc --remote --file build/seed-app.sql",
+    "db:import:local": "python3 tools/guard_load.py --local && wrangler d1 execute family-tree -c wrangler.local.jsonc --local --file build/seed-app.sql",
+    "test": "node --test tests/"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

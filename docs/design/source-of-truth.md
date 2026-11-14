@@ -1,6 +1,6 @@
 # Design: the app as the source of truth
 
-Status: **accepted, not yet built**. Phases below are tracked as GitHub issues.
+Status: **phase 1 (foundation) built**, plus to-dos with assignees and the research-suggestion queue; cutover not yet run. Phases below are tracked as GitHub issues.
 
 ## Decision
 
@@ -119,6 +119,10 @@ Structural operations need care and get their own UI: **merge two people**, **at
 2. **Migration** `0002_source_of_truth.sql` (via `wrangler d1 migrations`): add version columns and the `members`, `changes`, `proposals` and `comments` tables; set `meta.source_of_truth = 'app'`; insert the owner's `members` row.
 3. **Lock the old path.** `npm run db:load` checks `meta.source_of_truth` and refuses, so a full replace can never wipe app edits again.
 4. `family-data/` becomes an archive of the original import. Research batches go in through `--submit`.
+
+## To-dos and the work queue (added during phase 1)
+
+To-dos are first-class rows (`todos`, with history in `todo_events`): priority, status (`open`, `in_progress`, `needs_review`, `done`, `wont_do`), assignee (an email or an agent principal), outcome. People and agents share one queue. Agents claim work, submit research as a proposal linked to the to-do, and the to-do waits in `needs_review` until an editor approves (closes it) or rejects (sends it back). See `GET /api/queue`, `POST /api/todos/:id/claim` and `tools/agent_api.py`.
 
 ## Phases
 

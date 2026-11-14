@@ -31,7 +31,7 @@ PRIVATE_PATHS = [
     (re.compile(r"(^|/)wrangler\.local\.jsonc$"), "your real Cloudflare IDs"),
     (re.compile(r"(^|/)\.dev\.vars$"), "local secrets"),
     (re.compile(r"\.zip$", re.I), "archive (could hold anything)"),
-    (re.compile(r"^(?!worker/).*\.sql$", re.I), "SQL dump"),
+    (re.compile(r"^(?!worker/|migrations/).*\.sql$", re.I), "SQL dump (schema belongs in worker/ or migrations/)"),
     (re.compile(r"^site/(family\.json|data\.js)$"), "built data in the public site folder"),
 ]
 ID_PATTERNS = [

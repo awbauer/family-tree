@@ -67,6 +67,18 @@ Free to do without asking: read anything, run `tools/build.py`, `tools/serve.py`
 - Keep `wrangler.jsonc` a placeholder template. Real values live in the git-ignored `wrangler.local.jsonc`, and all npm scripts use `-c wrangler.local.jsonc`.
 - Branch, commit and open PRs against `main`. Keep PR text generic ("fix date parsing for dual-dated years"), never "fix Grandpa X's birth date".
 
+## After cutover: the app is the source of truth
+
+Once `meta.source_of_truth = 'app'` (see docs/agents/operations.md → Cutover), research no longer goes into `family-data/research.json`. Work the shared queue instead, through `tools/agent_api.py` with an Access service token:
+
+1. `python3 tools/agent_api.py queue`: to-dos assigned to you (`agent:<name>` / your service token), then unassigned ones.
+2. `python3 tools/agent_api.py claim <id>`, then research it following docs/agents/research-protocol.md.
+3. Write the batch file as before (outside the repo, or in `family-data/batches/`), check it with `merge_research.py --check`, then `python3 tools/agent_api.py submit batch.json --todo <id> --rationale "..."`.
+4. The to-do moves to needs_review. An editor approves or rejects it. A rejection comes back to you with a note; read it with `todos --assignee me` and the to-do's history.
+5. Use `comment <id> "..."` for progress notes, or `release <id>` if you can't finish.
+
+You can't close to-dos, approve suggestions, or see trees you have no grant for. Don't try to work around those limits; they're the point.
+
 ## Multiple agents at once
 
 - Split research **by branch** (`research.json → branches[].key`) or by person; one agent per branch.

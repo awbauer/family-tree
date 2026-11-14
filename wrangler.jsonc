@@ -15,6 +15,7 @@
     {
       "binding": "DB",
       "database_name": "family-tree",
+      "migrations_dir": "migrations",
       "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
     }
   ],
@@ -22,10 +23,14 @@
   "r2_buckets": [
     { "binding": "MEDIA", "bucket_name": "family-tree-media" }
   ],
+  // Nightly backup of the whole database to R2 (backups/YYYY-MM-DD.json); see worker/backup.js
+  "triggers": { "crons": ["17 3 * * *"] },
   "vars": {
     // Your Zero Trust team domain, e.g. "yourteam.cloudflareaccess.com"
     "ACCESS_TEAM_DOMAIN": "",
     // The Application Audience (AUD) tag of the Access application protecting this Worker
-    "ACCESS_AUD": ""
+    "ACCESS_AUD": "",
+    // The owner's Access email(s), comma-separated. Owners see every tree and can manage grants.
+    "OWNER_EMAIL": ""
   }
 }

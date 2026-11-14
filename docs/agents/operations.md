@@ -55,6 +55,44 @@ If you ever move off Static Assets (for example, the Worker serves the three `si
 - **Hostname-based Access** (Zero Trust → Access → Applications → Self-hosted) protects only the hostnames you list. Use it if you need WebSockets: Worker-level policies currently reject WebSocket upgrades with 403, which matters if you later add a live agent chat to the site.
 - Either way, keep the JWT check in the Worker. Access at the edge is the gate, and the Worker's own check is defense in depth that fails closed.
 
+## Cutover: the app becomes the source of truth (one time)
+
+After this, nobody edits the GEDCOM-and-rebuild pipeline any more; changes happen in the app or arrive as suggestions.
+
+```sh
+python3 tools/build.py --raw-out build/raw.json          # final import: grafts + edits applied
+python3 tools/seed_app.py --owner you@example.com --assign-open-to owner --cutover
+npm run db:migrate                                        # migrations/0001_app_schema.sql (replaces the legacy tables)  ⚠ ask
+npm run db:import                                         # loads build/seed-app.sql; the guard refuses once cut over  ⚠ ask
+npm run deploy                                            # the Worker that reads raw rows and derives  ⚠ ask
+```
+
+Set `OWNER_EMAIL` in `wrangler.local.jsonc` before deploying. Trees come from `research.json → "trees"`. After `--cutover`, `npm run db:load` and `npm run db:import` refuse (`tools/guard_load.py`), so a full replace can't wipe app edits.
+
+Test the whole thing locally first: put `ALLOW_UNAUTHENTICATED=true` and `DEV_PRINCIPAL=you@example.com` in `.dev.vars`, then run `npm run db:migrate:local && npm run db:import:local && npm run dev`. Local D1 lives in `.wrangler/`, so delete `.wrangler/state` to start over.
+
+## Who can see what (trees, views, grants)
+
+Owners (`OWNER_EMAIL`, or `members.is_owner`) see every tree. Everyone else needs a **grant**: principal + tree + role (`editor`, `member` or `agent`) + optional **view** (a filter: living people `full`/`names-only`/`anonymous`/`hidden`, branch subset, generation limit, research/notes/media/sources on or off). No grant means no data. The admin UI is phase 6 (#9). Until then, use the API as the owner:
+
+```sh
+curl -X PUT $SITE/api/admin/views/cousins  -d '{"name":"Cousins","filter":{"living":"names-only","research":false}}'
+curl -X PUT $SITE/api/admin/grants         -d '{"principal":"cousin@example.com","tree_id":"spouse","role":"member","view_id":"cousins"}'
+curl -X PUT $SITE/api/admin/members/agent%3Aresearch -d '{"kind":"agent","display_name":"Research agent"}'
+```
+
+The person must also be allowed through the Access policy. A grant without Access gets nothing, and Access without a grant gets an empty "no trees shared with you" page.
+
+## To-dos and the review queue
+
+To-dos live in D1 (`/api/todos`). Each has a priority, a status (`open → in_progress → needs_review → done` or `wont_do`), an assignee (a person's email, or `agent:<name>` / `service:<token>`), an outcome and a history. Anyone with a grant can add to-dos and take unassigned ones. Editors assign, close and edit them. Agents can't close their own work: submitting research moves the to-do to **needs_review**, and an editor approves the suggestion (Research → Suggestions). Approving applies the findings, log, statuses and new to-dos and closes the to-do. Rejecting sends it back to the assignee.
+
+## Backups and restore
+
+- **Nightly:** a Cron Trigger (`17 3 * * *`) writes every table to R2 `backups/YYYY-MM-DD.json` (30 dailies plus the 1st of each month for a year). The owner can download the same export from `/api/export.json`.
+- **D1 Time Travel** restores the database to any minute in the last 30 days: `npx wrangler d1 time-travel info family-tree -c wrangler.local.jsonc`, then `... time-travel restore family-tree --timestamp <ISO time>` ⚠ ask.
+- **Restore from an R2 export:** download `backups/<day>.json`, then for each table delete its rows and re-insert them from `tables.<name>`. Rehearse it on a local database (`--local`) before you need it.
+
 ## Photos (R2)
 
 1. **Strip metadata first.** Phone photos carry GPS coordinates (a living relative's home). Use `exiftool -all= file.jpg` or `sips` re-export on macOS, and check with `exiftool file.jpg`.

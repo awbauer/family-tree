@@ -277,3 +277,8 @@ sup.cite a { text-decoration: none; font-size: .72rem; padding: 0 1px; }
   body { background: #fff; }
   .card { box-shadow: none; }
 }
+
+/* tree switcher (shown when you can see more than one tree) */
+.tree-switch { padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: .85rem; max-width: 180px; }
+@media (max-width: 720px) { .tree-switch { max-width: 120px; } }
+#td-out select { padding: 4px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: .85rem; }

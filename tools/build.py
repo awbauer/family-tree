@@ -144,7 +144,7 @@ def best_event(events, typ):
     return max(cands, key=score)
 
 
-def main(ged_path, data_dir, out_dir):
+def main(ged_path, data_dir, out_dir, raw_out=None):
     raw = g2j.parse(ged_path)
     research = json.loads((data_dir / "research.json").read_text()) if (data_dir / "research.json").exists() else {}
     for gcfg in research.get("grafts", []):
@@ -170,6 +170,13 @@ def main(ged_path, data_dir, out_dir):
         research["duplicates"] = [d for d in research.get("duplicates", []) if len(set(d["ids"])) > 1]
         print(f"Applied {len(elog)} edits ({len(aliases)} people merged)")
     places = json.loads((data_dir / "places.json").read_text()) if (data_dir / "places.json").exists() else {}
+    if raw_out:
+        # Snapshot of the stored (pre-derivation) data: what the database holds and worker/derive.js consumes.
+        # Serialised now, so the derivation below can't leak into it.
+        raw_out = Path(raw_out)
+        raw_out.parent.mkdir(parents=True, exist_ok=True)
+        raw_out.write_text(json.dumps({"raw": raw, "research": research, "places": places, "aliases": aliases},
+                                      ensure_ascii=False, separators=(",", ":")))
     P, F, S = raw["people"], raw["families"], raw["sources"]
     overrides = research.get("overrides", {})
     issues = []
@@ -587,6 +594,9 @@ if __name__ == "__main__":
     ap.add_argument("--data", default=str(ROOT / "family-data"),
                     help="folder holding your .ged, research.json and places.json (default: family-data/, falls back to example/)")
     ap.add_argument("--out", default=str(ROOT / "build"), help="output folder (default: build/)")
+    ap.add_argument("--raw-out", metavar="PATH",
+                    help="also write the parsed data (after grafts and edits, before derivation) as JSON to PATH; "
+                         "this is the input of worker/derive.js")
     a = ap.parse_args()
     data_dir = Path(a.data)
     if not data_dir.exists() and a.data == str(ROOT / "family-data"):
@@ -608,4 +618,4 @@ if __name__ == "__main__":
             sys.exit(f"Found {len(candidates)} main .ged files in {data_dir} ({', '.join(g.name for g in candidates)}). "
                      'Set "gedcom" in research.json to the main tree, and list the others under "grafts".')
         primary = candidates[0]
-    main(primary, data_dir, Path(a.out))
+    main(primary, data_dir, Path(a.out), a.raw_out)

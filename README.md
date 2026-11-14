@@ -67,7 +67,9 @@ Prefer **Worker-level Access** (Workers & Pages → family-tree → Access), whi
 
 `workers_dev` is off, so the only way in is the Access-protected domain. Even if it were on, the Worker verifies the Access JWT itself (signature, audience, issuer, expiry) and answers **403** to anything else. The static app shell is public-safe because it contains no data.
 
-**Updating:** re-export the GEDCOM → `python3 tools/build.py` → `npm run db:load`. The load replaces everything, and research survives because it lives in `research.json`, keyed by GEDCOM IDs (Ancestry keeps them stable across exports). If you merge two people in your tree software, move research from the vanished ID to the survivor.
+**Making the app the source of truth (recommended once you're happy with the import):** see [docs/agents/operations.md → Cutover](docs/agents/operations.md#cutover-the-app-becomes-the-source-of-truth-one-time). After cutover, people edit, assign to-dos and review suggestions in the app; the steps below are for the import phase only.
+
+**Updating (import phase):** re-export the GEDCOM → `python3 tools/build.py` → `npm run db:load`. The load replaces everything, and research survives because it lives in `research.json`, keyed by GEDCOM IDs (Ancestry keeps them stable across exports). If you merge two people in your tree software, move research from the vanished ID to the survivor.
 
 **Photos:** `npx wrangler r2 object put family-tree-media/photos/grandma.jpg --file grandma.jpg --remote`, then add `"I123": [{"file": "photos/grandma.jpg", "portrait": true, "caption": "…"}]` under `media` in `research.json`. For local preview, put the same files in `family-data/media/photos/`.
 
