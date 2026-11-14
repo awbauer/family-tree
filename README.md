@@ -1,6 +1,6 @@
-# Family Tree on Cloudflare
+# Family Tree App
 
-A private, good-looking family-history site you run on your own Cloudflare account. You keep your tree in Ancestry, Gramps or anything else that exports **GEDCOM**. This project turns that export, plus your own research notes, into an interactive site:
+A private family-history site you run on your own Cloudflare account. You keep your tree in Ancestry, Gramps or anything else that exports **GEDCOM**. This project turns that export, plus your own research notes, into an interactive site:
 
 - **Interactive tree:** pan and zoom through ancestor and descendant charts, plus a fan chart on the home page.
 - **Person pages:** life timeline with historical context, family links, footnoted sources, and research findings.
