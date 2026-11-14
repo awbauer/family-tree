@@ -1,0 +1,299 @@
+0 HEAD
+1 SOUR example
+1 GEDC
+2 VERS 5.5.1
+2 FORM LINEAGE-LINKED
+1 CHAR UTF-8
+1 NOTE Fictional example family for the family-tree template. All people are invented.
+0 @S1@ SOUR
+1 TITL 1950 United States Federal Census
+0 @S2@ SOUR
+1 TITL England & Wales, Civil Registration Death Index
+0 @S3@ SOUR
+1 TITL Family recollection (interview with Ana Costa, 2019)
+0 @I1@ INDI
+1 NAME Sam /Hartley/
+2 GIVN Sam
+2 SURN Hartley
+1 SEX M
+1 BIRT
+2 DATE 3 Mar 1992
+2 PLAC Portland, Multnomah, Oregon, USA
+1 FAMC @F1@
+0 @I2@ INDI
+1 NAME Daniel James /Hartley/
+2 GIVN Daniel James
+2 SURN Hartley
+1 SEX M
+1 BIRT
+2 DATE 14 Jun 1960
+2 PLAC Leeds, Yorkshire, England
+1 RESI
+2 DATE 1995
+2 PLAC Portland, Multnomah, Oregon, USA
+1 FAMC @F2@
+1 FAMS @F1@
+0 @I3@ INDI
+1 NAME Ana Maria /Costa/
+2 GIVN Ana Maria
+2 SURN Costa
+1 SEX F
+1 BIRT
+2 DATE 22 Sep 1963
+2 PLAC Fall River, Bristol, Massachusetts, USA
+1 FAMC @F3@
+1 FAMS @F1@
+0 @I4@ INDI
+1 NAME George /Hartley/
+2 GIVN George
+2 SURN Hartley
+1 SEX M
+1 BIRT
+2 DATE 2 Feb 1931
+2 PLAC Leeds, Yorkshire, England
+1 DEAT
+2 DATE 19 Nov 2004
+2 PLAC Leeds, Yorkshire, England
+2 SOUR @S2@
+3 PAGE Vol. 2c, p. 411
+1 OCCU Tram conductor
+2 DATE 1961
+2 PLAC Leeds, Yorkshire, England
+1 FAMC @F4@
+1 FAMS @F2@
+0 @I5@ INDI
+1 NAME Eva /Novák/
+2 GIVN Eva
+2 SURN Novák
+1 SEX F
+1 BIRT
+2 DATE 11 Jan 1934
+2 PLAC Plzeň, Bohemia, Czechoslovakia
+1 DEAT
+2 DATE 5 May 2015
+2 PLAC Leeds, Yorkshire, England
+1 IMMI
+2 DATE 1948
+2 PLAC Dover, Kent, England
+2 SOUR @S3@
+1 FAMC @F5@
+1 FAMS @F2@
+0 @I6@ INDI
+1 NAME Manuel /Costa/
+2 GIVN Manuel
+2 SURN Costa
+1 SEX M
+1 BIRT
+2 DATE 1 Apr 1935
+2 PLAC Ponta Delgada, São Miguel, Azores, Portugal
+1 DEAT
+2 DATE 30 Aug 2010
+2 PLAC Fall River, Bristol, Massachusetts, USA
+1 IMMI
+2 DATE 1957
+2 PLAC Boston, Massachusetts, USA
+2 SOUR @S3@
+1 FAMC @F6@
+1 FAMS @F3@
+0 @I7@ INDI
+1 NAME Ingrid /Lindqvist/
+2 GIVN Ingrid
+2 SURN Lindqvist
+1 SEX F
+1 BIRT
+2 DATE 7 Dec 1938
+2 PLAC Duluth, St. Louis, Minnesota, USA
+1 DEAT
+2 DATE 2 Feb 2020
+2 PLAC Fall River, Bristol, Massachusetts, USA
+2 SOUR @S1@
+3 PAGE Duluth, St. Louis, Minnesota; ED 69-12
+1 FAMC @F7@
+1 FAMS @F3@
+0 @I8@ INDI
+1 NAME Arthur /Hartley/
+2 GIVN Arthur
+2 SURN Hartley
+1 SEX M
+1 BIRT
+2 DATE 1899
+2 PLAC Leeds, Yorkshire, England
+1 DEAT
+2 DATE 1966
+2 PLAC Leeds, Yorkshire, England
+2 SOUR @S2@
+3 PAGE Vol. 2c, p. 411
+1 MILI
+2 DATE 1917
+2 PLAC France
+1 FAMS @F4@
+1 FAMS @F8@
+0 @I9@ INDI
+1 NAME Florence /Pike/
+2 GIVN Florence
+2 SURN Pike
+1 SEX F
+1 BIRT
+2 DATE 1903
+2 PLAC York, Yorkshire, England
+1 DEAT
+2 DATE 1979
+2 PLAC Leeds, Yorkshire, England
+1 FAMS @F4@
+0 @I10@ INDI
+1 NAME Josef /Novák/
+2 GIVN Josef
+2 SURN Novák
+1 SEX M
+1 BIRT
+2 DATE 12 Mar 1905
+2 PLAC Plzeň, Bohemia, Czechoslovakia
+1 DEAT
+2 DATE 1944
+2 PLAC Plzeň, Bohemia
+1 FAMS @F5@
+0 @I11@ INDI
+1 NAME Marie /Dvořák/
+2 GIVN Marie
+2 SURN Dvořák
+1 SEX F
+1 BIRT
+2 DATE 1908
+2 PLAC Plzeň, Bohemia, Austria-Hungary
+1 FAMS @F5@
+0 @I12@ INDI
+1 NAME João /Costa/
+2 GIVN João
+2 SURN Costa
+1 SEX M
+1 BIRT
+2 DATE 1904
+2 PLAC Ponta Delgada, São Miguel, Azores, Portugal
+1 DEAT
+2 DATE 1970
+2 PLAC Ponta Delgada, São Miguel, Azores, Portugal
+1 FAMS @F6@
+0 @I13@ INDI
+1 NAME Olof /Lindqvist/
+2 GIVN Olof
+2 SURN Lindqvist
+1 SEX M
+1 BIRT
+2 DATE 1910
+2 PLAC Kiruna, Norrbotten, Sweden
+1 DEAT
+2 DATE 1975
+2 PLAC Duluth, St. Louis, Minnesota, USA
+1 IMMI
+2 DATE 1928
+2 PLAC Duluth, St. Louis, Minnesota, USA
+2 SOUR @S3@
+1 FAMS @F7@
+0 @I14@ INDI
+1 NAME Karin /Berg/
+2 GIVN Karin
+2 SURN Berg
+1 SEX F
+1 BIRT
+2 DATE 1912
+2 PLAC Duluth, St. Louis, Minnesota, USA
+1 DEAT
+2 DATE 1990
+2 PLAC Duluth, St. Louis, Minnesota, USA
+1 FAMS @F7@
+0 @I15@ INDI
+1 NAME Florence /Pike/
+2 GIVN Florence
+2 SURN Pike
+1 SEX F
+1 BIRT
+2 DATE abt 1904
+2 PLAC York, Yorkshire, England
+1 DEAT
+2 DATE 1979
+2 PLAC Leeds
+1 FAMS @F8@
+0 @I16@ INDI
+1 NAME Lena /Hartley/
+2 GIVN Lena
+2 SURN Hartley
+1 SEX F
+1 BIRT
+2 DATE 1990
+2 PLAC Portland, Multnomah, Oregon, USA
+1 FAMC @F1@
+0 @I17@ INDI
+1 NAME Thomas /Hartley/
+2 GIVN Thomas
+2 SURN Hartley
+1 SEX M
+1 BIRT
+2 DATE 1925
+2 PLAC Leeds, Yorkshire, England
+1 FAMC @F4@
+1 FAMC @F8@
+0 @I18@ INDI
+1 NAME Rosa /Costa/
+2 GIVN Rosa
+2 SURN Costa
+1 SEX F
+1 BIRT
+2 DATE 1931
+2 PLAC Ponta Delgada, São Miguel, Azores, Portugal
+1 DEAT
+2 DATE 1999
+2 PLAC New Bedford, Massachusetts, USA
+1 FAMC @F6@
+0 @F1@ FAM
+1 HUSB @I2@
+1 WIFE @I3@
+1 CHIL @I16@
+1 CHIL @I1@
+1 MARR
+2 DATE 1989
+2 PLAC Portland, Multnomah, Oregon, USA
+0 @F2@ FAM
+1 HUSB @I4@
+1 WIFE @I5@
+1 CHIL @I2@
+1 MARR
+2 DATE 1958
+2 PLAC Leeds, Yorkshire, England
+0 @F3@ FAM
+1 HUSB @I6@
+1 WIFE @I7@
+1 CHIL @I3@
+1 MARR
+2 DATE 1961
+2 PLAC Fall River, Bristol, Massachusetts, USA
+0 @F4@ FAM
+1 HUSB @I8@
+1 WIFE @I9@
+1 CHIL @I17@
+1 CHIL @I4@
+1 MARR
+2 DATE 1924
+2 PLAC Leeds, Yorkshire, England
+0 @F5@ FAM
+1 HUSB @I10@
+1 WIFE @I11@
+1 CHIL @I5@
+1 MARR
+2 DATE 1932
+2 PLAC Plzeň, Bohemia
+0 @F6@ FAM
+1 HUSB @I12@
+1 CHIL @I18@
+1 CHIL @I6@
+0 @F7@ FAM
+1 HUSB @I13@
+1 WIFE @I14@
+1 CHIL @I7@
+1 MARR
+2 DATE 1936
+2 PLAC Duluth, St. Louis, Minnesota, USA
+0 @F8@ FAM
+1 HUSB @I8@
+1 WIFE @I15@
+1 CHIL @I17@
+0 TRLR

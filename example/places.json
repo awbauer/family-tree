@@ -1,0 +1,15 @@
+{
+  "_comment": "Map gazetteer: each event place is matched against the 'match' regexes (case-insensitive) in order; first hit wins.",
+  "places": [
+    {"key": "portland", "name": "Portland, Oregon", "lat": 45.5152, "lng": -122.6784, "match": ["portland"]},
+    {"key": "leeds", "name": "Leeds, England", "lat": 53.8008, "lng": -1.5491, "match": ["leeds"]},
+    {"key": "york", "name": "York, England", "lat": 53.9600, "lng": -1.0873, "match": ["^york"]},
+    {"key": "dover", "name": "Dover, England", "lat": 51.1279, "lng": 1.3134, "match": ["dover"]},
+    {"key": "plzen", "name": "Plzeň, Bohemia", "lat": 49.7384, "lng": 13.3736, "match": ["plze"]},
+    {"key": "pontadelgada", "name": "Ponta Delgada, Azores", "lat": 37.7412, "lng": -25.6756, "match": ["ponta delgada"]},
+    {"key": "fallriver", "name": "Fall River, Massachusetts", "lat": 41.7015, "lng": -71.1550, "match": ["fall river", "new bedford", "boston"]},
+    {"key": "duluth", "name": "Duluth, Minnesota", "lat": 46.7867, "lng": -92.1005, "match": ["duluth"]},
+    {"key": "kiruna", "name": "Kiruna, Sweden", "lat": 67.8558, "lng": 20.2253, "match": ["kiruna"]},
+    {"key": "france", "name": "France", "lat": 50.0, "lng": 2.8, "match": ["^france$"]}
+  ]
+}

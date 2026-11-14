@@ -1,0 +1,16 @@
+{
+  "name": "family-tree",
+  "private": true,
+  "description": "Private family-history site on Cloudflare Workers + D1, built from a GEDCOM export.",
+  "scripts": {
+    "build": "python3 tools/build.py",
+    "preview": "python3 tools/build.py && python3 tools/serve.py",
+    "db:load": "wrangler d1 execute family-tree --remote --file build/seed.sql",
+    "db:load:local": "wrangler d1 execute family-tree --local --file build/seed.sql",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

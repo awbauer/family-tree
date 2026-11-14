@@ -1,0 +1,31 @@
+{
+  // Cloudflare Worker config. See README → "Deploy to Cloudflare".
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "family-tree",
+  "main": "worker/index.js",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "./site",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/media/*"]
+  },
+  // Turn off the public workers.dev URL; serve only on your Access-protected custom domain.
+  "workers_dev": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "family-tree",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+    }
+  ],
+  // Optional: photos/documents. Remove this block if you don't use R2.
+  "r2_buckets": [
+    { "binding": "MEDIA", "bucket_name": "family-tree-media" }
+  ],
+  "vars": {
+    // Your Zero Trust team domain, e.g. "yourteam.cloudflareaccess.com"
+    "ACCESS_TEAM_DOMAIN": "",
+    // The Application Audience (AUD) tag of the Access application protecting this Worker
+    "ACCESS_AUD": ""
+  }
+}

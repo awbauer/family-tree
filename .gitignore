@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.DS_Store
+node_modules/
+.wrangler/
+
+# Your private family data never goes in git
+family-data/
+build/
+build-*/
+*.ged
+!example/*.ged
+site/family.json
+site/data.js
+.dev.vars

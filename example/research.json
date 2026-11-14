@@ -1,0 +1,55 @@
+{
+  "_comment": "Example research layer for the fictional Hartley family. Copy this file into your own private data folder and replace everything. See README → research.json.",
+  "site": {
+    "title": "Hartley Family History",
+    "familyName": "The Hartley Family",
+    "mark": "H",
+    "eyebrow": "A fictional example family",
+    "lede": "Yorkshire, Bohemia, the Azores and Swedish Minnesota — four invented lines showing what this template can do. Replace this folder with your own data."
+  },
+  "home_person": "I1",
+  "core_people": ["I1", "I2", "I3", "I16"],
+  "branches": [
+    {"key": "hartley", "root": "I4", "label": "Hartley", "tagline": "Leeds, Yorkshire", "color": "#2f6f73",
+     "intro": "Tram men and mill workers in Leeds for at least three generations."},
+    {"key": "novak", "root": "I5", "label": "Novák", "tagline": "Plzeň → Leeds", "color": "#7a4a7e",
+     "intro": "Eva Novák came to England in 1948 as a teenager; her father did not survive the war."},
+    {"key": "costa", "root": "I6", "label": "Costa", "tagline": "Azores → Fall River", "color": "#b5562f",
+     "intro": "Azorean fishermen and mill hands who settled in southeastern Massachusetts."},
+    {"key": "lindqvist", "root": "I7", "label": "Lindqvist", "tagline": "Kiruna → Duluth", "color": "#8a7a2a",
+     "intro": "Swedish iron-mining families who followed the ore to Minnesota’s Iron Range and Duluth."}
+  ],
+  "place_rules": [
+    {"pattern": "czechoslovakia", "before": 1918, "message": "Czechoslovakia did not exist before October 1918; use 'Bohemia, Austria-Hungary'."}
+  ],
+  "people_status": {
+    "I4": {"status": "verified", "note": "Birth and death matched to the GRO death index and the 1939 Register (example)."},
+    "I8": {"status": "partly-verified", "note": "Death index entry found; birth year still from family memory."},
+    "I10": {"status": "disputed", "note": "Death year 1944 conflicts with a 1946 letter mentioned by the family."},
+    "I15": {"status": "disputed", "note": "Duplicate of Florence Pike (I9) — merge."}
+  },
+  "duplicates": [{"ids": ["I9", "I15"], "note": "Same woman entered twice from two record hints."}],
+  "findings": [
+    {"person": "I4", "kind": "confirmed", "field": "death", "claim": "d. 19 Nov 2004 Leeds", "finding": "Death index lists George Hartley, born 2 Feb 1931, registered Leeds, Dec quarter 2004.", "confidence": "high",
+     "sources": [{"title": "England & Wales Death Index (example citation)", "url": "https://www.freebmd.org.uk/", "note": "Illustrative — not a real record"}]},
+    {"person": "I10", "kind": "conflict", "field": "death", "claim": "d. 1944 Plzeň", "finding": "A family letter dated 1946 refers to Josef as still living. One of the two is wrong.", "confidence": "medium", "sources": [{"title": "Family letter, 1946 (example)"}]},
+    {"person": "I6", "kind": "new-fact", "field": "immigration", "finding": "Arrived at Boston in 1957 under the Azorean refugee provisions that followed the 1957 Capelinhos eruption? Check the dates — the eruption began in September 1957.", "confidence": "low", "sources": []}
+  ],
+  "stories": [
+    {"slug": "eva-comes-to-england", "title": "Eva comes to England", "branch": "novak", "era": "1948", "people": ["I5", "I10", "I11"],
+     "body": "This is an example story. Stories are plain paragraphs separated by blank lines, and can link people like [[I5|Eva Novák]] or [[I4]].\n\n## Headings work too\n\nUse **bold** and *italic* for emphasis. List the sources you relied on in the story's sources array.",
+     "sources": [{"title": "Interview with Ana Costa, 2019 (example)"}]}
+  ],
+  "todo": [
+    {"person": "I10", "task": "Find Josef Novák's death record in the Plzeň parish or civil registers.", "where": "Czech regional archive online registers (e.g. https://www.portafontium.eu/)", "priority": "high"},
+    {"person": "I15", "task": "Merge this duplicate into Florence Pike (I9) in your tree software and re-export.", "where": "Your tree software", "priority": "medium"}
+  ],
+  "context": [
+    {"year": 1914, "month": 7, "title": "First World War begins"},
+    {"year": 1918, "month": 10, "title": "Czechoslovakia founded", "branches": ["novak"]},
+    {"year": 1939, "month": 9, "title": "Second World War begins in Europe"},
+    {"year": 1957, "month": 9, "title": "Capelinhos volcano erupts in the Azores", "branches": ["costa"]}
+  ],
+  "methodology": "Every person starts **Unverified**. Mark them **Verified** once independent records (not other people's trees) confirm who they were, and **Disputed** when records contradict the tree.",
+  "media": {}
+}
