@@ -11,6 +11,10 @@ Fails (exit 1) if:
   - added lines or the given text contain a UUID or a 64-hex string (D1 database_id, Access AUD tag)
   - added lines or the given text contain the full name of anyone in your private GEDCOM
     (family-data/*.ged), except names that also appear in the fictional example family
+  - ...or any SURNAME from your private GEDCOM written as a capitalized word ("Smith", "Van Dyke"),
+    or as a lowercase branch-style key ("vandyke"), except surnames in the example family and
+    common words listed in COMMON_WORDS (repo-owner usernames inside URLs don't match: "@jsmith" isn't "Smith")
+  - ...or a person/family ID from your private GEDCOM, or a prefix of one ("I12…" when your IDs look like I123456)
 
 Enable the hooks once per clone:  git config core.hooksPath .githooks   (npm install does this)
 """
@@ -56,6 +60,35 @@ def names_in(ged):
     return out
 
 
+COMMON_WORDS = {"daily", "young", "king", "white", "black", "green", "brown", "long", "short", "little", "rose",
+                "may", "june", "april", "street", "church", "hall", "wood", "hill", "field", "page", "case", "mark"}
+
+
+def surnames_in(ged):
+    out = set()
+    if ged.exists():
+        for m in re.finditer(r"^\s*1 NAME [^/\n]*/([^/\n]+)/", ged.read_text(encoding="utf-8-sig", errors="replace"), re.M):
+            sn = re.sub(r"\(.*?\)", "", m.group(1)).strip()
+            if len(sn) >= 4 and re.match(r"\w", sn):
+                out.add(sn)
+    return out
+
+
+def private_surnames():
+    s = set()
+    for ged in (ROOT / "family-data").glob("*.ged"):
+        s |= surnames_in(ged)
+    ex = {x.lower() for g in (ROOT / "example").glob("*.ged") for x in surnames_in(g)}
+    return {x for x in s if x.lower() not in ex and x.lower() not in COMMON_WORDS}
+
+
+def private_ids():
+    ids = set()
+    for ged in (ROOT / "family-data").glob("*.ged"):
+        ids |= set(re.findall(r"^0 @([A-Z]\d{4,})@", ged.read_text(encoding="utf-8-sig", errors="replace"), re.M))
+    return ids
+
+
 def private_names():
     names = set()
     for ged in (ROOT / "family-data").glob("*.ged"):
@@ -67,6 +100,14 @@ def private_names():
 
 def scan_text(text, where, names_re):
     problems = []
+    for sn in SURNAMES:
+        cap = re.compile(r"(?<![\w@/.-])" + re.escape(sn) + r"(?!\w)")          # "Van Dyke" as written
+        key = re.compile(r"(?<![\w@/.-])" + re.escape(re.sub(r"\W", "", sn).lower()) + r"(?!\w)")  # "vandyke"
+        if cap.search(text) or (len(sn) >= 6 and key.search(text)):
+            problems.append(f"{where}: surname from your private tree: {sn!r}")
+    for tok in set(re.findall(r"\b([A-Z]\d{3,})", text)):
+        if tok in IDS or any(i.startswith(tok) for i in IDS if len(tok) >= 4):
+            problems.append(f"{where}: ID (or ID prefix) from your private tree: {tok!r}")
     for pat, why in ID_PATTERNS:
         for m in pat.finditer(text):
             problems.append(f"{where}: {why}: {m.group(0)[:12]}…")
@@ -99,6 +140,10 @@ def staged():
                           if l.startswith("+") and not l.startswith("+++"))
         problems += scan_text(added, f, nre)
     return problems
+
+
+SURNAMES = private_surnames()
+IDS = private_ids()
 
 
 def main(argv):
