@@ -23,8 +23,6 @@
   "r2_buckets": [
     { "binding": "MEDIA", "bucket_name": "family-tree-media" }
   ],
-  // Nightly backup of the whole database to R2 (backups/YYYY-MM-DD.json); see worker/backup.js
-  "triggers": { "crons": ["17 3 * * *"] },
   "vars": {
     // Your Zero Trust team domain, e.g. "yourteam.cloudflareaccess.com"
     "ACCESS_TEAM_DOMAIN": "",

@@ -168,14 +168,6 @@ test("every write is audited", async () => {
   assert.ok(n > 5);
 });
 
-test("nightly backup writes a full export to R2", async () => {
-  const { runBackup } = await import("../worker/backup.js");
-  const r = await runBackup(env, new Date("2026-11-15T03:17:00Z"));
-  assert.equal(r.key, "backups/2026-11-15.json");
-  const saved = JSON.parse(env.MEDIA.objects.get(r.key).body);
-  assert.ok(saved.tables.people.length > 0 && saved.tables.todos.length > 0);
-});
-
 test("media is only served if attached to someone you can see", async () => {
   await env.MEDIA.put("photos/secret.jpg", "x");
   assert.equal((await call("GET", "/media/photos/secret.jpg")).status, 404);

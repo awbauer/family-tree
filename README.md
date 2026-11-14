@@ -103,7 +103,7 @@ The repo is set up for agents (Claude Code, Codex, Cursor and others) to do both
 
 - **[AGENTS.md](AGENTS.md)**: the rules every agent follows (privacy, no invented records, what needs your OK). `CLAUDE.md` imports it.
 - **[docs/agents/research-protocol.md](docs/agents/research-protocol.md)**: how to research, weigh evidence, cite, and record results as batches.
-- **[docs/agents/operations.md](docs/agents/operations.md)**: build, load, deploy, Access, photos, backups.
+- **[docs/agents/operations.md](docs/agents/operations.md)**: build, load, deploy, Access, photos, restore.
 - **`.claude/skills/`**: `research` and `publish` skills for Claude Code. **`.claude/settings.json`** asks before remote loads, deploys and pushes.
 - **`tools/check_privacy.py`** runs as a pre-commit and commit-msg hook. It blocks private paths, Cloudflare IDs, and the full name of anyone in your private GEDCOM. Run it on PR text too: `echo "$BODY" | python3 tools/check_privacy.py --file -`.
 

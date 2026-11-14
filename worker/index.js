@@ -24,7 +24,6 @@ import { identify, resolveAccess, grantFor, can } from "./auth.js";
 import { scopeBundle } from "./scope.js";
 import { validateBatch, researchStatements } from "./research.js";
 import { J, now, parse, dataVersion, loadState, todoOut, write, audit, meta } from "./db.js";
-import { runBackup, exportAll } from "./backup.js";
 
 const TODO_STATUSES = ["open", "in_progress", "needs_review", "done", "wont_do"];
 const PRIORITY = ["high", "medium", "low"];
@@ -49,9 +48,6 @@ export default {
       console.error(e);
       return json({ error: "Internal error" }, 500);
     }
-  },
-  async scheduled(event, env, ctx) {
-    ctx.waitUntil(runBackup(env));
   },
 };
 
@@ -79,10 +75,6 @@ async function route(c) {
   if (p === "/api/admin" && m === "GET") return admin(c);
   if ((r = p.match(/^\/api\/admin\/(trees|views|members)\/([^/]+)$/)) && m === "PUT") return adminPut(c, r[1], decodeURIComponent(r[2]));
   if (p === "/api/admin/grants" && (m === "PUT" || m === "DELETE")) return adminGrant(c, m);
-  if (p === "/api/export.json" && m === "GET") {
-    if (!c.access.isOwner) fail(403, "Only the owner can export the whole database.");
-    return json(await exportAll(c.env), 200, { "Content-Disposition": `attachment; filename="family-tree-${now().slice(0, 10)}.json"` });
-  }
   fail(404, "Not found");
 }
 

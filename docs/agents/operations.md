@@ -87,11 +87,16 @@ The person must also be allowed through the Access policy. A grant without Acces
 
 To-dos live in D1 (`/api/todos`). Each has a priority, a status (`open → in_progress → needs_review → done` or `wont_do`), an assignee (a person's email, or `agent:<name>` / `service:<token>`), an outcome and a history. Anyone with a grant can add to-dos and take unassigned ones. Editors assign, close and edit them. Agents can't close their own work: submitting research moves the to-do to **needs_review**, and an editor approves the suggestion (Research → Suggestions). Approving applies the findings, log, statuses and new to-dos and closes the to-do. Rejecting sends it back to the assignee.
 
-## Backups and restore
+## Restore (D1 Time Travel)
 
-- **Nightly:** a Cron Trigger (`17 3 * * *`) writes every table to R2 `backups/YYYY-MM-DD.json` (30 dailies plus the 1st of each month for a year). The owner can download the same export from `/api/export.json`.
-- **D1 Time Travel** restores the database to any minute in the last 30 days: `npx wrangler d1 time-travel info family-tree -c wrangler.local.jsonc`, then `... time-travel restore family-tree --timestamp <ISO time>` ⚠ ask.
-- **Restore from an R2 export:** download `backups/<day>.json`, then for each table delete its rows and re-insert them from `tables.<name>`. Rehearse it on a local database (`--local`) before you need it.
+D1 keeps point-in-time recovery automatically: 30 days on Workers Paid, 7 on Free. There is no other copy.
+
+```sh
+npx wrangler d1 time-travel info family-tree -c wrangler.local.jsonc                       # current bookmark
+npx wrangler d1 time-travel restore family-tree -c wrangler.local.jsonc --timestamp <ISO>   # ⚠ ask
+```
+
+Every write is also recorded in the `changes` table (who, when, before and after), so a single bad change can be traced and undone without restoring the whole database.
 
 ## Photos (R2)
 
@@ -103,9 +108,9 @@ To-dos live in D1 (`/api/todos`). Each has a priority, a status (`open → in_pr
 
 Photos of living people: only with their consent, and only if the owner says so.
 
-## Backups
+## Your local files
 
-`family-data/` is the only copy of the research. Before any bulk change (large merges, new GEDCOM), copy it somewhere private: `zip -r ~/Backups/family-data-$(date +%F).zip family-data`. Never into this repo.
+Until cutover, `family-data/` is the only copy of the import inputs and research. Before any bulk change, copy it somewhere private, never into this repo.
 
 ## Checks before any commit or PR
 
