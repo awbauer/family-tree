@@ -76,6 +76,7 @@ Once `meta.source_of_truth = 'app'` (see docs/agents/operations.md → Cutover),
 3. Write the batch file as before (outside the repo, or in `family-data/batches/`), check it with `merge_research.py --check`, then `python3 tools/agent_api.py submit batch.json --todo <id> --rationale "..."`.
 4. The to-do moves to needs_review. An editor approves or rejects it. A rejection comes back to you with a note; read it with `todos --assignee me` and the to-do's history.
 5. Use `comment <id> "..."` for progress notes, or `release <id>` if you can't finish.
+6. To fix the tree itself (wrong parents, duplicates, a wrong date), propose **edit ops** (docs/design/edit-ops.md) with `python3 tools/agent_api.py suggest-edit ops.json --reason "<evidence>" --todo <id>`. An editor reviews them like research. Cite the record in `sources`. Never propose deleting people; merging duplicates (`person.merge`) is the way.
 
 You can't close to-dos, approve suggestions, or see trees you have no grant for. Don't try to work around those limits; they're the point.
 

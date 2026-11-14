@@ -22,12 +22,25 @@ function startFamilyApp(D) {
     if (!r.ok) { const e = new Error(data.error || `The server answered ${r.status}.`); e.status = r.status; e.data = data; throw e; }
     return data;
   }
+  const whoTxt = (x) => !x ? "—" : ME && x === ME.principal ? "me" : x.startsWith("service:") || x.startsWith("agent:") ? "🤖 " + x.replace(/^(service|agent):/, "") : x.split("@")[0];
+  const CTX = () => ({ P, F, S, R, D, ME, ACCOUNT, TREE, EDITOR, app, api, esc, plink, findingHtml, people, isUnknown, who: whoTxt });
+  if (ACCOUNT && ACCOUNT.isOwner) {
+    const a = document.createElement("a"); a.href = "#/admin"; a.textContent = "Sharing";
+    document.querySelector(".site-nav").appendChild(a);
+  }
+  if (D.previewView) {
+    const bar = document.createElement("div");
+    bar.className = "preview-bar";
+    bar.innerHTML = `Previewing what someone with the view <b>${esc0(D.previewView)}</b> sees. <button class="btn">Exit preview</button>`;
+    bar.querySelector("button").onclick = () => { try { sessionStorage.removeItem("previewView"); } catch {} location.reload(); };
+    document.body.prepend(bar);
+  }
   if (ACCOUNT && ACCOUNT.trees.length > 1) {
     const sel = document.createElement("select");
     sel.className = "tree-switch"; sel.setAttribute("aria-label", "Family tree");
     sel.innerHTML = ACCOUNT.trees.map((t) => `<option value="${esc0(t.id)}"${t.id === TREE ? " selected" : ""}>${esc0(t.name)}</option>`).join("");
     sel.onchange = () => { try { localStorage.setItem("tree", sel.value); } catch {} location.reload(); };
-    document.querySelector(".header-inner").insertBefore(sel, document.querySelector(".search"));
+    document.querySelector(".site-nav").appendChild(sel); // folds into the menu on small screens
   }
   const SITE = Object.assign({ title: "Family History", familyName: "Our Family", eyebrow: "A family history, in progress", lede: "" }, R.site || {});
   // brand + per-branch colours from config
@@ -167,7 +180,8 @@ function startFamilyApp(D) {
     currentRoute = parts;
     nav.classList.remove("open");
     document.querySelectorAll(".site-nav a").forEach((a) => a.classList.toggle("active", a.getAttribute("href") === "#/" + (parts[0] || "")));
-    const views = { "": viewHome, tree: viewTree, person: viewPerson, people: viewPeople, stories: viewStories, story: viewStory, map: viewMap, timeline: viewTimeline, research: viewResearch, about: viewAbout, branch: viewBranch };
+    const views = { "": viewHome, tree: viewTree, person: viewPerson, people: viewPeople, stories: viewStories, story: viewStory, map: viewMap, timeline: viewTimeline, research: viewResearch, about: viewAbout, branch: viewBranch,
+      admin: () => (ACCOUNT && ACCOUNT.isOwner && window.FamilyWork ? (setTitle("Sharing"), window.FamilyWork.admin(CTX())) : viewNotFound()) };
     const v = views[parts[0] || ""] || viewNotFound;
     v(parts.slice(1), params);
     if (!["tree"].includes(parts[0])) window.scrollTo(0, 0);
@@ -417,7 +431,7 @@ function startFamilyApp(D) {
       const note = e.note ? `<div class="t-note">${esc(e.note)}</div>` : e.address ? `<div class="t-note">${esc(e.address)}</div>` : "";
       const mis = e.misfiled ? `<div class="t-note sev-warn">⚠ This is a relative’s event that Ancestry exported as this person’s own — ignore.</div>` : "";
       return `<li class="${e.misfiled ? "misfiled" : ""}"><div class="t-date">${esc(e.dateDisplay || "undated")}</div><span class="t-dot"></span>
-        <div class="t-body">${what}${place}${cites.length ? `<sup class="cite">${cites.join(",")}</sup>` : ""}${note}${mis}</div></li>`;
+        <div class="t-body"${kind === "own" && e.fid ? ` data-fid="${esc(e.fid)}"` : ""}>${what}${place}${cites.length ? `<sup class="cite">${cites.join(",")}</sup>` : ""}${note}${mis}</div></li>`;
     }).join("");
     (p.citations || []).forEach(cite);
 
@@ -486,6 +500,7 @@ function startFamilyApp(D) {
         </div>
       </div>
     </div>`;
+    if (LIVE && window.FamilyWork) window.FamilyWork.person(CTX(), id);
   }
   function linkify(s) {
     return esc(s).replace(/https?:\/\/[^\s<]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener">${u.length > 60 ? u.slice(0, 57) + "…" : u}</a>`);
@@ -844,6 +859,7 @@ function startFamilyApp(D) {
           <div class="card"><div class="eyebrow">Open tasks</div><div class="stat"><b>${todos.length}</b></div><p class="small">${todos.filter((t) => t.priority === "high").length} high priority</p><a class="small" href="#/research/todo">See list →</a></div>
           <div class="card"><div class="eyebrow">Sources</div><div class="stat"><b>${Object.keys(S).length}</b></div><p class="small">record collections cited from Ancestry</p><a class="small" href="#/research/sources">Browse →</a></div>
         </div>
+        ${LIVE && EDITOR ? `<p class="btn-row" style="margin-top:14px"><a class="btn" href="api/export.ged?tree=${encodeURIComponent(TREE)}" download>Download GEDCOM (what you can see)</a>${ACCOUNT && ACCOUNT.isOwner ? `<a class="btn" href="api/export.json" download>Download everything (JSON)</a>` : ""}</p>` : ""}
         ${R.methodology ? `<section class="section prose">${R.methodology.split(/\n\n+/).map((t) => `<p>${inline(t)}</p>`).join("")}</section>` : ""}`;
     } else if (tab === "review") {
       const groups = {};
@@ -989,6 +1005,7 @@ function startFamilyApp(D) {
     function card(pr) {
       const b = pr.payload || {};
       const parts = [];
+      if (pr.kind === "edit") parts.push(`<h4>Proposed changes${b.origin ? ` <span class="small muted">(${esc(b.origin)})</span>` : ""}</h4><ol>${(b.ops || []).map((o) => `<li>${window.FamilyWork ? window.FamilyWork.opText(CTX(), o) : esc(o.op)}</li>`).join("")}</ol>${b.reason ? `<p class="small"><b>Why:</b> ${esc(b.reason)}</p>` : ""}${(b.sources || []).map((s) => `<p class="small">Source: ${s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>` : esc(s.title)}</p>`).join("")}`);
       if ((b.findings || []).length) parts.push(`<h4>Findings</h4>${b.findings.map((f) => findingHtml(Object.assign({}, f, { branch: f.branch || b.branch }))).join("")}`);
       if (Object.keys(b.people_status || {}).length) parts.push(`<h4>Status changes</h4><ul>${Object.entries(b.people_status).map(([id, s]) => `<li>${P[id] ? plink(id) : esc(id)}: <b>${esc(s.status)}</b> ${esc(s.note || "")}</li>`).join("")}</ul>`);
       if ((b.todo || []).length) parts.push(`<h4>New to-dos</h4><ul>${b.todo.map((t) => `<li>[${esc(t.priority)}] ${t.person && P[t.person] ? plink(t.person) + ": " : ""}${esc(t.task)}</li>`).join("")}</ul>`);
@@ -1052,9 +1069,11 @@ function startFamilyApp(D) {
         let saved = null; try { saved = localStorage.getItem("tree"); } catch {}
         tree = (account.trees.find((t) => t.id === saved) || account.trees[0]).id;
       } else if (me.status === 403) throw new Error(me.body.error || "Not signed in.");
-      const r = await get(`api/tree${tree ? `?tree=${encodeURIComponent(tree)}` : ""}`);
+      let preview = null; try { preview = account && account.isOwner ? sessionStorage.getItem("previewView") : null; } catch {}
+      const r = await get(`api/tree${tree ? `?tree=${encodeURIComponent(tree)}` : ""}${preview ? `&preview_view=${encodeURIComponent(preview)}` : ""}`);
       if (!r.ok) throw new Error(r.body.error || `The server answered ${r.status}.`);
       r.body.account = account;
+      if (preview) r.body.previewView = preview;
       return r.body;
     })
     .then(startFamilyApp)

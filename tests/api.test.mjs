@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeEnv, client } from "./helpers/fake-env.mjs";
+import { makeEnv, client, migrate } from "./helpers/fake-env.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OWNER = "owner@example.test", MEMBER = "cousin@example.test", AGENT = "service:research-agent", STRANGER = "nobody@example.test";
@@ -26,7 +26,7 @@ before(async () => {
   execFileSync("python3", ["tools/seed_app.py", "--raw", join(dir, "raw.json"), "--bundle", join(dir, "family.json"),
     "--research", join(dir, "research.json"), "--out", join(dir, "seed.sql"), "--owner", OWNER, "--cutover"], { cwd: ROOT });
   env = makeEnv();
-  env.DB.execFile(join(ROOT, "migrations/0001_app_schema.sql"));
+  migrate(env.DB, ROOT);
   env.DB.execFile(join(dir, "seed.sql"));
   worker = (await import("../worker/index.js")).default;
   call = client(worker, env);

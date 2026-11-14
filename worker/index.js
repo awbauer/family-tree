@@ -24,6 +24,10 @@ import { identify, resolveAccess, grantFor, can } from "./auth.js";
 import { scopeBundle } from "./scope.js";
 import { validateBatch, researchStatements } from "./research.js";
 import { J, now, parse, dataVersion, loadState, todoOut, write, audit, meta } from "./db.js";
+import { OpError, referencedIds, applyOps } from "./ops.js";
+import { loadEditable, applyAndCommit, revertBatch, isConflict } from "./store.js";
+import * as Graph from "./graph.js";
+import { exportGedcom } from "./gedcom_export.js";
 
 const TODO_STATUSES = ["open", "in_progress", "needs_review", "done", "wont_do"];
 const PRIORITY = ["high", "medium", "low"];
@@ -62,7 +66,11 @@ async function route(c) {
   const p = url.pathname.replace(/\/+$/, "");
   let r;
   if (p === "/api/me" && m === "GET") return me(c);
-  if (p === "/api/tree" && m === "GET") return json(await scoped(c, grantOrFail(c)), 200, { "Cache-Control": "private, no-store" });
+  if (p === "/api/tree" && m === "GET") {
+    const g = grantOrFail(c), pv = c.url.searchParams.get("preview_view");
+    if (pv && !c.access.isOwner) fail(403, "Only the owner can preview views.");
+    return json(await scoped(c, pv ? { ...g, view_id: pv, role: "member" } : g), 200, { "Cache-Control": "private, no-store" });
+  }
   if (p === "/api/todos" && m === "GET") return listTodos(c);
   if (p === "/api/todos" && m === "POST") return createTodo(c);
   if ((r = p.match(/^\/api\/todos\/(\d+)$/)) && m === "PATCH") return updateTodo(c, +r[1]);
@@ -72,6 +80,17 @@ async function route(c) {
   if (p === "/api/proposals" && m === "GET") return listProposals(c);
   if (p === "/api/proposals" && m === "POST") return createProposal(c);
   if ((r = p.match(/^\/api\/proposals\/(\d+)\/(approve|reject|withdraw)$/)) && m === "POST") return reviewProposal(c, +r[1], r[2]);
+  if (p === "/api/export.ged" && m === "GET") return exportGed(c);
+  if (p === "/api/export.json" && m === "GET") return exportJson(c);
+  if (p === "/api/edit" && m === "POST") return edit(c);
+  if (p === "/api/history" && m === "GET") return history(c);
+  if ((r = p.match(/^\/api\/changes\/([\w-]+)\/revert$/)) && m === "POST") return revert(c, r[1]);
+  if (p === "/api/comments" && m === "GET") return listComments(c);
+  if (p === "/api/comments" && m === "POST") return addComment(c);
+  if ((r = p.match(/^\/api\/comments\/(\d+)\/resolve$/)) && m === "POST") return resolveComment(c, +r[1]);
+  if (p === "/api/media/upload" && m === "POST") return upload(c);
+  if ((r = p.match(/^\/api\/graph\/(path|ancestors|descendants)$/)) && m === "GET") return graph(c, r[1]);
+  if (p === "/api/me/person" && m === "PUT") return linkMe(c);
   if (p === "/api/admin" && m === "GET") return admin(c);
   if ((r = p.match(/^\/api\/admin\/(trees|views|members)\/([^/]+)$/)) && m === "PUT") return adminPut(c, r[1], decodeURIComponent(r[2]));
   if (p === "/api/admin/grants" && (m === "PUT" || m === "DELETE")) return adminGrant(c, m);
@@ -104,7 +123,7 @@ function grantOrFail(c, treeId) {
 
 async function scoped(c, grant) {
   const { version, full } = await fullBundle(c.env);
-  const key = `${version}|${grant.tree_id}|${grant.view_id || ""}|${c.access.personId || ""}|${c.access.isOwner}`;
+  const key = `${version}|${grant.tree_id}|${grant.view_id || ""}|${c.access.personId || ""}|${c.access.isOwner}|${grant.role}`;
   if (scopedCache.has(key)) return scopedCache.get(key);
   const t = c.access.treeById[grant.tree_id];
   const tree = { id: t.id, name: t.name, definition: parse(t.definition, { branches: ["*"] }) };
@@ -304,11 +323,14 @@ async function createProposal(c) {
   const g = grantOrFail(c, d.tree);
   if (!can.propose(g)) fail(403, "You can't make suggestions in this tree.");
   const kind = d.kind || "research";
-  if (kind === "edit") fail(501, "Tree-edit suggestions arrive with the editing phase (issue #5). Submit research batches for now.");
-  if (kind !== "research") fail(400, "kind must be research");
+  if (!["research", "edit"].includes(kind)) fail(400, "kind must be research or edit");
   const b = await scoped(c, g);
-  const errs = validateBatch(d.payload, (pid) => !!b.people[pid]);
-  if (errs.length) fail(422, "The batch didn't validate.", { errors: errs });
+  if (kind === "research") {
+    const errs = validateBatch(d.payload, (pid) => !!b.people[pid]);
+    if (errs.length) fail(422, "The batch didn't validate.", { errors: errs });
+  } else {
+    await checkEdit(c, g, d.payload, { dryRun: true });
+  }
   let todo = null;
   if (d.todo_id) {
     todo = (await loadTodo(c, d.todo_id)).row;
@@ -344,20 +366,27 @@ async function reviewProposal(c, id, action) {
   if (!can.review(g) || c.access.kind === "agent") fail(403, "Only editors can review suggestions.");
   const st = [];
   if (action === "approve") {
-    if (row.kind !== "research") fail(501, "Only research suggestions can be approved for now.");
     const payload = parse(row.payload, {});
     const b = await scoped(c, g);
+    if (row.kind === "edit") {
+      await checkEdit(c, g, payload, { dryRun: true });
+      // the tree edit is applied together with closing the proposal (and its to-do) in one batch
+      const extra = [];
+      extra.push(c.env.DB.prepare("UPDATE proposals SET status = 'approved', reviewed_by = ?, reviewed_at = ?, review_note = ? WHERE id = ? AND status = 'open'").bind(self(c), t, d.note || null, id));
+      extra.push(...await todoCloseStatements(c, row, payload, d, t, id));
+      try {
+        const res = await applyAndCommit(c.env, payload.ops, { actor: self(c), actorKind: "person", reason: payload.reason || row.rationale || `suggestion #${id} by ${row.author}`, sources: payload.sources, proposalId: id, op: "edit", extra });
+        return json({ ok: true, status: "approved", batch: res.batchId, created: res.created });
+      } catch (e) {
+        if (e instanceof OpError) fail(422, `This suggestion no longer applies: ${e.message}`);
+        if (isConflict(e)) fail(409, "The tree changed while approving. Try again.");
+        throw e;
+      }
+    }
     const errs = validateBatch(payload, (pid) => !!b.people[pid]); // re-check: the tree may have changed
     if (errs.length) fail(422, "The batch no longer validates.", { errors: errs });
     st.push(...await researchStatements(c.env, payload, { actor: self(c), actorKind: "person", proposalId: id, treeId: row.tree_id }));
-    if (row.todo_id) {
-      const td = await c.env.DB.prepare("SELECT * FROM todos WHERE id = ?").bind(row.todo_id).first();
-      const closedByBatch = (payload.todo_done || []).some((x) => x.id === row.todo_id);
-      if (td && td.status === "needs_review" && !closedByBatch && d.close_todo !== false) {
-        st.push(c.env.DB.prepare("UPDATE todos SET status = 'done', closed_at = ?, outcome = COALESCE(NULLIF(outcome, ''), ?), updated_at = ?, updated_by = ?, version = version + 1 WHERE id = ?").bind(t, `See suggestion #${id}.`, t, self(c), td.id));
-        st.push(c.env.DB.prepare("INSERT INTO todo_events (todo_id, at, actor, kind, data) VALUES (?, ?, ?, 'status', ?)").bind(td.id, t, self(c), J({ from: "needs_review", to: "done", proposal: id })));
-      }
-    }
+    st.push(...await todoCloseStatements(c, row, payload, d, t, id));
   } else if (row.todo_id) {
     const td = await c.env.DB.prepare("SELECT * FROM todos WHERE id = ?").bind(row.todo_id).first();
     if (td && td.status === "needs_review") {
@@ -370,6 +399,191 @@ async function reviewProposal(c, id, action) {
   st.push(audit(c.env, { actor: self(c), actorKind: "person", entityType: "proposal", entityId: id, op: action, reason: d.note || null, proposalId: id }));
   await write(c.env, st);
   return json({ ok: true, status: action === "approve" ? "approved" : "rejected" });
+}
+
+async function todoCloseStatements(c, row, payload, d, t, id) {
+  if (!row.todo_id) return [];
+  const td = await c.env.DB.prepare("SELECT * FROM todos WHERE id = ?").bind(row.todo_id).first();
+  const closedByBatch = (payload.todo_done || []).some((x) => x.id === row.todo_id);
+  if (!td || td.status !== "needs_review" || closedByBatch || d.close_todo === false) return [];
+  return [
+    c.env.DB.prepare("UPDATE todos SET status = 'done', closed_at = ?, outcome = COALESCE(NULLIF(outcome, ''), ?), updated_at = ?, updated_by = ?, version = version + 1 WHERE id = ?").bind(t, `See suggestion #${id}.`, t, self(c), td.id),
+    c.env.DB.prepare("INSERT INTO todo_events (todo_id, at, actor, kind, data) VALUES (?, ?, ?, 'status', ?)").bind(td.id, t, self(c), J({ from: "needs_review", to: "done", proposal: id })),
+  ];
+}
+
+// ---------------------------------------------------------------- editing (#5)
+/** Validate an edit payload against the caller's scope; with dryRun, also apply it in memory. */
+async function checkEdit(c, g, payload, { dryRun }) {
+  if (!payload || !Array.isArray(payload.ops) || !payload.ops.length) fail(400, "payload.ops must be a non-empty list");
+  const b = await scoped(c, g);
+  const { people, families } = referencedIds(payload.ops);
+  for (const pid of people) {
+    const p = b.people[pid];
+    if (!p) fail(403, `Person ${pid} isn't in a tree you can see.`);
+    if (p.private) fail(403, `${pid} is shown to you as a name only; you can't change their details.`);
+  }
+  for (const fid of families) if (!b.families[fid]) fail(403, `Family ${fid} isn't in a tree you can see.`);
+  if (dryRun) {
+    const { state } = await loadEditable(c.env);
+    try { applyOps(state, payload.ops, { actor: self(c) }); }
+    catch (e) { if (e instanceof OpError) fail(422, e.message); throw e; }
+  }
+}
+
+async function edit(c) {
+  const d = await body(c);
+  const g = grantOrFail(c, d.tree);
+  if (c.access.kind === "agent") fail(403, "Agents suggest changes (POST /api/proposals with kind \"edit\"); they don't edit directly.");
+  if (!can.review(g)) fail(403, "Only editors can change the tree directly. Use \"Suggest a change\" instead.");
+  if (!String(d.reason || "").trim()) fail(400, "Say why (reason) — it's kept in the history.");
+  await checkEdit(c, g, d, { dryRun: false });
+  try {
+    const res = await applyAndCommit(c.env, d.ops, { actor: self(c), actorKind: "person", reason: d.reason, sources: d.sources });
+    return json({ ok: true, batch: res.batchId, touched: res.touched, created: res.created });
+  } catch (e) {
+    if (e instanceof OpError) fail(422, e.message);
+    if (isConflict(e)) fail(409, "Someone changed this while you were editing. Reload and try again.");
+    throw e;
+  }
+}
+
+async function history(c) {
+  const g = grantOrFail(c);
+  const b = await scoped(c, g);
+  const id = c.url.searchParams.get("id");
+  let rows;
+  if (id) {
+    if (!b.people[id] && !b.families[id]) fail(404, "Not found.");
+    const fams = b.people[id] ? [...(b.people[id].famc || []), ...(b.people[id].fams || [])] : [];
+    const ids = [id, ...fams];
+    rows = (await c.env.DB.prepare(`SELECT * FROM changes WHERE entity_id IN (${ids.map(() => "?").join(",")}) ORDER BY id DESC LIMIT 200`).bind(...ids).all()).results;
+  } else {
+    if (!can.review(g)) fail(403, "Only editors can see the full history.");
+    rows = (await c.env.DB.prepare("SELECT * FROM changes WHERE entity_type IN ('person','family','source','config') ORDER BY id DESC LIMIT 200").all()).results;
+  }
+  // never show snapshots of entities outside the caller's scope
+  const visible = (r) => r.entity_type === "person" ? !!b.people[r.entity_id] || c.access.isOwner
+    : r.entity_type === "family" ? !!b.families[r.entity_id] || c.access.isOwner
+    : c.access.isOwner || can.review(g);
+  const batches = {};
+  for (const r of rows.filter(visible)) {
+    const k = r.batch_id || `c${r.id}`;
+    (batches[k] = batches[k] || { batch: r.batch_id, at: r.at, actor: r.actor, op: r.op, reason: r.reason, proposal: r.proposal_id, entities: [] })
+      .entities.push({ type: r.entity_type, id: r.entity_id, change: r.before == null ? "created" : r.after == null ? "deleted" : "updated", before: c.access.isOwner || can.review(g) ? parse(r.before) : undefined, after: c.access.isOwner || can.review(g) ? parse(r.after) : undefined });
+  }
+  return json({ history: Object.values(batches) });
+}
+
+async function revert(c, batchId) {
+  const g = grantOrFail(c);
+  if (!can.review(g) || c.access.kind === "agent") fail(403, "Only editors can revert changes.");
+  const d = await c.request.json().catch(() => ({}));
+  try {
+    const r = await revertBatch(c.env, batchId, { actor: self(c), actorKind: "person", reason: d.reason });
+    if (!r) fail(404, "No such change.");
+    return json({ ok: true, ...r });
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    if (isConflict(e) || e.conflict) fail(409, "Those records have changed since; revert the later changes first.");
+    throw e;
+  }
+}
+
+// ---------------------------------------------------------------- comments (#6)
+async function listComments(c) {
+  const g = grantOrFail(c);
+  const b = await scoped(c, g);
+  const type = c.url.searchParams.get("type") || "person", id = c.url.searchParams.get("id");
+  if (!id || !(type === "person" ? b.people[id] : b.families[id])) fail(404, "Not found.");
+  const rows = (await c.env.DB.prepare("SELECT * FROM comments WHERE entity_type = ? AND entity_id = ? ORDER BY id").bind(type, id).all()).results;
+  return json({ comments: rows });
+}
+async function addComment(c) {
+  const d = await body(c);
+  const g = grantOrFail(c, d.tree);
+  const b = await scoped(c, g);
+  const type = d.type || "person";
+  if (!["person", "family"].includes(type) || !d.id || !(type === "person" ? b.people[d.id] : b.families[d.id])) fail(404, "Not found.");
+  const text = String(d.body || "").trim();
+  if (!text) fail(400, "Empty comment.");
+  const row = await c.env.DB.prepare("INSERT INTO comments (entity_type, entity_id, fid, author, body, created_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING *")
+    .bind(type, d.id, d.fid || null, self(c), text.slice(0, 8000), now()).first();
+  return json({ comment: row }, 201);
+}
+async function resolveComment(c, id) {
+  const row = await c.env.DB.prepare("SELECT * FROM comments WHERE id = ?").bind(id).first();
+  if (!row) fail(404, "Not found.");
+  const g = grantOrFail(c);
+  const b = await scoped(c, g);
+  if (!(row.entity_type === "person" ? b.people[row.entity_id] : b.families[row.entity_id])) fail(404, "Not found.");
+  if (row.author !== self(c) && !can.review(g)) fail(403, "Only the author or an editor can resolve a comment.");
+  await c.env.DB.prepare("UPDATE comments SET resolved_at = ?, resolved_by = ? WHERE id = ?").bind(now(), self(c), id).run();
+  return json({ ok: true });
+}
+
+// ---------------------------------------------------------------- uploads (#7)
+const UPLOAD_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "application/pdf": "pdf" };
+async function upload(c) {
+  const g = grantOrFail(c);
+  if (!c.env.MEDIA) fail(500, "No R2 binding named MEDIA.");
+  const type = (c.request.headers.get("Content-Type") || "").split(";")[0].trim();
+  if (!UPLOAD_TYPES[type]) fail(415, "Upload a JPEG, PNG, WebP, GIF or PDF.");
+  const len = +(c.request.headers.get("Content-Length") || 0);
+  if (len > 20 * 1024 * 1024) fail(413, "Files are limited to 20 MB.");
+  const buf = await c.request.arrayBuffer();
+  if (buf.byteLength > 20 * 1024 * 1024) fail(413, "Files are limited to 20 MB.");
+  const name = String(c.url.searchParams.get("name") || "upload").replace(/[^\w.-]+/g, "-").slice(-80);
+  const key = `uploads/${now().slice(0, 7)}/${crypto.randomUUID().slice(0, 8)}-${name.replace(/\.[^.]*$/, "")}.${UPLOAD_TYPES[type]}`;
+  await c.env.MEDIA.put(key, buf, { httpMetadata: { contentType: type } });
+  await c.env.DB.prepare("INSERT INTO uploads (key, uploaded_by, uploaded_at, content_type, bytes, original_name) VALUES (?, ?, ?, ?, ?, ?)").bind(key, self(c), now(), type, buf.byteLength, name).run();
+  return json({ key, canAttach: can.review(g) }, 201);
+}
+
+// ---------------------------------------------------------------- export (#8)
+async function exportGed(c) {
+  const g = grantOrFail(c);
+  if (!can.review(g)) fail(403, "Only editors and the owner can export.");
+  const b = await scoped(c, g); // exactly what the caller can see, living people as their view shows them
+  const ged = exportGedcom(b, { title: b.scope.treeName, now: new Date() });
+  return new Response(ged, { headers: { "Content-Type": "text/plain; charset=utf-8", "Content-Disposition": `attachment; filename="${g.tree_id}-${now().slice(0, 10)}.ged"`, "Cache-Control": "private, no-store" } });
+}
+async function exportJson(c) {
+  if (!c.access.isOwner) fail(403, "Only the owner can export the whole database.");
+  const st = await loadState(c.env);
+  const cfg = Object.fromEntries((await c.env.DB.prepare("SELECT key, value FROM config").all()).results.map((r) => [r.key, parse(r.value)]));
+  return json({ format: "family-tree-export/1", exported_at: now(), raw: st.raw, config: cfg, research: st.research },
+    200, { "Content-Disposition": `attachment; filename="family-tree-${now().slice(0, 10)}.json"`, "Cache-Control": "private, no-store" });
+}
+
+// ---------------------------------------------------------------- graph queries (#15)
+async function graph(c, kind) {
+  const g = grantOrFail(c);
+  const b = await scoped(c, g); // only over what the caller can see: a path never passes through hidden people
+  const idx = Graph.buildIndex(b.people, b.families);
+  const sp = c.url.searchParams;
+  if (kind === "path") {
+    const from = sp.get("from") || c.access.personId || b.home, to = sp.get("to");
+    if (!b.people[from] || !b.people[to]) fail(404, "Pick two people you can see.");
+    const r = Graph.relationshipPath(idx, from, to);
+    return json(Object.assign({ from, to }, r, r.found ? { sentence: Graph.explain(r, b.people) } : {}));
+  }
+  const id = sp.get("id"), n = Math.min(+sp.get("generations") || 4, 12);
+  if (!b.people[id]) fail(404, "Not found.");
+  return json({ id, [kind]: kind === "ancestors" ? Graph.ancestors(idx, id, n) : Graph.descendants(idx, id, n) });
+}
+
+async function linkMe(c) {
+  const d = await body(c);
+  const g = grantOrFail(c, d.tree);
+  const b = await scoped(c, g);
+  if (d.person_id && !b.people[d.person_id]) fail(404, "Pick someone in a tree you can see.");
+  await write(c.env, [
+    c.env.DB.prepare("INSERT INTO members (principal, kind, person_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(principal) DO UPDATE SET person_id = excluded.person_id")
+      .bind(self(c), c.access.kind === "agent" ? "agent" : "person", d.person_id || null, now()),
+    audit(c.env, { actor: self(c), actorKind: actorKind(c), entityType: "member", entityId: self(c), op: "link-person", after: { person_id: d.person_id || null } }),
+  ]);
+  return json({ ok: true });
 }
 
 // ---------------------------------------------------------------- admin (owner only)
@@ -418,7 +632,32 @@ async function adminGrant(c, method) {
     stmt = c.env.DB.prepare("DELETE FROM grants WHERE principal = ? AND tree_id = ?").bind(principal, d.tree_id);
   }
   await write(c.env, [stmt, audit(c.env, { actor: self(c), actorKind: "person", entityType: "grant", entityId: `${principal}|${d.tree_id}`, op: method === "PUT" ? "put" : "delete", after: d })]);
-  return json({ ok: true });
+  let access = null;
+  if (method === "PUT" && d.invite && principal.includes("@")) access = await accessGroup(c.env, principal, "add");
+  if (method === "DELETE" && d.revoke_access) {
+    const left = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM grants WHERE principal = ?").bind(principal).first();
+    if (!left.n) access = await accessGroup(c.env, principal, "remove");
+  }
+  return json({ ok: true, access });
+}
+
+/** Optional: keep the Access group behind the app's policy in sync with invites. Needs CF_API_TOKEN (a token with
+ *  only "Access: Organizations, Identity Providers, and Groups: Edit"), CF_ACCOUNT_ID and ACCESS_GROUP_ID. */
+async function accessGroup(env, email, action) {
+  if (!env.CF_API_TOKEN || !env.CF_ACCOUNT_ID || !env.ACCESS_GROUP_ID) {
+    return { automated: false, todo: `Add ${email} to the Access group or policy for this app (Zero Trust → Access → ${action === "add" ? "add" : "remove"} the email). Automate this by setting CF_API_TOKEN, CF_ACCOUNT_ID and ACCESS_GROUP_ID.` };
+  }
+  const url = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/access/groups/${env.ACCESS_GROUP_ID}`;
+  const h = { Authorization: `Bearer ${env.CF_API_TOKEN}`, "Content-Type": "application/json" };
+  const cur = await (await fetch(url, { headers: h })).json();
+  if (!cur.success) return { automated: true, ok: false, error: "Couldn't read the Access group." };
+  const g = cur.result;
+  const has = (g.include || []).some((r) => r.email && r.email.email.toLowerCase() === email);
+  if ((action === "add") === has) return { automated: true, ok: true, unchanged: true };
+  const include = action === "add" ? [...(g.include || []), { email: { email } }] : (g.include || []).filter((r) => !(r.email && r.email.email.toLowerCase() === email));
+  if (!include.length) return { automated: true, ok: false, error: "Refusing to leave the Access group empty." };
+  const res = await (await fetch(url, { method: "PUT", headers: h, body: JSON.stringify({ name: g.name, include, exclude: g.exclude || [], require: g.require || [] }) })).json();
+  return { automated: true, ok: !!res.success };
 }
 
 // ---------------------------------------------------------------- media

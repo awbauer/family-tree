@@ -83,6 +83,38 @@ curl -X PUT $SITE/api/admin/members/agent%3Aresearch -d '{"kind":"agent","displa
 
 The person must also be allowed through the Access policy. A grant without Access gets nothing, and Access without a grant gets an empty "no trees shared with you" page.
 
+## Editing, history and undo
+
+Editors edit people and families on each person's page (facts, names, parents, spouses, children, photos, merging duplicates, reviewing facts). Every save needs a reason, is recorded in `changes` with before and after snapshots, and can be undone from the page's History. An undo is refused if later changes touched the same records; undo those first. Members and agents see "Suggest a change": the same tools, but the result goes to Research → Suggestions for an editor. All of these use one op format (docs/design/edit-ops.md).
+
+Photos and documents uploaded in the app go to R2 under `uploads/`, after the browser strips location and camera data from images. They're only served once attached to someone the viewer can see.
+
+## Invites
+
+Granting someone a tree on the **Sharing** page (owner only) also needs them allowed through Cloudflare Access. To have the app do that automatically, create an API token with only *Access: Organizations, Identity Providers, and Groups: Edit*, make an Access group used by the app's policy, then:
+
+```sh
+npx wrangler secret put CF_API_TOKEN -c wrangler.local.jsonc     # ⚠ ask
+```
+
+and set `CF_ACCOUNT_ID` and `ACCESS_GROUP_ID` in `wrangler.local.jsonc` vars. Without them, the app tells you the manual step after each grant.
+
+## Export
+
+- **GEDCOM** (editors and owner): Research → "Download GEDCOM" exports exactly what you can see, with living people as your view shows them.
+- **JSON** (owner): everything, in the `family-tree-export/1` format that `tools/import_hints.py` reads.
+
+## Ancestry hints (after cutover)
+
+When you've added things in Ancestry, export a fresh GEDCOM and run:
+
+```sh
+python3 tools/import_hints.py new-export.ged --dry-run hints.json   # look first
+python3 tools/import_hints.py new-export.ged --submit               # ⚠ ask: sends suggestions to the review queue
+```
+
+It applies the same `grafts` and `edits` as the original import. It suggests only additions (new people, facts, names, citations, sources) and flags conflicting dates or places as CONFLICT. It never deletes. Already-submitted suggestions are remembered in `family-data/hints-ledger.json`.
+
 ## To-dos and the review queue
 
 To-dos live in D1 (`/api/todos`). Each has a priority, a status (`open → in_progress → needs_review → done` or `wont_do`), an assignee (a person's email, or `agent:<name>` / `service:<token>`), an outcome and a history. Anyone with a grant can add to-dos and take unassigned ones. Editors assign, close and edit them. Agents can't close their own work: submitting research moves the to-do to **needs_review**, and an editor approves the suggestion (Research → Suggestions). Approving applies the findings, log, statuses and new to-dos and closes the to-do. Rejecting sends it back to the assignee.

@@ -1,6 +1,12 @@
 // A D1 + R2 + Assets stand-in for tests, backed by Node's built-in SQLite (node:sqlite).
 import { DatabaseSync } from "node:sqlite";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+
+/** Apply every migrations/*.sql in order. */
+export function migrate(db, root) {
+  for (const f of readdirSync(join(root, "migrations")).filter((x) => x.endsWith(".sql")).sort()) db.execFile(join(root, "migrations", f));
+}
 
 class Stmt {
   constructor(db, sql) { this.db = db; this.sql = sql; this.params = []; }

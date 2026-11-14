@@ -4,6 +4,7 @@
     python3 tools/agent_api.py queue                       # what's assigned to me, then what's unassigned
     python3 tools/agent_api.py claim 42                    # take to-do 42 (assigns it to me, status in_progress)
     python3 tools/agent_api.py submit batch.json --todo 42 --rationale "..."   # research for review; to-do -> needs_review
+    python3 tools/agent_api.py suggest-edit ops.json --reason "..." [--todo 42]   # tree edits (docs/design/edit-ops.md)
     python3 tools/agent_api.py comment 42 "Searched X, nothing; trying Y next"
     python3 tools/agent_api.py release 42                  # give it back (unassign, status open)
     python3 tools/agent_api.py todos [--status active] [--assignee me]
@@ -100,6 +101,17 @@ def main(argv):
             body["todo_id"] = int(opt(args, "--todo"))
         p = call("POST", "proposals", body)["proposal"]
         print(f"Submitted suggestion #{p['id']} for review" + (f" (to-do #{p['todo_id']} is now needs_review)" if p.get("todo_id") else ""))
+    elif cmd == "suggest-edit":
+        doc = json.loads(open(args[0]).read())
+        ops = doc["ops"] if isinstance(doc, dict) else doc
+        reason = opt(args, "--reason") or (doc.get("reason") if isinstance(doc, dict) else None)
+        if not reason:
+            sys.exit("--reason is required: say what the evidence is")
+        body = {"kind": "edit", "payload": {"ops": ops, "reason": reason, "sources": doc.get("sources") if isinstance(doc, dict) else None}, "rationale": reason}
+        if opt(args, "--todo"):
+            body["todo_id"] = int(opt(args, "--todo"))
+        p = call("POST", "proposals", body)["proposal"]
+        print(f"Submitted edit suggestion #{p['id']} ({len(ops)} ops) for review")
     elif cmd == "proposals":
         for p in call("GET", f"proposals?status={opt(args, '--status', 'open')}")["proposals"]:
             b = p["payload"]

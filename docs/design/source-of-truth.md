@@ -1,6 +1,6 @@
 # Design: the app as the source of truth
 
-Status: **phase 1 (foundation) built**, plus to-dos with assignees and the research-suggestion queue; cutover not yet run. Phases below are tracked as GitHub issues.
+Status: **all phases built** (PRs #14 and the follow-up for #5–#10, plus graph queries #15); cutover not yet run. Phases are tracked as GitHub issues.
 
 ## Decision
 

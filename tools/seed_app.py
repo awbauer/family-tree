@@ -60,6 +60,13 @@ def main():
                 "research_log", "todos", "todo_events", "proposals", "trees", "changes"):
         out.append(f"DELETE FROM {tbl};")
 
+    def assign_fids(ent):  # stable fact ids for events and names (see worker/ops.js assignFids)
+        for i, ev in enumerate(ent.get("events", []), 1):
+            ev.setdefault("fid", f"e{i}")
+        for i, nm in enumerate(ent.get("names", []), 1):
+            nm.setdefault("fid", f"n{i}")
+    for ent in list(raw["people"].values()) + list(raw["families"].values()):
+        assign_fids(ent)
     for tbl, coll in (("people", raw["people"]), ("families", raw["families"]), ("sources", raw["sources"]), ("media", raw["media"])):
         for k, v in coll.items():
             out.append(f"INSERT INTO {tbl} (id, data, updated_at, updated_by) VALUES ({q(k)}, {j(v)}, {q(t)}, {q(who)});")
