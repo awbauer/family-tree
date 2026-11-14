@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""Block private family data from reaching git (or a PR description).
+
+    python3 tools/check_privacy.py                 # check staged changes (the pre-commit hook runs this)
+    python3 tools/check_privacy.py --file msg.txt  # check any text: commit message, PR body, issue comment
+    echo "$TEXT" | python3 tools/check_privacy.py --file -
+
+Fails (exit 1) if:
+  - a staged path is private: family-data/, build/, *.ged outside example/, wrangler.local.jsonc,
+    .dev.vars, *.zip, *.sql outside worker/
+  - added lines or the given text contain a UUID or a 64-hex string (D1 database_id, Access AUD tag)
+  - added lines or the given text contain the full name of anyone in your private GEDCOM
+    (family-data/*.ged), except names that also appear in the fictional example family
+
+Enable the hooks once per clone:  git config core.hooksPath .githooks   (npm install does this)
+"""
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+PRIVATE_PATHS = [
+    (re.compile(r"^family-data/"), "private data folder"),
+    (re.compile(r"^build(-[^/]*)?/"), "build output (contains your data)"),
+    (re.compile(r"^(?!example/).*\.ged$", re.I), "GEDCOM file"),
+    (re.compile(r"(^|/)wrangler\.local\.jsonc$"), "your real Cloudflare IDs"),
+    (re.compile(r"(^|/)\.dev\.vars$"), "local secrets"),
+    (re.compile(r"\.zip$", re.I), "archive (could hold anything)"),
+    (re.compile(r"^(?!worker/).*\.sql$", re.I), "SQL dump"),
+    (re.compile(r"^site/(family\.json|data\.js)$"), "built data in the public site folder"),
+]
+ID_PATTERNS = [
+    (re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I), "UUID (D1 database_id?)"),
+    (re.compile(r"\b[0-9a-f]{64}\b", re.I), "64-hex string (Access AUD tag?)"),
+]
+# Files whose content is allowed to contain hashes/ids (lockfiles carry integrity hashes, not UUIDs, but be safe).
+CONTENT_EXEMPT = re.compile(r"(^|/)package-lock\.json$")
+
+
+def names_in(ged):
+    out = set()
+    if not ged.exists():
+        return out
+    for line in ged.read_text(encoding="utf-8-sig", errors="replace").splitlines():
+        m = re.match(r"\s*1 NAME (.*?)\s*/([^/]+)/", line)
+        if not m:
+            continue
+        given = [g for g in re.sub(r"\(.*?\)", " ", m.group(1)).split() if re.match(r"\w", g)]
+        surname = re.sub(r"\(.*?\)", " ", m.group(2)).strip()
+        if not given or not surname or given[0].lower() in ("unknown", "nn"):
+            continue
+        out.add(f"{given[0]} {surname}")
+        if len(given) > 1:
+            out.add(f"{' '.join(given)} {surname}")
+    return out
+
+
+def private_names():
+    names = set()
+    for ged in (ROOT / "family-data").glob("*.ged"):
+        names |= names_in(ged)
+    for ged in (ROOT / "example").glob("*.ged"):
+        names -= names_in(ged)
+    return names
+
+
+def scan_text(text, where, names_re):
+    problems = []
+    for pat, why in ID_PATTERNS:
+        for m in pat.finditer(text):
+            problems.append(f"{where}: {why}: {m.group(0)[:12]}…")
+    if names_re:
+        for m in names_re.finditer(text):
+            problems.append(f"{where}: full name of someone in your private tree: {m.group(0)!r}")
+    return problems
+
+
+def names_regex():
+    names = private_names()
+    if not names:
+        return None
+    return re.compile(r"(?<!\w)(" + "|".join(sorted(map(re.escape, names), key=len, reverse=True)) + r")(?!\w)", re.I)
+
+
+def staged():
+    git = lambda *a: subprocess.run(["git", *a], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    problems = []
+    files = [f for f in git("diff", "--cached", "--name-only", "--diff-filter=ACMR").splitlines() if f]
+    for f in files:
+        for pat, why in PRIVATE_PATHS:
+            if pat.search(f):
+                problems.append(f"{f}: {why} must never be committed")
+    nre = names_regex()
+    for f in files:
+        if CONTENT_EXEMPT.search(f):
+            continue
+        added = "\n".join(l[1:] for l in git("diff", "--cached", "-U0", "--", f).splitlines()
+                          if l.startswith("+") and not l.startswith("+++"))
+        problems += scan_text(added, f, nre)
+    return problems
+
+
+def main(argv):
+    if "--file" in argv:
+        src = argv[argv.index("--file") + 1]
+        text = sys.stdin.read() if src == "-" else Path(src).read_text()
+        problems = scan_text(text, "text", names_regex())
+    else:
+        problems = staged()
+    if problems:
+        print("PRIVACY CHECK FAILED. Nothing from your private data may leave this machine:", file=sys.stderr)
+        for p in problems:
+            print("  - " + p, file=sys.stderr)
+        print("Unstage or edit, then try again. (Do not bypass with --no-verify.)", file=sys.stderr)
+        sys.exit(1)
+    print("privacy check: ok")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

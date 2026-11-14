@@ -16,7 +16,9 @@ worker/          Cloudflare Worker: serves /api/tree from D1, /media/* from R2, 
 tools/
   build.py       GEDCOM + research.json → build/family.json + build/seed.sql
   serve.py       local preview (http://localhost:8000) without Cloudflare
-  merge_research.py  fold a batch of research findings into research.json
+  merge_research.py  validate + merge a research batch into research.json
+  check_privacy.py   pre-commit guard against leaking family data
+AGENTS.md, docs/agents/  instructions for AI agents (CLAUDE.md imports AGENTS.md)
 example/         a fictional family to try it out and to copy from
 family-data/     ← YOUR private data (git-ignored): *.ged, research.json, places.json, media/
 ```
@@ -43,18 +45,22 @@ Requires Python 3.9+ only. No pip packages.
 You need a Cloudflare account, a domain on Cloudflare, and Node 18+.
 
 ```sh
-npm install
+npm install                                   # also enables the privacy git hooks
 npx wrangler login
-npx wrangler d1 create family-tree            # copy the database_id into wrangler.jsonc
+cp wrangler.jsonc wrangler.local.jsonc        # git-ignored; your real IDs go here, never in wrangler.jsonc
+npx wrangler d1 create family-tree            # copy the database_id into wrangler.local.jsonc
 npx wrangler r2 bucket create family-tree-media   # optional, for photos
 python3 tools/build.py
 npm run db:load                                # loads build/seed.sql into D1 (full replace)
+npm run db:counts                              # check people / families / findings
 ```
+
+All npm scripts pass `-c wrangler.local.jsonc`, so the tracked `wrangler.jsonc` stays a placeholder template.
 
 Then protect it with **Cloudflare Access** (Zero Trust → Access → Applications → *Self-hosted*):
 
 1. Create an application for the hostname you'll use (e.g. `family.example.com`) and add a policy allowing your family's emails.
-2. Copy the application's **Audience (AUD) tag** and your **team domain** (`<team>.cloudflareaccess.com`) into `ACCESS_AUD` and `ACCESS_TEAM_DOMAIN` in `wrangler.jsonc`.
+2. Copy the application's **Audience (AUD) tag** and your **team domain** (`<team>.cloudflareaccess.com`) into `ACCESS_AUD` and `ACCESS_TEAM_DOMAIN` in `wrangler.local.jsonc`.
 3. Add the hostname as a custom domain for the Worker (Workers → family-tree → Settings → Domains), then run `npm run deploy`.
 
 `workers_dev` is off, so the only way in is the Access-protected domain. Even if it were on, the Worker verifies the Access JWT itself (signature, audience, issuer, expiry) and answers **403** to anything else. The static app shell is public-safe because it contains no data.
@@ -82,7 +88,22 @@ Then protect it with **Cloudflare Access** (Zero Trust → Access → Applicatio
 | `place_rules` | `[{pattern, before, message}]` flags anachronistic place names |
 | `methodology` | text for the Research overview |
 
-`tools/merge_research.py batch.json` merges a batch of findings, statuses, stories and to-dos (same shape, plus `"branch"`) into `family-data/research.json`. It's handy when a research assistant, human or AI, works one branch at a time.
+| `todo_done` | closed to-dos with their `outcome` (written by `merge_research.py`) |
+| `research_log` | every search tried, including nil results, so nobody repeats it (written by `merge_research.py`) |
+
+Don't hand-edit findings, statuses, to-dos or media. Write a **batch** file (see `example/batch-example.json`) and run `tools/merge_research.py --check batch.json`, then `tools/merge_research.py batch.json`. The merge checks that every person ID exists in your GEDCOM and every finding has a citation, and it's safe to re-run.
+
+## Working with AI agents
+
+The repo is set up for agents (Claude Code, Codex, Cursor and others) to do both code work and research:
+
+- **[AGENTS.md](AGENTS.md)**: the rules every agent follows (privacy, no invented records, what needs your OK). `CLAUDE.md` imports it.
+- **[docs/agents/research-protocol.md](docs/agents/research-protocol.md)**: how to research, weigh evidence, cite, and record results as batches.
+- **[docs/agents/operations.md](docs/agents/operations.md)**: build, load, deploy, Access, photos, backups.
+- **`.claude/skills/`**: `research` and `publish` skills for Claude Code. **`.claude/settings.json`** asks before remote loads, deploys and pushes.
+- **`tools/check_privacy.py`** runs as a pre-commit and commit-msg hook. It blocks private paths, Cloudflare IDs, and the full name of anyone in your private GEDCOM. Run it on PR text too: `echo "$BODY" | python3 tools/check_privacy.py --file -`.
+
+To run several research agents at once, give each one a branch. Each writes its own `family-data/batches/<date>-<branch>-<agent>.json`, and one person or agent merges them.
 
 ## places.json
 
@@ -92,7 +113,7 @@ The map groups raw GEDCOM place strings into canonical places using regexes: `{"
 
 - The site shows living people. Access is what protects them; `noindex` is just belt and braces.
 - `.assetsignore` keeps a stray `site/family.json` from being uploaded as a public static file.
-- GEDCOM, `family-data/`, `build/` and `.dev.vars` are git-ignored. Check `git status` before you push anyway.
+- GEDCOM, `family-data/`, `build/`, `wrangler.local.jsonc` and `.dev.vars` are git-ignored, and the pre-commit hook blocks them even with `git add -f`. Check `git status` before you push anyway.
 
 ## License
 

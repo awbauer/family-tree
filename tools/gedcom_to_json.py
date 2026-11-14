@@ -2,7 +2,7 @@
 """Convert an Ancestry GEDCOM export into the site's data file.
 
 Usage:
-    python3 tools/gedcom_to_json.py data/bauer-family-tree.ged
+    python3 tools/gedcom_to_json.py family-data/your-tree.ged   (build.py imports this; you rarely run it directly)
 
 Writes data/tree.json (raw, from GEDCOM). Research findings live separately in
 data/research.json and are merged at build time by tools/build.py, so you can
@@ -188,4 +188,4 @@ def main(ged):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else ROOT / "data" / "bauer-family-tree.ged")
+    main(sys.argv[1] if len(sys.argv) > 1 else sys.exit(__doc__))
