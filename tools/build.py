@@ -23,6 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gedcom_to_json as g2j  # noqa: E402
+import graft  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -145,6 +146,15 @@ def best_event(events, typ):
 def main(ged_path, data_dir, out_dir):
     raw = g2j.parse(ged_path)
     research = json.loads((data_dir / "research.json").read_text()) if (data_dir / "research.json").exists() else {}
+    for gcfg in research.get("grafts", []):
+        gpath = data_dir / gcfg["gedcom"]
+        if not gpath.exists():
+            sys.exit(f"graft: {gpath} not found")
+        try:
+            stats = graft.graft(raw, g2j.parse(gpath), gcfg)
+        except ValueError as e:
+            sys.exit(str(e))
+        print("Grafted " + ", ".join(f"{k}={v}" for k, v in stats.items()))
     places = json.loads((data_dir / "places.json").read_text()) if (data_dir / "places.json").exists() else {}
     P, F, S = raw["people"], raw["families"], raw["sources"]
     overrides = research.get("overrides", {})
@@ -570,4 +580,17 @@ if __name__ == "__main__":
     geds = sorted(data_dir.glob("*.ged"))
     if not geds:
         sys.exit(f"No .ged file found in {data_dir}")
-    main(geds[0], data_dir, Path(a.out))
+    rj = data_dir / "research.json"
+    cfg = json.loads(rj.read_text()) if rj.exists() else {}
+    grafted = {g["gedcom"] for g in cfg.get("grafts", [])}
+    if cfg.get("gedcom"):
+        primary = data_dir / cfg["gedcom"]
+        if not primary.exists():
+            sys.exit(f'research.json "gedcom" names {primary.name}, which is not in {data_dir}')
+    else:
+        candidates = [g for g in geds if g.name not in grafted]
+        if len(candidates) != 1:
+            sys.exit(f"Found {len(candidates)} main .ged files in {data_dir} ({', '.join(g.name for g in candidates)}). "
+                     'Set "gedcom" in research.json to the main tree, and list the others under "grafts".')
+        primary = candidates[0]
+    main(primary, data_dir, Path(a.out))
