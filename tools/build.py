@@ -24,6 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gedcom_to_json as g2j  # noqa: E402
 import graft  # noqa: E402
+import edits  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -155,6 +156,19 @@ def main(ged_path, data_dir, out_dir):
         except ValueError as e:
             sys.exit(str(e))
         print("Grafted " + ", ".join(f"{k}={v}" for k, v in stats.items()))
+    aliases = {}
+    if research.get("edits"):
+        try:
+            aliases, elog = edits.apply_edits(raw, research["edits"])
+        except edits.EditError as e:
+            sys.exit(str(e))
+        edits.remap_research(research, aliases)
+        ov = research.get("overrides", {})
+        for old, new in aliases.items():
+            if old in ov:
+                ov.setdefault(new, ov.pop(old))
+        research["duplicates"] = [d for d in research.get("duplicates", []) if len(set(d["ids"])) > 1]
+        print(f"Applied {len(elog)} edits ({len(aliases)} people merged)")
     places = json.loads((data_dir / "places.json").read_text()) if (data_dir / "places.json").exists() else {}
     P, F, S = raw["people"], raw["families"], raw["sources"]
     overrides = research.get("overrides", {})
@@ -520,6 +534,7 @@ def main(ged_path, data_dir, out_dir):
         "home": home,
         "people": P, "families": F, "sources": S, "media": raw["media"],
         "issues": issues,
+        "aliases": aliases,
         "research": {k: v for k, v in research.items() if k not in ("overrides", "place_rules")},
         "places": {pl["key"]: {k: pl[k] for k in ("name", "lat", "lng")} for pl in gaz},
     }
