@@ -63,6 +63,8 @@ Then protect it with **Cloudflare Access** (Zero Trust → Access → Applicatio
 2. Copy the application's **Audience (AUD) tag** and your **team domain** (`<team>.cloudflareaccess.com`) into `ACCESS_AUD` and `ACCESS_TEAM_DOMAIN` in `wrangler.local.jsonc`.
 3. Add the hostname as a custom domain for the Worker (Workers → family-tree → Settings → Domains), then run `npm run deploy`.
 
+Prefer **Worker-level Access** (Workers & Pages → family-tree → Access), which covers every domain and preview URL the Worker has. Why the Worker still checks the JWT itself instead of using `ctx.access` is explained in [docs/agents/operations.md → Deployment considerations](docs/agents/operations.md#deployment-considerations-how-the-worker-checks-access).
+
 `workers_dev` is off, so the only way in is the Access-protected domain. Even if it were on, the Worker verifies the Access JWT itself (signature, audience, issuer, expiry) and answers **403** to anything else. The static app shell is public-safe because it contains no data.
 
 **Updating:** re-export the GEDCOM → `python3 tools/build.py` → `npm run db:load`. The load replaces everything, and research survives because it lives in `research.json`, keyed by GEDCOM IDs (Ancestry keeps them stable across exports). If you merge two people in your tree software, move research from the vanished ID to the survivor.
