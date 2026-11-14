@@ -13,3 +13,6 @@ build-*/
 site/family.json
 site/data.js
 .dev.vars
+
+# Your real Cloudflare IDs (copy of wrangler.jsonc with values filled in)
+wrangler.local.jsonc
