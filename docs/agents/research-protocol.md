@@ -14,8 +14,9 @@ How an agent (or a person) researches the tree and records results. It's a light
 4. **Write a batch** at `family-data/batches/YYYY-MM-DD-<branch>-<agent>.json`. The shape is in [`example/batch-example.json`](../../example/batch-example.json) and at the top of `tools/merge_research.py`.
 5. **Validate:** `python3 tools/merge_research.py --check family-data/batches/<file>.json`. Fix any errors.
 6. **Merge** (or hand the batch to the coordinator): `python3 tools/merge_research.py family-data/batches/<file>.json`.
-7. **Rebuild and look:** `python3 tools/build.py && python3 tools/serve.py`. Check the person page.
-8. **Report** to the owner what you found, what you didn't, and what needs a human (paywalled records, record orders, tree fixes). Loading into D1 is a separate step and needs the owner's OK (see [operations.md](operations.md)).
+7. **Archive the evidence:** `python3 tools/archive_sources.py` saves a private copy of every newly cited source (images, PDFs, pages) to `family-data/evidence/`. Sites that block scripts are listed as `blocked`; tell the owner which ones to save by hand. Never work around a block.
+8. **Rebuild and look:** `python3 tools/build.py && python3 tools/serve.py`. Check the person page.
+9. **Report** to the owner what you found, what you didn't, and what needs a human (paywalled records, record orders, tree fixes). Loading into D1 is a separate step and needs the owner's OK (see [operations.md](operations.md)).
 
 ## Recording results
 
