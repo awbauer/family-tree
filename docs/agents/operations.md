@@ -57,7 +57,7 @@ If you ever move off Static Assets (for example, the Worker serves the three `si
 
 ## Automatic deploys from GitHub (Workers Builds)
 
-Cloudflare builds and deploys the Worker on every push to `main`; no GitHub Actions. The repo holds no account IDs, so the build generates its config: `npm run deploy:ci` runs `tools/ci_config.mjs`, which writes `wrangler.ci.jsonc` (git-ignored) from the `wrangler.jsonc` template with your D1 id. It never includes `vars` and always sets `keep_vars`, so **variables you set in the dashboard survive every deploy**. Secrets are never touched by deploys either way.
+Cloudflare builds and deploys the Worker on every push to `main`; no GitHub Actions. **Status: connected** (trigger on `main` only, build command empty, deploy command `npm run deploy:ci`, `D1_DATABASE_ID` build variable set). Check builds in Workers & Pages → family-tree → Deployments. The repo holds no account IDs, so the build generates its config: `npm run deploy:ci` runs `tools/ci_config.mjs`, which writes `wrangler.ci.jsonc` (git-ignored) from the `wrangler.jsonc` template with your D1 id. It never includes `vars` and always sets `keep_vars`, so **variables you set in the dashboard survive every deploy**. Secrets are never touched by deploys either way.
 
 One-time setup in the dashboard (owner):
 
