@@ -41,6 +41,20 @@ After a new GEDCOM export: replace the `.ged` in `family-data/`, build, check wh
 4. Workers → family-tree → Settings → Domains: add the same hostname. `workers_dev` stays `false`.
 5. Deploy, then test: signed out → Access login page; signed in → site loads; `curl https://<host>/api/tree` without a cookie → redirected or 403.
 
+## Deployment considerations: how the Worker checks Access
+
+**Current design (deliberate):** the Worker verifies the Access JWT itself in `worker/index.js` (`authorize()`). It reads `Cf-Access-Jwt-Assertion` (falling back to the `CF_Authorization` cookie), checks the RS256 signature against `https://<team>/cdn-cgi/access/certs`, and checks audience, issuer, expiry and not-before. If `ACCESS_TEAM_DOMAIN` or `ACCESS_AUD` is unset, every `/api/*` and `/media/*` request gets a 403. It fails closed, so a forgotten route or a misconfigured policy publishes nothing.
+
+**Why not `ctx.access`?** Since August 2026, Workers protected by Access receive `ctx.access` (and `ctx.access.getIdentity()`), which removes the need to parse JWTs. It doesn't work here as built: this Worker serves `site/` as **Static Assets**, and Cloudflare documents that Workers with Static Assets run behind an internal router that **does not pass `ctx.access` to the user Worker**. Switching to it without other changes would make `ctx.access` always `undefined` and lock everyone out. See [ctx.access limitations](https://developers.cloudflare.com/workers/configuration/cloudflare-access/#ctxaccess-limitations).
+
+If you ever move off Static Assets (for example, the Worker serves the three `site/` files itself), you can replace `authorize()` with "no `ctx.access` → 403, and `ctx.access.aud` must equal `ACCESS_AUD`", drop the JWKS code and `ACCESS_TEAM_DOMAIN`, and use Wrangler's `access.dev` block for local testing instead of `ALLOW_UNAUTHENTICATED`.
+
+**Which Access setup:**
+
+- **Worker-level Access** (Workers & Pages → family-tree → **Access**, available since August 2026) attaches the policy to the Worker, so every route, custom domain, `workers.dev` and preview URL is covered, including ones added later. This is the better default. Use that application's AUD tag for `ACCESS_AUD`.
+- **Hostname-based Access** (Zero Trust → Access → Applications → Self-hosted) protects only the hostnames you list. Use it if you need WebSockets: Worker-level policies currently reject WebSocket upgrades with 403, which matters if you later add a live agent chat to the site.
+- Either way, keep the JWT check in the Worker. Access at the edge is the gate, and the Worker's own check is defense in depth that fails closed.
+
 ## Photos (R2)
 
 1. **Strip metadata first.** Phone photos carry GPS coordinates (a living relative's home). Use `exiftool -all= file.jpg` or `sips` re-export on macOS, and check with `exiftool file.jpg`.
