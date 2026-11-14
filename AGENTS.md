@@ -64,7 +64,7 @@ Free to do without asking: read anything, run `tools/build.py`, `tools/serve.py`
 - Python tools: standard library only, Python 3.9+. Site: plain JS/CSS with no build step. Worker: plain ES modules.
 - Test against the fictional family: `python3 tools/build.py --data example --out build-example && python3 tools/serve.py --data example`. If the owner's data exists locally, also run `python3 tools/build.py` and check the counts and issue summary didn't change unexpectedly.
 - The site shell in `site/` is public static content. It must never contain family data. Data comes only from `/api/tree`.
-- Keep `wrangler.jsonc` a placeholder template. Real values live in the git-ignored `wrangler.local.jsonc`, and all npm scripts use `-c wrangler.local.jsonc`.
+- Keep `wrangler.jsonc` a placeholder template with **no `vars` block** (runtime variables live in the Cloudflare dashboard; `keep_vars` protects them). Real IDs live in the git-ignored `wrangler.local.jsonc` for manual deploys; Workers Builds generates `wrangler.ci.jsonc` via `npm run deploy:ci`.
 - Branch, commit and open PRs against `main`. Keep PR text generic ("fix date parsing for dual-dated years"), never "fix Grandpa X's birth date".
 
 ## After cutover: the app is the source of truth

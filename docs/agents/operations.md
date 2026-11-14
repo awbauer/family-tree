@@ -11,7 +11,7 @@ npx wrangler whoami               # confirm the right Cloudflare account
 cp wrangler.jsonc wrangler.local.jsonc
 ```
 
-Fill in `wrangler.local.jsonc` (git-ignored): `database_id` from `npx wrangler d1 list`, and `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` from the Access application. Every npm script passes `-c wrangler.local.jsonc`; running bare `npx wrangler …` without `-c` uses the placeholder template and will fail or hit the wrong thing.
+Fill in `wrangler.local.jsonc` (git-ignored) with the `database_id` from `npx wrangler d1 list`. Don't add a `vars` block: `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` and `OWNER_EMAIL` are set in the dashboard (see Automatic deploys), and local development reads `.dev.vars`. Every npm script passes `-c wrangler.local.jsonc`; running bare `npx wrangler …` without `-c` uses the placeholder template and will fail or hit the wrong thing.
 
 Why a separate file: the tracked `wrangler.jsonc` stays a clean template for anyone who forks the repo. Strictly speaking a D1 ID and an AUD tag aren't secrets (they're useless without your Cloudflare credentials or an Access login), but they identify your account and don't belong in a public template.
 
@@ -55,6 +55,27 @@ If you ever move off Static Assets (for example, the Worker serves the three `si
 - **Hostname-based Access** (Zero Trust → Access → Applications → Self-hosted) protects only the hostnames you list. Use it if you need WebSockets: Worker-level policies currently reject WebSocket upgrades with 403, which matters if you later add a live agent chat to the site.
 - Either way, keep the JWT check in the Worker. Access at the edge is the gate, and the Worker's own check is defense in depth that fails closed.
 
+## Automatic deploys from GitHub (Workers Builds)
+
+Cloudflare builds and deploys the Worker on every push to `main`; no GitHub Actions. The repo holds no account IDs, so the build generates its config: `npm run deploy:ci` runs `tools/ci_config.mjs`, which writes `wrangler.ci.jsonc` (git-ignored) from the `wrangler.jsonc` template with your D1 id. It never includes `vars` and always sets `keep_vars`, so **variables you set in the dashboard survive every deploy**. Secrets are never touched by deploys either way.
+
+One-time setup in the dashboard (owner):
+
+1. **Workers & Pages → family-tree → Settings → Variables and Secrets.** Set `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `OWNER_EMAIL` (text), plus `CF_ACCOUNT_ID` and `ACCESS_GROUP_ID` and the `CF_API_TOKEN` secret if you want automatic invites. These are the runtime values; they don't go in any file.
+2. **Settings → Builds → Connect.** Pick GitHub, install the Cloudflare app on the `family-tree` repo only, and choose branch `main`.
+   - Build command: *(empty)*
+   - Deploy command: `npm run deploy:ci`
+   - Root directory: `/`
+   - **Build variables:** `D1_DATABASE_ID` = the id from `npx wrangler d1 list`
+3. **Non-production branches:** turn branch builds off. If you want them, set the command to `npm run upload:ci`; version URLs stay off (`preview_urls: false`), and the Worker still checks Access.
+
+Things to know:
+
+- **Schema migrations are not applied by the build.** Before merging code that needs a new file in `migrations/`, run `npm run db:migrate` ⚠ ask. Otherwise the new code deploys against the old schema.
+- **The build deploys `main` as-is.** Merging is deploying, so review PRs accordingly.
+- **Never add a `vars` block** to `wrangler.jsonc` or `wrangler.local.jsonc`; listed variables overwrite dashboard values on deploy. Local development uses `.dev.vars`.
+- Manual deploys (`npm run deploy`) use `wrangler.local.jsonc`, which also has `keep_vars` and no vars, so they're safe too.
+
 ## Cutover: the app becomes the source of truth (one time)
 
 After this, nobody edits the GEDCOM-and-rebuild pipeline any more; changes happen in the app or arrive as suggestions.
@@ -67,7 +88,7 @@ npm run db:import                                         # loads build/seed-app
 npm run deploy                                            # the Worker that reads raw rows and derives  ⚠ ask
 ```
 
-Set `OWNER_EMAIL` in `wrangler.local.jsonc` before deploying. Trees come from `research.json → "trees"`. After `--cutover`, `npm run db:load` and `npm run db:import` refuse (`tools/guard_load.py`), so a full replace can't wipe app edits.
+Set `OWNER_EMAIL` (and the Access values) in the dashboard under Variables and Secrets before deploying; they are not kept in any config file. Trees come from `research.json → "trees"`. After `--cutover`, `npm run db:load` and `npm run db:import` refuse (`tools/guard_load.py`), so a full replace can't wipe app edits.
 
 Test the whole thing locally first: put `ALLOW_UNAUTHENTICATED=true` and `DEV_PRINCIPAL=you@example.com` in `.dev.vars`, then run `npm run db:migrate:local && npm run db:import:local && npm run dev`. Local D1 lives in `.wrangler/`, so delete `.wrangler/state` to start over.
 
@@ -97,7 +118,7 @@ Granting someone a tree on the **Sharing** page (owner only) also needs them all
 npx wrangler secret put CF_API_TOKEN -c wrangler.local.jsonc     # ⚠ ask
 ```
 
-and set `CF_ACCOUNT_ID` and `ACCESS_GROUP_ID` in `wrangler.local.jsonc` vars. Without them, the app tells you the manual step after each grant.
+and set `CF_ACCOUNT_ID` and `ACCESS_GROUP_ID` as variables in the dashboard. Without them, the app tells you the manual step after each grant.
 
 ## Export
 

@@ -55,12 +55,12 @@ npm run db:load                                # loads build/seed.sql into D1 (f
 npm run db:counts                              # check people / families / findings
 ```
 
-All npm scripts pass `-c wrangler.local.jsonc`, so the tracked `wrangler.jsonc` stays a placeholder template.
+All npm scripts pass `-c wrangler.local.jsonc`, so the tracked `wrangler.jsonc` stays a placeholder template. To deploy automatically on every push from Cloudflare (Workers Builds), see [operations.md → Automatic deploys](docs/agents/operations.md#automatic-deploys-from-github-workers-builds). Runtime variables (Access settings, owner email) are set in the dashboard and survive deploys.
 
 Then protect it with **Cloudflare Access** (Zero Trust → Access → Applications → *Self-hosted*):
 
 1. Create an application for the hostname you'll use (e.g. `family.example.com`) and add a policy allowing your family's emails.
-2. Copy the application's **Audience (AUD) tag** and your **team domain** (`<team>.cloudflareaccess.com`) into `ACCESS_AUD` and `ACCESS_TEAM_DOMAIN` in `wrangler.local.jsonc`.
+2. Copy the application's **Audience (AUD) tag** and your **team domain** (`<team>.cloudflareaccess.com`) into the `ACCESS_AUD` and `ACCESS_TEAM_DOMAIN` variables in the dashboard (Workers & Pages → family-tree → Settings → Variables and Secrets). Deploys keep them (`keep_vars`).
 3. Add the hostname as a custom domain for the Worker (Workers → family-tree → Settings → Domains), then run `npm run deploy`.
 
 Prefer **Worker-level Access** (Workers & Pages → family-tree → Access), which covers every domain and preview URL the Worker has. Why the Worker still checks the JWT itself instead of using `ctx.access` is explained in [docs/agents/operations.md → Deployment considerations](docs/agents/operations.md#deployment-considerations-how-the-worker-checks-access).
