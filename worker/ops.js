@@ -21,6 +21,28 @@ export const CITATION_ENUMS = {
 // GEDCOM 7 MEDI enumeration, lower-cased.
 export const MEDIA_TYPES = ["audio", "book", "card", "electronic", "fiche", "film", "magazine", "manuscript", "map", "newspaper", "photo", "tombstone", "video", "other"];
 const MEDIA_FIELDS = ["caption", "date", "place", "source", "note"];
+// What kind of source a catalogued source record is (source.upsert `type`).
+export const SOURCE_KINDS = ["original", "derivative", "tree", "book", "website"];
+const SOURCE_FIELDS = ["title", "type", "author", "publication", "url", "repository", "apid", "note", "text"];
+
+/**
+ * Every place a source id is used: citations on people, their names and events, family events, the evidence of
+ * fact reviews, and photos/documents (media_map `source`). Calls visit(kind, ownerId, obj) for each use (obj.source
+ * === id) and returns the number of uses.
+ */
+export function forEachSourceUse(state, id, visit = () => {}) {
+  let n = 0;
+  const cites = (list, kind, owner) => { for (const c of list || []) if (c && c.source === id) { n++; visit(kind, owner, c); } };
+  const fact = (f, kind, owner) => { cites(f.citations, kind, owner); if (f.review) cites(f.review.evidence, kind, owner); };
+  for (const [pid, p] of Object.entries(state.people || {})) {
+    if (!p) continue;
+    cites(p.citations, "person", pid);
+    for (const x of [...(p.names || []), ...(p.events || [])]) fact(x, "person", pid);
+  }
+  for (const [fid, f] of Object.entries(state.families || {})) for (const e of (f && f.events) || []) fact(e, "family", fid);
+  for (const [pid, list] of Object.entries(state.media_map || {})) for (const m of list || []) if (m && m.source === id) { n++; visit("media_map", pid, m); }
+  return n;
+}
 
 /** Give every event and name a stable fact id (used at import and for anything created without one). */
 export function assignFids(entity) {
@@ -294,11 +316,43 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
       }
       case "source.upsert": {
         const id = o.id || mkId("S", S.sources);
-        if (!o.data || !String(o.data.title || "").trim()) throw new OpError("a source needs a title", i);
+        if (!o.data || typeof o.data !== "object") throw new OpError("source.upsert needs data", i);
+        const d = { ...(S.sources[id] || {}) };
+        for (const k of SOURCE_FIELDS) {
+          if (!(k in o.data)) continue;
+          const v = o.data[k] == null ? "" : String(o.data[k]).trim();
+          if (v === "") delete d[k]; // an empty value removes the field
+          else d[k] = v.slice(0, k === "text" ? 20000 : 2000);
+        }
+        if (!d.title) throw new OpError("a source needs a title", i);
+        if (d.type && !SOURCE_KINDS.includes(d.type)) throw new OpError(`source type must be one of ${SOURCE_KINDS.join(", ")}`, i);
+        if (d.url && !/^https?:\/\//i.test(d.url)) throw new OpError("source url must start with http(s)://", i);
         touch("source", id);
-        const d = {};
-        for (const k of ["title", "author", "publication", "url", "repository", "apid", "note"]) if (o.data[k]) d[k] = String(o.data[k]).slice(0, 2000);
-        S.sources[id] = { ...(S.sources[id] || {}), ...d, id };
+        S.sources[id] = { ...d, id };
+        break;
+      }
+      case "source.merge": {
+        // re-point every use of `drop` to `keep`, fill keep's empty fields from drop, then remove drop
+        const { keep, drop } = o;
+        if (!S.sources[keep]) throw new OpError(`no source ${JSON.stringify(keep)}`, i);
+        if (!S.sources[drop]) throw new OpError(`no source ${JSON.stringify(drop)}`, i);
+        if (keep === drop) throw new OpError("keep and drop are the same source", i);
+        const owners = [];
+        forEachSourceUse(S, drop, (kind, owner) => owners.push([kind, owner]));
+        for (const [kind, owner] of owners) touch(kind, owner); // copy-on-write, then change the copies
+        forEachSourceUse(S, drop, (_kind, _owner, c) => { c.source = keep; });
+        const k = touch("source", keep), d = S.sources[drop];
+        for (const f of SOURCE_FIELDS) if (!k[f] && d[f]) k[f] = d[f];
+        touch("source", drop);
+        delete S.sources[drop];
+        break;
+      }
+      case "source.delete": {
+        if (!S.sources[o.id]) throw new OpError(`no source ${JSON.stringify(o.id)}`, i);
+        const n = forEachSourceUse(S, o.id);
+        if (n) throw new OpError(`source ${o.id} is still cited ${n} time${n > 1 ? "s" : ""}; merge it into another source instead`, i);
+        touch("source", o.id);
+        delete S.sources[o.id];
         break;
       }
       case "media.attach": {
@@ -359,6 +413,7 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
 export function referencedIds(ops) {
   const people = new Set(), families = new Set();
   for (const o of ops || []) {
+    if (String(o.op || "").startsWith("source.")) continue; // source ids, not people: see sourceIds
     for (const k of ["id", "person", "keep", "drop", "husband", "wife"]) {
       const v = o[k];
       if (typeof v !== "string" || v.startsWith("$")) continue;
@@ -371,4 +426,15 @@ export function referencedIds(ops) {
     if (o.op === "person.create" && o.id) people.delete(o.id);
   }
   return { people, families };
+}
+
+/** The existing source ids an op list changes or removes (source.upsert with an id, source.merge, source.delete). */
+export function sourceIds(ops) {
+  const out = new Set();
+  for (const o of ops || []) {
+    if (o.op === "source.upsert" && o.id) out.add(o.id);
+    if (o.op === "source.merge") for (const v of [o.keep, o.drop]) if (v) out.add(v);
+    if (o.op === "source.delete" && o.id) out.add(o.id);
+  }
+  return out;
 }

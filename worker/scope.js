@@ -131,14 +131,20 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
   research.stories = (R0.stories || []).filter((s) => (s.people || []).every((x) => ids.has(x)));
   research.media = v.media ? Object.fromEntries(Object.entries(R0.media || {}).filter(([k]) => ids.has(k))) : {};
 
-  // ---- 6. sources and GEDCOM media: only what visible people cite
-  const citedSources = new Set(), citedMedia = new Set();
-  const collect = (cites) => (cites || []).forEach((c) => c.source && citedSources.add(c.source));
-  for (const p of Object.values(people)) {
-    collect(p.citations); (p.events || []).forEach((e) => collect(e.citations)); (p.media || []).forEach((m) => citedMedia.add(m));
-  }
-  for (const f of Object.values(families)) (f.events || []).forEach((e) => collect(e.citations));
-  const sources = v.sources ? Object.fromEntries(Object.entries(full.sources || {}).filter(([k]) => citedSources.has(k))) : {};
+  // ---- 6. sources and GEDCOM media: only what visible people cite, plus sources nobody cites (so they can be
+  // tidied up; they point at no one)
+  const citingSources = (ppl, fams, mediaMap, into) => {
+    const collect = (cites) => (cites || []).forEach((c) => c && c.source && into.add(c.source));
+    const fact = (x) => { collect(x.citations); if (x.review) collect(x.review.evidence); };
+    for (const p of Object.values(ppl)) { collect(p.citations); (p.names || []).forEach(fact); (p.events || []).forEach(fact); }
+    for (const f of Object.values(fams)) (f.events || []).forEach(fact);
+    for (const list of Object.values(mediaMap || {})) (list || []).forEach((m) => m && m.source && into.add(m.source));
+    return into;
+  };
+  const citedSources = citingSources(people, families, research.media, new Set()), citedMedia = new Set();
+  for (const p of Object.values(people)) (p.media || []).forEach((m) => citedMedia.add(m));
+  const citedAnywhere = citingSources(P0, F0, R0.media, new Set());
+  const sources = v.sources ? Object.fromEntries(Object.entries(full.sources || {}).filter(([k]) => citedSources.has(k) || !citedAnywhere.has(k))) : {};
   const media = v.media ? Object.fromEntries(Object.entries(full.media || {}).filter(([k]) => citedMedia.has(k))) : {};
 
   // ---- 7. data-quality issues: re-run on the scoped data when possible (messages embed names)

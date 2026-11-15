@@ -1,7 +1,7 @@
-// The research section: overview, data problems, findings, to-dos, suggestions, agent runs, verification and
-// sources.
-import { useMemo, useState } from "react";
-import { Link, useParams } from "react-router";
+// The research section: overview, data problems, findings, to-dos, suggestions, agent runs and verification, with a
+// link to the sources list (#/sources).
+import { useState } from "react";
+import { Link, Navigate, useParams } from "react-router";
 import { useData } from "../../data";
 import { isUnknown, PersonLink, useTitle, years } from "../../lib";
 import { Inline } from "../../StoryText";
@@ -28,7 +28,7 @@ function Overview() {
         <div className="card"><div className="eyebrow">Findings</div><div className="stat"><b>{findings.length}</b></div><p className="small">{Object.entries(k).map(([a, b]) => `${b} ${a}`).join(" · ") || "none yet"}</p><Link className="small" to="/research/findings">Review →</Link></div>
         <div className="card"><div className="eyebrow">Data problems</div><div className="stat"><b>{issues.filter((i) => i.severity === "error").length}</b></div><p className="small">errors, plus {issues.filter((i) => i.severity === "warn").length} warnings, found automatically on each build.</p><Link className="small" to="/research/review">Review →</Link></div>
         <div className="card"><div className="eyebrow">Open tasks</div><div className="stat"><b>{todos.length}</b></div><p className="small">{todos.filter((t) => t.priority === "high").length} high priority</p><Link className="small" to="/research/todo">See list →</Link></div>
-        <div className="card"><div className="eyebrow">Sources</div><div className="stat"><b>{Object.keys(D.sources).length}</b></div><p className="small">record collections cited from Ancestry</p><Link className="small" to="/research/sources">Browse →</Link></div>
+        <div className="card"><div className="eyebrow">Sources</div><div className="stat"><b>{Object.keys(D.sources).length}</b></div><p className="small">records, indexes, trees, books and websites cited</p><Link className="small" to="/sources">Browse →</Link></div>
       </div>
       {live && editor && (
         <p className="btn-row" style={{ marginTop: 14 }}>
@@ -105,32 +105,6 @@ function Verification() {
   );
 }
 
-function Sources() {
-  const { D, people } = useData();
-  const { use, list } = useMemo(() => {
-    const use: Record<string, string[]> = {};
-    people.forEach((p: any) => {
-      const seen = new Set<string>();
-      p.events.concat([{ citations: p.citations }]).forEach((e: any) => (e.citations || []).forEach((c: any) => {
-        if (!seen.has(c.source)) { seen.add(c.source); (use[c.source] = use[c.source] || []).push(p.id); }
-      }));
-    });
-    const list = Object.values(D.sources as Record<string, any>).sort((a, b) => (use[b.id] || []).length - (use[a.id] || []).length);
-    return { use, list };
-  }, [D, people]);
-  return (
-    <>
-      <p className="muted">Every record collection cited in the Ancestry export, with the people who cite it. Indexes (e.g. “Find a Grave Index”, “Public Records Index”) are pointers, not proof — follow them to the underlying record.</p>
-      <div className="table-wrap"><table className="data"><thead><tr><th>Collection</th><th>People</th></tr></thead><tbody>
-        {list.map((s) => (
-          <tr key={s.id}><td>{s.title}<br /><span className="small muted">{s.author || ""}</span></td>
-            <td className="small">{(use[s.id] || []).length ? use[s.id].map((id, i) => <span key={id}>{i > 0 && ", "}<PersonLink id={id} /></span>) : "—"}</td></tr>
-        ))}
-      </tbody></table></div>
-    </>
-  );
-}
-
 export function Research() {
   const { tab: t } = useParams();
   const tab = t || "overview";
@@ -151,11 +125,11 @@ export function Research() {
   else if (tab === "queue" && live) body = <Queue />;
   else if (tab === "agents" && ai) body = <AgentRuns />;
   else if (tab === "status") body = <Verification />;
-  else if (tab === "sources") body = <Sources />;
+  else if (tab === "sources") return <Navigate to="/sources" replace />; // the old tab: the list has its own page now
   return (
     <div className="wrap page">
       <h1>Research</h1>
-      <nav className="tabs">{tabs.map(([k, l, n]) => <Link key={k} to={`/research/${k}`} className={k === tab ? "on" : ""}>{l}{n != null && <span className="count">{n}</span>}</Link>)}</nav>
+      <nav className="tabs">{tabs.map(([k, l, n]) => <Link key={k} to={k === "sources" ? "/sources" : `/research/${k}`} className={k === tab ? "on" : ""}>{l}{n != null && <span className="count">{n}</span>}</Link>)}</nav>
       {body}
     </div>
   );

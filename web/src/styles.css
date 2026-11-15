@@ -435,3 +435,13 @@ table.audit .audit-row:focus-visible { outline: 2px solid var(--accent); outline
 .diff-fields .d-from { text-decoration: line-through; color: var(--muted); }
 .nowrap { white-space: nowrap; }
 @media (max-width: 700px) { .audit-raw { grid-template-columns: 1fr; } table.audit th:nth-child(4), table.audit td:nth-child(4) { display: none; } }
+/* a fact linked to from elsewhere (#/person/I5?fact=e3) */
+.t-body.fact-target { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+/* a source page (#/source/:id) */
+.source-meta { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+.source-meta dt { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; padding-top: 3px; }
+.source-meta dd { margin: 0; overflow-wrap: anywhere; }
+.source-text { white-space: pre-wrap; font-family: var(--serif); margin: 0; }
+.source-person h3 { margin: 14px 0 4px; font-size: 1rem; }
+.source-person ul { margin: 0; padding-left: 20px; }
+.source-form textarea { font: inherit; font-size: .9rem; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); margin: 6px 0; box-sizing: border-box; }

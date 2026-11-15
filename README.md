@@ -6,7 +6,7 @@ A private family-history site you run on your own Cloudflare account. You keep y
 - **Person pages:** life timeline with historical context, family links, footnoted sources, and research findings.
 - **Verification tracking:** each person is *verified*, *partly verified*, *unverified* or *disputed*, with notes.
 - **Automatic data checks:** duplicates, people attached to two sets of parents, impossible ages, misfiled Ancestry events, anachronistic places, malformed dates.
-- **Stories, a map of where everyone lived, a timeline, a research to-do list, and a source index.**
+- **Stories, a map of where everyone lived, a timeline, a research to-do list, and a source index.** Each source has its own page with every fact that cites it; editors can correct, merge or remove sources there.
 
 **Your family data never goes in this repository.** The repo holds only code and a fictional example family. Your GEDCOM and research files live in a git-ignored folder on your machine. The built data is loaded into a **Cloudflare D1** database, and photos go into **R2**. The Worker serves data only to people signed in through **Cloudflare Access**, and without Access configured it refuses.
 

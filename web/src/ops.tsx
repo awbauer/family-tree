@@ -1,6 +1,7 @@
 // How edits read to people: op descriptions (the queue, chat, history), citations, and before/after diffs.
 // Vocabularies mirror worker/ops.js.
 import { Fragment, type ReactNode } from "react";
+import { Link } from "react-router";
 import { useData } from "./data";
 import { PersonLink } from "./lib";
 import type { Tree } from "./types";
@@ -9,6 +10,8 @@ export const SOURCE_TYPES: Record<string, string> = { original: "Original record
 export const INFORMATION: Record<string, string> = { primary: "Primary: from someone with first-hand knowledge, near the time", secondary: "Secondary: second-hand or recorded later", undetermined: "Undetermined" };
 export const EVIDENCE: Record<string, string> = { direct: "Direct: answers the question by itself", indirect: "Indirect: answers it only combined with other evidence", negative: "Negative: an absence that tells something" };
 export const QUALITY: Record<string, string> = { 3: "3 · Direct and primary evidence", 2: "2 · Secondary evidence, officially recorded later", 1: "1 · Questionable reliability", 0: "0 · Unreliable or estimated" };
+/** What a catalogued source record is (source.upsert `type`). */
+export const SOURCE_KINDS: Record<string, string> = { original: "Original record", derivative: "Index or transcript", tree: "Compiled tree", book: "Book", website: "Website" };
 export const MEDIA_TYPES: Record<string, string> = { photo: "Photo", tombstone: "Headstone", newspaper: "Newspaper", manuscript: "Document or letter", card: "Card", map: "Map", book: "Book page", electronic: "Digital record", film: "Film", fiche: "Microfiche", magazine: "Magazine", audio: "Audio", video: "Video", other: "Other" };
 
 /** <option>s for a vocabulary, with an optional blank first option. */
@@ -29,11 +32,23 @@ export function Cite({ cit }: { cit: any }) {
   const meta = [cit.source_type && SOURCE_TYPES[cit.source_type] && cit.source_type, cit.information && `${cit.information} info`, cit.evidence && `${cit.evidence} evidence`, cit.quality != null && `QUAY ${cit.quality}`].filter(Boolean);
   return <>{cit.url ? <a href={cit.url} target="_blank" rel="noopener">{label}</a> : label}{meta.length > 0 && <span className="muted small"> ({meta.join(" · ")})</span>}</>;
 }
+/** "Title (S12)", the text a source picker shows for a catalogued source; pickedSource reads the id back. */
+export const sourceOption = (s: any) => `${s.title || s.id} (${s.id})`;
+export const pickedSource = (v: string | null | undefined) => (String(v || "").match(/\(([^()\s]+)\)\s*$/) || [])[1] || null;
+/** A <datalist> of the tree's catalogued sources, for inputs with list={id}. */
+export function SourceList({ id, except }: { id: string; except?: string }) {
+  const { D } = useData();
+  const list = Object.values(D.sources as Record<string, any>).filter((s) => s.id !== except).sort((a, b) => String(a.title || "").localeCompare(String(b.title || "")));
+  return <datalist id={id}>{list.map((s) => <option key={s.id} value={sourceOption(s)} />)}</datalist>;
+}
+
 /** Form fields for one structured citation; read them back with readCitation(form, prefix). */
 export function CitationFields({ prefix = "c" }: { prefix?: string }) {
   return (
     <fieldset className="cite-fields"><legend className="small">Source</legend>
-      <input name={`${prefix}_title`} placeholder="Record or collection (e.g. Exampleton parish burials)" style={{ flex: 2, minWidth: 220 }} />
+      <input name={`${prefix}_source`} list={`${prefix}-sources`} placeholder="Search the catalogued sources…" title="Pick a source already in the tree, or leave empty and describe a new one" style={{ flex: 2, minWidth: 220 }} />
+      <SourceList id={`${prefix}-sources`} />
+      <input name={`${prefix}_title`} placeholder="…or a record or collection not listed (e.g. Exampleton parish burials)" style={{ flex: 2, minWidth: 220 }} />
       <input name={`${prefix}_url`} placeholder="Link to the record (https://…)" style={{ flex: 2, minWidth: 200 }} />
       <input name={`${prefix}_page`} placeholder="Where in it (volume, page, entry, image)" style={{ flex: 1, minWidth: 180 }} />
       <select name={`${prefix}_source_type`} title="What kind of source" defaultValue=""><Options map={SOURCE_TYPES} blank="Kind of source…" /></select>
@@ -47,11 +62,23 @@ export function CitationFields({ prefix = "c" }: { prefix?: string }) {
 /** The citation typed into <CitationFields>, or null when it was left empty. Throws on a bad link. */
 export function readCitation(form: HTMLFormElement, prefix = "c") {
   const v = (k: string) => String(((form.elements.namedItem(`${prefix}_${k}`) as HTMLInputElement | null)?.value) || "").trim();
-  if (!v("title") && !v("url")) return null;
-  const cit: any = { title: v("title") || undefined, url: v("url") || undefined, page: v("page") || undefined, text: v("text") || undefined, accessed: new Date().toISOString().slice(0, 10) };
+  // a picked catalogued source cites it by id; text typed into the search that matches none is taken as a title
+  const source = pickedSource(v("source")) || undefined;
+  const title = v("title") || (!source && v("source")) || "";
+  if (!source && !title && !v("url")) return null;
+  const cit: any = { source, title: title || undefined, url: v("url") || undefined, page: v("page") || undefined, text: v("text") || undefined, accessed: new Date().toISOString().slice(0, 10) };
   for (const k of ["source_type", "information", "evidence", "quality"]) if (v(k)) cit[k] = v(k);
   if (cit.url && !/^https?:\/\//i.test(cit.url)) throw new Error("The link must start with http:// or https://");
   return cit;
+}
+/** Prefill <CitationFields> from a citation (a catalogued source shows as "Title (S12)" in the picker). */
+export function fillCitation(D: Tree, form: HTMLFormElement, prefix: string, cit: any) {
+  for (const [k, v] of Object.entries(cit || {})) {
+    const el = form.elements.namedItem(`${prefix}_${k}`) as HTMLInputElement | null;
+    if (!el || v == null || v === "") continue;
+    const s = k === "source" && (D.sources as any)[String(v)];
+    el.value = s ? sourceOption(s) : String(v);
+  }
 }
 /** A research finding's sources as structured citations (their analysis is unknown until someone assesses it). */
 export const findingCitations = (f: any) => (f.sources || []).filter((s: any) => s.title || s.url).map((s: any) => ({ title: s.title || undefined, url: /^https?:\/\//i.test(s.url || "") ? s.url : undefined, note: s.note || undefined, accessed: f.date || undefined }));
@@ -67,6 +94,13 @@ function WhoLink({ id }: { id?: string | null }) {
   if (!id) return <>—</>;
   if (String(id).startsWith("$")) return <>the new person</>;
   return D.people[id] ? <PersonLink id={id} /> : <>{id}</>;
+}
+/** A link to a catalogued source's page, by title (plain text when it isn't in the tree, e.g. merged away). */
+export function SourceLink({ id, children }: { id?: string | null; children?: ReactNode }) {
+  const { D } = useData();
+  if (!id) return <>—</>;
+  const s = (D.sources as any)[id];
+  return s ? <Link to={`/source/${encodeURIComponent(id)}`}>{children ?? `“${s.title || id}”`}</Link> : <>{children ?? id}</>;
 }
 const join = (xs: ReactNode[], sep: string) => xs.map((x, i) => <span key={i}>{i > 0 && sep}{x}</span>);
 
@@ -100,7 +134,12 @@ export function OpText({ o }: { o: any }) {
     case "family.remove_child": return <>remove {W(o.person)} from family {o.family}</>;
     case "family.delete": return <>delete family {o.family}</>;
     case "family.merge": return <>merge family {o.drop} into {o.keep}</>;
-    case "source.upsert": return <>add/update source “{o.data.title}”</>;
+    case "source.upsert": {
+      const s = o.id && (D.sources as any)[o.id];
+      return s ? <>update source <SourceLink id={o.id} />{Object.keys(o.data || {}).length > 0 && <span className="muted">: {Object.keys(o.data).join(", ")}</span>}</> : <>add source “{(o.data || {}).title}”</>;
+    }
+    case "source.merge": return <>merge source <SourceLink id={o.drop} /> into <SourceLink id={o.keep} />, moving its citations</>;
+    case "source.delete": return <>delete source <SourceLink id={o.id} /></>;
     case "media.attach": return <>attach a photo/document to {W(o.person)}{o.caption ? `: ${o.caption}` : ""}</>;
     case "media.detach": return <>detach a photo/document from {W(o.person)}</>;
     case "media.update": return <>update photo details on {W(o.person)}: {Object.entries(o.set || {}).filter(([, v]) => v).map(([k, v]) => `${k} “${v}”`).join(", ") || "clear details"}</>;
@@ -158,6 +197,7 @@ export function diffItems(D: Tree, ch: any): ReactNode[] {
   if (t === "media" || t === "media_map") return mediaDiff(a, b);
   if (t === "finding") return [b ? <li className="d-chg"><b>Finding</b> {b.status}{b.note ? ` — ${b.note}` : ""}</li> : <li className="d-chg"><b>Finding</b> reopened</li>];
   if (t === "status") return [<Chg label="Research status" from={a && a.status} to={b && b.status} />];
+  if (t === "source" && !(a && b)) return [b ? <Add label="Source">{b.title || ch.id}</Add> : <Del label="Source">{(a && a.title) || ch.id}</Del>];
   if (!a && b) return [<Add label={t === "family" ? "Family" : "Person"}>{t === "family" ? [b.husband, b.wife].filter(Boolean).map((x: string) => whoName(D, x)).join(" & ") : (b.names || []).map(nameText).join(" / ")}</Add>];
   if (a && !b) return [<Del label={t === "family" ? "Family" : "Person"}>{t === "family" ? ch.id : (a.names || []).map(nameText).join(" / ")}</Del>];
   if (!a || !b) return [];
@@ -182,7 +222,7 @@ export function diffItems(D: Tree, ch: any): ReactNode[] {
     for (const x of d.removed) out.push(<Del label="Child">{whoName(D, x)}</Del>);
     out.push(...factsDiff(D, a.events, b.events, evText, (e) => e.type));
   } else if (t === "source") {
-    for (const k of ["title", "author", "publication", "url", "repository"]) if ((a[k] || "") !== (b[k] || "")) out.push(<Chg label={`Source · ${k}`} from={a[k]} to={b[k]} />);
+    for (const k of ["title", "type", "author", "publication", "url", "repository", "apid", "note", "text"]) if ((a[k] || "") !== (b[k] || "")) out.push(<Chg label={`Source · ${k === "text" ? "transcription" : k}`} from={k === "type" ? SOURCE_KINDS[a[k]] || a[k] : a[k]} to={k === "type" ? SOURCE_KINDS[b[k]] || b[k] : b[k]} />);
   }
   return out;
 }
@@ -193,7 +233,7 @@ export function Diff({ changes }: { changes?: any[] }) {
     const items = diffItems(D, ch);
     if (!items.length) return null;
     const t = ch.type, w = whoName(D, ch.id);
-    const title = t === "person" ? w : t === "family" ? `Family ${ch.id}` : t === "media" || t === "media_map" ? `Photos of ${w}` : t === "finding" ? `Finding #${ch.id}` : t === "status" ? `Status of ${w}` : `${t} ${ch.id}`;
+    const title = t === "person" ? w : t === "family" ? `Family ${ch.id}` : t === "media" || t === "media_map" ? `Photos of ${w}` : t === "finding" ? `Finding #${ch.id}` : t === "status" ? `Status of ${w}` : t === "source" ? `Source ${ch.id}` : `${t} ${ch.id}`;
     return <div className="diff" key={i}><div className="small muted">{title}</div><ul>{items.map((x, j) => <Fragment key={j}>{x}</Fragment>)}</ul></div>;
   }).filter(Boolean);
   return blocks.length ? <>{blocks}</> : <p className="small muted">No visible differences.</p>;

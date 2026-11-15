@@ -293,14 +293,14 @@ function groupForeign(relationships, sexOf) {
 export function familyFromGx(relationships) { return Object.values(familiesFromGx(relationships))[0] || null; }
 
 // ---------------------------------------------------------------- sources and media (SourceDescription)
-const SOURCE_KEYS = ["id", "title", "author", "publication", "url", "repository", "apid", "note"];
+const SOURCE_KEYS = ["id", "title", "author", "publication", "url", "repository", "apid", "note", "type", "text"];
 export function sourceToGx(s) {
   const g = { id: s.id, resourceType: GX + "Collection", [ft("kind")]: "source" };
   if (s.title !== undefined) g.titles = [{ value: s.title }];
   const cite = [s.author, s.title, s.publication].filter(Boolean).join(", ");
   if (cite) g.citations = [{ value: cite }];
   if (s.url !== undefined) g.about = s.url;
-  for (const k of ["author", "publication", "repository", "apid", "note"]) if (s[k] !== undefined) g[ft(k)] = s[k];
+  for (const k of ["author", "publication", "repository", "apid", "note", "type", "text"]) if (s[k] !== undefined) g[ft(k)] = s[k];
   return { ...g, ...extra(s, SOURCE_KEYS) };
 }
 const MEDIA_KEYS = ["id", "file", "title", "form", "type", "kind", "date", "place"];
@@ -322,7 +322,7 @@ export function sourceDescriptionFromGx(g) {
   const s = { id: g.id };
   if (g.titles) s.title = g.titles[0].value;
   if (g.about !== undefined) s.url = g.about;
-  for (const k of ["author", "publication", "repository", "apid", "note"]) if (g[ft(k)] !== undefined) s[k] = g[ft(k)];
+  for (const k of ["author", "publication", "repository", "apid", "note", "type", "text"]) if (g[ft(k)] !== undefined) s[k] = g[ft(k)];
   return { kind: "source", value: { ...s, ...unextra(g) } };
 }
 
