@@ -48,7 +48,7 @@ function Insights({ id }: { id: string }) {
   const names = ["parents", "grandparents", "great-grandparents", "2×great-grandparents", "3×great-grandparents"];
   return (
     <p className="small graph-stats">
-      {gens.filter((x) => x.possible).map((x, i) => <span key={x.g}>{i > 0 && " · "}<span title={`${names[x.g - 1]} recorded`}>{x.found} of {x.possible} {names[x.g - 1]}</span></span>)}<br />
+      {gens.filter((x) => x.possible).map((x, i) => <Fragment key={x.g}>{i > 0 && " · "}<span title={`${names[x.g - 1]} recorded`}>{x.found} of {x.possible} {names[x.g - 1]}</span></Fragment>)/* the " · " stays outside the no-wrap spans, so the line can break there */}<br />
       Connected to {seen.size - 1} of {total - 1} other people in this tree{seen.size < total && <> <span className="muted">({total - seen.size} aren't linked to {P[id].given || P[id].name} by any parent, child or spouse link)</span></>}.
     </p>
   );
