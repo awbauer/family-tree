@@ -131,20 +131,32 @@ def private_places(baseline=True):
     ex = " ".join(f.read_text(encoding="utf-8", errors="replace") for f in (ROOT / "example").glob("*")).lower()
     words = {w for w in words if w.lower() not in ex and w.lower() not in COMMON_WORDS and w not in SURNAMES}
     if baseline:  # already-public words (code, docs) aren't news; --audit skips this so earlier slips still show
-        try:
-            tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True).stdout.split()
-            pub = set()
-            for f in tracked:
-                if f.endswith("package-lock.json") or CONTENT_EXEMPT.search(f):
-                    continue
-                try:
-                    pub |= _words((ROOT / f).read_text(encoding="utf-8", errors="ignore"))
-                except OSError:
-                    pass
-            words -= pub
-        except Exception:
-            pass
+        words -= _committed_words()
     return words
+
+
+def _committed_words():
+    """Words in tracked files as they are in the last commit (HEAD). Never the working copy or the index: a word
+    being committed right now must not count as already public, or a new private word would excuse itself."""
+    try:
+        listing = subprocess.run(["git", "ls-tree", "-r", "--name-only", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split("\n")
+    except (subprocess.CalledProcessError, OSError):
+        return set()  # no commits yet: nothing is public
+    paths = [f for f in listing if f and not f.endswith("package-lock.json") and not CONTENT_EXEMPT.search(f)]
+    if not paths:
+        return set()
+    proc = subprocess.run(["git", "cat-file", "--batch"], cwd=ROOT, input="".join(f"HEAD:{f}\n" for f in paths).encode(), capture_output=True)
+    out, pub, i = proc.stdout, set(), 0
+    while i < len(out):
+        nl = out.index(b"\n", i)
+        header = out[i:nl].split()
+        i = nl + 1
+        if len(header) < 3 or header[1] == b"missing":
+            continue
+        size = int(header[2])
+        pub |= _words(out[i:i + size].decode("utf-8", errors="ignore"))
+        i += size + 1  # the content is followed by a newline
+    return pub
 
 
 def scan_text(text, where, names_re, places=None):

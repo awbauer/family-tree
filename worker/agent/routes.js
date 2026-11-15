@@ -173,7 +173,7 @@ export async function refreshContent(c) {
 // ---------------------------------------------------------------- data quality review (#31)
 async function startQuality(c, d, g, { scoped }) {
   const env = c.env, s = settings(env), b = await scoped(c, g);
-  const scope = ["todos", "findings", "both"].includes(d.scope) ? d.scope : "both";
+  const scope = Quality.SCOPES.includes(d.scope) ? d.scope : "both";
   const person = d.person ? String(d.person) : null;
   if (person && !b.people[person]) fail(404, "That person isn't in this tree.");
   const limit = Math.max(1, Math.min(Quality.MAX_ITEMS, parseInt(d.limit, 10) || 10));

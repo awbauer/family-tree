@@ -967,9 +967,9 @@ function startFamilyApp(D) {
           <datalist id="ar-people">${people.filter((p) => !isUnknown(p) && !p.living).map((p) => `<option value="${esc(p.name)} (${p.id})">`).join("")}</datalist>
           <input name="instructions" placeholder="What should it look for?" style="flex:2;min-width:240px"><button class="btn primary">Start a run</button></form>
         <details class="card" style="margin-bottom:16px"><summary><b>Data quality review</b> <span class="small muted">· check open to-dos and findings against what the tree now records</span></summary>
-          <p class="small muted">The agent reads the tree only (no web). It keeps, closes, resolves or dismisses each item, and files any fix to the facts as a suggestion. A dry run changes nothing: you get a report and can apply it afterwards.</p>
+          <p class="small muted">The agent reads the tree only (no web). Tree checks look for duplicate people and families, impossible dates and ages, two sets of parents, repeated events, empty or disconnected records, and dates and places not in standard form. It keeps, closes, resolves or dismisses each item, and files any fix to the facts as a suggestion. A dry run changes nothing: you get a report and can apply it afterwards.</p>
           <form id="dq-new" class="filters">
-            <select name="scope" aria-label="What to review"><option value="both">To-dos and findings</option><option value="todos">To-dos only</option><option value="findings">Findings only</option></select>
+            <select name="scope" aria-label="What to review"><option value="all">Everything: tree checks, to-dos and findings</option><option value="checks">Tree checks only</option><option value="both">To-dos and findings</option><option value="todos">To-dos only</option><option value="findings">Findings only</option></select>
             <input name="person" list="dq-people" placeholder="Person (optional)" style="flex:1;min-width:180px">
             <datalist id="dq-people">${people.filter((p) => !isUnknown(p)).map((p) => `<option value="${esc(p.name)} (${p.id})">`).join("")}</datalist>
             <label class="small">Up to <input name="limit" type="number" min="1" max="100" value="10" style="width:64px"> items</label>
@@ -1097,7 +1097,7 @@ function startFamilyApp(D) {
   function qualityReport(r) {
     const rep = r.report || [], o = r.options || {};
     const counts = rep.reduce((a, d) => ((a[d.verdict] = (a[d.verdict] || 0) + 1), a), {});
-    const ref = (x) => { const [t, n] = x.split(":"); return t === "todo" ? `<a href="#/research/todo">to-do #${esc(n)}</a>` : `<a href="#/research/findings">finding #${esc(n)}</a>`; };
+    const ref = (x) => { const [t, n] = x.split(":"); return t === "todo" ? `<a href="#/research/todo">to-do #${esc(n)}</a>` : t === "check" ? `check: ${esc(n.replace(/-/g, " "))}` : `<a href="#/research/findings">finding #${esc(n)}</a>`; };
     const waiting = o.dry_run && !o.applied_at && r.status === "succeeded" && rep.some((d) => d.status === "would");
     return `<p class="small">${o.dry_run ? `<b>Dry run</b>${o.applied_at ? ` · applied by ${who(o.applied_by)} ${esc(o.applied_at.slice(0, 16).replace("T", " "))}` : ""} · ` : ""}${rep.length} of ${o.count || "?"} reviewed${rep.length ? ": " + Object.entries(counts).map(([k, n]) => `${n} ${esc((VERDICT_TXT[k] || k).toLowerCase())}`).join(", ") : ""}</p>
       ${r.summary ? `<p class="small">${esc(r.summary)}</p>` : ""}

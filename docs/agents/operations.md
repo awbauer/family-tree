@@ -242,7 +242,15 @@ Editors get an **Ask** button on every page. It opens a chat with an agent (`age
 
 Research → Agent runs → **Data quality review** starts an agent (`agents/src/agents/quality.js`, Flue, one Durable Object per run) that works through open items and checks each against what the tree now records. Editors only.
 
-- **Options:** to-dos, findings or both; optionally one person; a limit of 1–100 items (default 10); **dry run** (on by default).
+- **Options:** everything, tree checks, to-dos, findings, or to-dos and findings; optionally one person; a limit of 1–100 items (default 10); **dry run** (on by default).
+- **Tree checks** (`worker/agent/checks.js`) are found fresh at the start of each run, most serious first:
+  - the site's own record checks: impossible dates and ages, two sets of parents, a husband recorded as female, conflicting birth years;
+  - possible duplicate people (same name with the same parents, or the same birth year), the same couple recorded twice, and couples recorded the wrong way round;
+  - repeated birth, death or burial events;
+  - empty records, and people not connected to the home person;
+  - dates and places not in standard form ("1 June 1915" → "1 Jun 1915", "Exampleton, E.S." → "Exampleton, Example State, USA", the spelled-out form the tree already uses most).
+
+  Where the fix is mechanical (a merge, a standard date or place), the check carries the edit ops. The agent confirms the problem and files them as a suggestion, or calls it a false alarm, or adds a to-do when it needs your judgement. A decision on a check is applied only while the check still finds the same thing.
 - **Items:** open to-dos (open, or in progress and held by nobody else) and open findings the editor can see, oldest-updated first. The plan is fixed when the run starts and kept in `agent_runs.options`.
 - **Per item** the agent gives a verdict: still valid, resolved, obsolete, duplicate or needs a person, with a note and the records it relied on. It reads the tree only, with no web access.
   - **To-dos:** resolved → done (the outcome names the evidence); obsolete or duplicate → won't do; otherwise kept, with a comment and perhaps a new priority.
