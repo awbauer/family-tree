@@ -734,7 +734,39 @@ function startFamilyApp(D) {
     const st = R.stories || [];
     app.innerHTML = `<div class="wrap page"><h1>Stories</h1>
       <p class="prose">Narratives drawn from the records. Each story lists its sources; anything uncertain is said to be uncertain.</p>
-      ${st.length ? `<div class="grid g3">${st.map(storyCard).join("")}</div>` : `<div class="empty">No stories written yet. Add them to <code>research.json</code> → <code>stories</code>.</div>`}</div>`;
+      ${AI ? `<details class="card" style="margin-bottom:18px"><summary><b>Draft a story with AI</b> <span class="small muted">· written from the tree's records, sent to Suggestions for review</span></summary>
+        <form id="sd-form" class="stack" style="margin-top:10px">
+          <div class="filters"><input id="sd-person" list="sd-people" placeholder="Add a person…" style="flex:1;min-width:220px"><button type="button" class="btn" id="sd-add">Add</button></div>
+          <datalist id="sd-people">${people.filter((p) => !isUnknown(p) && !p.living).map((p) => `<option value="${esc(p.name)} (${p.id})">`).join("")}</datalist>
+          <div id="sd-chips" class="small muted">Who is it about? Add one or more people (living people can't be the subject).</div>
+          <textarea name="instructions" rows="2" placeholder="The angle, e.g. “her journey to England after the war” (optional)"></textarea>
+          <div class="filters"><select name="length" aria-label="Length"><option value="short">Short (~300 words)</option><option value="medium" selected>Medium (~700 words)</option><option value="long">Long (~1,200 words)</option></select>
+          <button class="btn primary">Draft it</button><span id="sd-msg" class="small muted"></span></div></form></details>` : ""}
+      ${st.length ? `<div class="grid g3">${st.map(storyCard).join("")}</div>` : `<div class="empty">No stories written yet.${AI ? " Draft one above, or add" : " Add"} them to <code>research.json</code> → <code>stories</code>.</div>`}</div>`;
+    if (AI) wireStoryDraft();
+  }
+  function wireStoryDraft() {
+    const chosen = [], chips = document.getElementById("sd-chips"), inp = document.getElementById("sd-person"), msg = document.getElementById("sd-msg");
+    const draw = () => {
+      chips.innerHTML = chosen.length ? chosen.map((id, i) => `<span class="badge">${esc(P[id].name)} <button type="button" class="linklike" data-rm="${i}" aria-label="Remove">✕</button></span>`).join(" ") : "Who is it about? Add one or more people (living people can't be the subject).";
+      chips.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { chosen.splice(+b.dataset.rm, 1); draw(); }));
+    };
+    const add = () => {
+      const id = (inp.value.match(/\(([^)]+)\)\s*$/) || [])[1];
+      if (id && P[id] && !P[id].living && !chosen.includes(id)) chosen.push(id);
+      inp.value = ""; draw(); inp.focus();
+    };
+    document.getElementById("sd-add").onclick = add;
+    inp.addEventListener("change", add);
+    document.getElementById("sd-form").onsubmit = async (ev) => {
+      ev.preventDefault();
+      if (!chosen.length) { msg.textContent = "Add at least one person."; return; }
+      const f = ev.target;
+      try {
+        await api("POST", "agent/runs", { kind: "story", mode: "draft", people: chosen, instructions: f.instructions.value || undefined, length: f.length.value });
+        location.hash = "#/research/agents";
+      } catch (e) { msg.textContent = e.message; }
+    };
   }
   function viewStory([slug]) {
     const s = (R.stories || []).find((x) => x.slug === slug);
@@ -747,7 +779,29 @@ function startFamilyApp(D) {
       ${(s.people || []).length ? `<p class="small">People: ${s.people.filter((x) => P[x]).map((x) => plink(x)).join(" · ")}</p>` : ""}
       <div class="prose">${paras}</div>
       ${(s.sources || []).length ? `<h3>Sources</h3><ol class="sources-list">${s.sources.map((x) => `<li>${x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title || x.url)}</a>` : esc(x.title)}${x.note ? `<span class="pg">${esc(x.note)}</span>` : ""}</li>`).join("")}</ol>` : ""}
+      ${AI ? `<details class="card sub"><summary><b>Review with AI</b> <span class="small muted">· checks every claim against the records and suggests a revision</span></summary>
+        <form id="sr-form" class="stack" style="margin-top:10px"><textarea name="instructions" rows="2" placeholder="Anything to change? e.g. “make it shorter”, “say more about the move” (optional)"></textarea>
+        <div class="filters"><button class="btn primary">Start the review</button><span id="sr-msg" class="small muted"></span></div></form></details>` : ""}
       <p><a href="#/stories">← All stories</a></p></article></div>`;
+    if (AI) document.getElementById("sr-form").onsubmit = async (ev) => {
+      ev.preventDefault();
+      try { await api("POST", "agent/runs", { kind: "story", mode: "review", slug: s.slug, instructions: ev.target.instructions.value || undefined }); location.hash = "#/research/agents"; }
+      catch (e) { document.getElementById("sr-msg").textContent = e.message; }
+    };
+  }
+  /** Paragraph-level diff of two story texts: removed paragraphs struck through, added ones highlighted. */
+  function storyDiff(a, b) {
+    const A = String(a || "").split(/\n\n+/), B = String(b || "").split(/\n\n+/);
+    const L = Array.from({ length: A.length + 1 }, () => new Array(B.length + 1).fill(0));
+    for (let i = A.length - 1; i >= 0; i--) for (let j = B.length - 1; j >= 0; j--) L[i][j] = A[i] === B[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    const out = [], para = (t) => (t.startsWith("## ") ? `<b>${esc(t.slice(3))}</b>` : inline(t));
+    let i = 0, j = 0;
+    while (i < A.length || j < B.length) {
+      if (i < A.length && j < B.length && A[i] === B[j]) { out.push(`<p class="muted">${para(A[i])}</p>`); i++; j++; }
+      else if (i < A.length && (j >= B.length || L[i + 1][j] >= L[i][j + 1])) out.push(`<p class="d-del">${para(A[i++])}</p>`);
+      else out.push(`<p class="d-ins">${para(B[j++])}</p>`);
+    }
+    return `<div class="prose small story-diff">${out.join("")}</div>`;
   }
   function inline(t) {
     // [[I123|label]] person links, **bold**, *italic*
@@ -1119,7 +1173,16 @@ function startFamilyApp(D) {
         ${pr.status === "open" && window.FamilyPerson ? `<details data-preview="${pr.id}"><summary class="small">What changes</summary><div class="small muted">Loading…</div></details>` : ""}`);
       if ((b.findings || []).length) parts.push(`<h4>Findings</h4>${b.findings.map((f) => findingHtml(Object.assign({}, f, { branch: f.branch || b.branch }))).join("")}`);
       if (Object.keys(b.people_status || {}).length) parts.push(`<h4>Status changes</h4><ul>${Object.entries(b.people_status).map(([id, s]) => `<li>${P[id] ? plink(id) : esc(id)}: <b>${esc(s.status)}</b> ${esc(s.note || "")}</li>`).join("")}</ul>`);
-      if ((b.story_updates || []).length) parts.push(`<h4>Story revisions</h4>${b.story_updates.map((u) => `<p><b>${esc(u.title)}</b>${u.reason ? ` · ${esc(u.reason)}` : ""} <a class="small" href="#/story/${esc(u.slug)}">current version</a></p><details><summary>Revised text</summary><div class="prose small">${esc(u.body).replace(/\n\n+/g, "<br><br>")}</div></details>`).join("")}`);
+      if ((b.story_updates || []).length) parts.push(`<h4>Story revisions</h4>${b.story_updates.map((u) => {
+        const cur = (R.stories || []).find((x) => x.slug === u.slug);
+        return `<p><b>${esc(u.title)}</b>${u.reason ? ` · ${esc(u.reason)}` : ""} <a class="small" href="#/story/${esc(u.slug)}">current version</a></p>
+          ${(u.changes || []).length ? `<ul class="small">${u.changes.map((c) => `<li>${esc(c.change)} <span class="muted">— ${esc(c.reason)}${(c.facts || []).length ? ` (${esc(c.facts.join(", "))})` : ""}</span></li>`).join("")}</ul>` : ""}
+          <details${pr.status === "open" ? " open" : ""}><summary>What changes in the text</summary>${cur ? storyDiff(cur.body, u.body) : `<div class="prose small">${esc(u.body).replace(/\n\n+/g, "<br><br>")}</div>`}</details>`;
+      }).join("")}`);
+      if ((b.stories || []).length) parts.push(`<h4>New ${b.stories.length > 1 ? "stories" : "story"}</h4>${b.stories.map((x) => `<p><b>${esc(x.title)}</b>${x.era ? ` · ${esc(x.era)}` : ""}${(x.people || []).length ? ` · ${x.people.filter((id) => P[id]).map((id) => plink(id)).join(", ")}` : ""}</p>
+        <details><summary>Read it</summary><div class="prose small">${(x.body || "").split(/\n\n+/).map((t) => t.startsWith("## ") ? `<h4>${esc(t.slice(3))}</h4>` : `<p>${inline(t)}</p>`).join("")}</div>
+        ${(x.sources || []).length ? `<p class="small"><b>Sources:</b> ${x.sources.map((y) => `${esc(y.title)}${y.note ? ` <span class="muted">(${esc(y.note)})</span>` : ""}`).join("; ")}</p>` : ""}</details>`).join("")}
+        ${(b.story_notes || []).length ? `<details><summary class="small">Which facts support each paragraph</summary><ul class="small">${b.story_notes.map((n) => `<li>${esc(n.paragraph)} <span class="muted">${esc((n.facts || []).join(", "))}</span></li>`).join("")}</ul></details>` : ""}`);
       if ((b.todo || []).length) parts.push(`<h4>New to-dos</h4><ul>${b.todo.map((t) => `<li>[${esc(t.priority)}] ${t.person && P[t.person] ? plink(t.person) + ": " : ""}${esc(t.task)}</li>`).join("")}</ul>`);
       if ((b.todo_done || []).length) parts.push(`<h4>Closes</h4><ul>${b.todo_done.map((t) => `<li>${esc(t.task || `to-do #${t.id}`)}: ${esc(t.outcome || "")}</li>`).join("")}</ul>`);
       if ((b.log || []).length) parts.push(`<details><summary>${b.log.length} searches logged</summary><ul>${b.log.map((l) => `<li>${esc(l.result)}: ${esc(l.searched)}${l.note ? ` <span class="muted">(${esc(l.note)})</span>` : ""}</li>`).join("")}</ul></details>`);
