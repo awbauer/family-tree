@@ -8,6 +8,39 @@ const KINDS = new Set(["confirmed", "correction", "conflict", "data-error", "new
 const LEVELS = new Set(["high", "medium", "low"]);
 const RESULTS = new Set(["found", "nil", "inconclusive"]);
 
+/**
+ * Point a batch at the people that merged-away ids became. `aliases` is {dropped: kept} from merges (followed through
+ * chains). A suggestion written before a merge would otherwise fail its re-check on approval.
+ */
+export function followMerges(b, aliases = {}) {
+  const to = (id) => { const seen = new Set(); while (aliases[id] && !seen.has(id)) { seen.add(id); id = aliases[id]; } return id; };
+  let s = JSON.stringify(b);
+  for (const id of Object.keys(aliases || {})) {
+    const t = to(id);
+    if (t === id || !s.includes(id)) continue;
+    s = s.split(JSON.stringify(id)).join(JSON.stringify(t)) // ids as values and keys (people_status), including ops
+      .replace(new RegExp(`\\[\\[${id.replace(/[^\w-]/g, "")}(?=[|\\]])`, "g"), `[[${t}`); // story links [[I12|…]]
+  }
+  return JSON.parse(s);
+}
+
+/**
+ * Leave out the findings, to-dos, log entries and statuses about people who aren't in the tree any more (removed, not
+ * merged). Returns the trimmed batch and which people were left out. Stories aren't trimmed: one that names a missing
+ * person still fails the re-check.
+ */
+export function dropMissing(b, visible) {
+  const gone = new Set(), keep = (pid) => !pid || visible(pid) || (gone.add(pid), false);
+  const out = { ...b };
+  if (b.findings) out.findings = b.findings.filter((f) => keep(f.person));
+  if (b.todo) out.todo = b.todo.filter((t) => keep(t.person));
+  if (b.log) out.log = b.log.filter((l) => keep(l.person));
+  if (b.people_status) out.people_status = Object.fromEntries(Object.entries(b.people_status).filter(([pid]) => keep(pid)));
+  const dropped = ["findings", "todo", "log"].reduce((n, k) => n + ((b[k] || []).length - (out[k] || []).length), 0)
+    + Object.keys(b.people_status || {}).length - Object.keys(out.people_status || {}).length;
+  return { batch: out, missing: [...gone], dropped };
+}
+
 /** Returns a list of error strings ([] = valid). `visible(id)` says whether a person is in the author's scope. */
 export function validateBatch(b, visible) {
   const errs = [];

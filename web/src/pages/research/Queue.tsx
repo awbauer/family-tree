@@ -1,7 +1,7 @@
 // The suggestions queue (/api/proposals): research and edits from relatives and agents, waiting for an editor.
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import { useData } from "../../data";
+import { ApiError, useData } from "../../data";
 import { PersonLink } from "../../lib";
 import { Diff, OpText } from "../../ops";
 import { Inline } from "../../StoryText";
@@ -103,7 +103,16 @@ export function Queue() {
     let note: string | null | undefined;
     if (action === "reject") { note = prompt("Why? (the author sees this)"); if (note === null) return; }
     try { await api("POST", `proposals/${id}/${action}`, { note }); if (action === "approve") location.reload(); else load(); }
-    catch (e) { alert((e as Error).message); }
+    catch (e) {
+      const err = e as ApiError, data = (err.data || {}) as { can_skip?: boolean };
+      // items about people removed since the suggestion was written: offer to approve the rest
+      if (action === "approve" && data.can_skip && confirm(`${err.message}\n\nApprove the rest of this suggestion without those items?`)) {
+        try { await api("POST", `proposals/${id}/approve`, { skip_missing: true }); location.reload(); }
+        catch (e2) { alert((e2 as Error).message); }
+        return;
+      }
+      alert(err.message);
+    }
   }
 
   return (

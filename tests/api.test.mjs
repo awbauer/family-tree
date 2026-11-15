@@ -172,3 +172,35 @@ test("media is only served if attached to someone you can see", async () => {
   await env.MEDIA.put("photos/secret.jpg", "x");
   assert.equal((await call("GET", "/media/photos/secret.jpg")).status, 404);
 });
+
+test("approving a suggestion written before a merge follows the merge; items about removed people can be left out", async () => {
+  // a person who'll be removed before the suggestion is approved
+  const made = await call("POST", "/api/edit", { body: { tree: "all", reason: "test", ops: [{ op: "person.create", id: "$x", names: [{ given: "Example", surname: "Removed" }] }] } });
+  assert.equal(made.status, 200, JSON.stringify(made.data));
+  const gone = made.data.created.$x;
+  const src = [{ title: "Exampleton parish register", url: "https://records.example.org/1" }];
+  const batch = {
+    findings: [{ person: "I15", kind: "confirmed", confidence: "medium", finding: "Baptism entry matches.", sources: src },
+      { person: gone, kind: "confirmed", confidence: "low", finding: "About someone who will be removed.", sources: src }],
+    log: [{ person: "I15", question: "baptism", searched: "Exampleton parish register", result: "found" },
+      { person: gone, question: "birth", searched: "Exampleton parish register", result: "nil" }],
+  };
+  const prop = await call("POST", "/api/proposals", { as: AGENT, body: { tree: "all", payload: batch, rationale: "before the merge" } });
+  assert.equal(prop.status, 201, JSON.stringify(prop.data));
+  // the duplicate is merged and the other person removed after the suggestion was written
+  const ed = await call("POST", "/api/edit", { body: { tree: "all", reason: "duplicate", ops: [{ op: "person.merge", keep: "I9", drop: "I15" }, { op: "person.delete", id: gone }] } });
+  assert.equal(ed.status, 200, JSON.stringify(ed.data));
+
+  const first = await call("POST", `/api/proposals/${prop.data.proposal.id}/approve`, { body: {} });
+  assert.equal(first.status, 422);
+  assert.deepEqual(first.data.missing, [gone], "names who's missing; the merged person isn't counted");
+  assert.equal(first.data.dropped, 2);
+  assert.equal(first.data.can_skip, true);
+  assert.match(first.data.error, /2 items are about a person no longer in the tree/);
+
+  const ok = await call("POST", `/api/proposals/${prop.data.proposal.id}/approve`, { body: { skip_missing: true } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  const R = (await call("GET", "/api/tree?tree=all")).data.research;
+  assert.ok(R.findings.some((f) => f.person === "I9" && f.finding === "Baptism entry matches."), "the finding moved to the kept person");
+  assert.ok(!R.findings.some((f) => f.person === gone), "nothing about the removed person");
+});
