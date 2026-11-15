@@ -4,4 +4,4 @@ ALTER TABLE agent_runs ADD COLUMN kind TEXT NOT NULL DEFAULT 'research';  -- res
 ALTER TABLE agent_runs ADD COLUMN options TEXT;   -- JSON, per kind (quality: scope, person, limit, dry_run, items)
 ALTER TABLE agent_runs ADD COLUMN report TEXT;    -- JSON, per kind (quality: one decision per item reviewed)
 
-UPDATE meta SET value = '7' WHERE key = 'schema';
+UPDATE meta SET value = '7' WHERE key = 'schema' AND CAST(value AS INTEGER) < 7;
