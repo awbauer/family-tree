@@ -103,6 +103,7 @@ async function route(c) {
   if (p === "/api/agent/runs" && m === "GET") return Agent.listRuns(c, { grantOrFail });
   if ((r = p.match(/^\/api\/agent\/runs\/([\w-]+)$/)) && m === "GET") return Agent.getRun(c, r[1]);
   if ((r = p.match(/^\/api\/agent\/runs\/([\w-]+)\/cancel$/)) && m === "POST") return Agent.cancel(c, r[1]);
+  if ((r = p.match(/^\/api\/agent\/runs\/([\w-]+)\/apply$/)) && m === "POST") return Agent.applyRun(c, r[1]);
   if ((r = p.match(/^\/api\/profiles\/([^/]+)\/refresh$/)) && m === "POST") return Agent.refreshProfileRoute(c, decodeURIComponent(r[1]), { grantOrFail, scoped });
   if (p === "/api/content/refresh" && m === "POST") return Agent.refreshContent(c);
   if (p === "/api/chat" && m === "GET") return Chat.listChats(c, { grantOrFail });
