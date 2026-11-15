@@ -192,7 +192,7 @@ export function TreeChart() {
           <button data-z="fit" aria-label="Fit" onClick={(e) => { e.stopPropagation(); ctl.current?.fit(); }}>⤢</button>
         </div>
         <div className="tree-legend">{(D.research.branches || []).map((b) => <span key={b.key}><i style={{ background: branchColor(b.key, branches) }} />{b.label}</span>)}
-          <span className="muted">Click a person to re-centre · drag to pan · scroll to zoom</span></div>
+          <span className="muted hint-mouse">Click a person to re-centre · drag to pan · scroll to zoom</span><span className="muted hint-touch">Tap a person to re-centre · drag to pan · pinch to zoom</span></div>
       </div>
     </div>
   );

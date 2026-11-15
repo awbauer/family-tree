@@ -47,7 +47,15 @@ body {
   margin: 0; background: var(--paper); color: var(--ink);
   font: 16px/1.6 var(--sans); min-height: 100vh; display: flex; flex-direction: column;
 }
-main { flex: 1; outline: none; }
+main { flex: 1; outline: none; min-width: 0; overflow-wrap: anywhere; } /* long names, places and links wrap instead of widening the page */
+main table { overflow-wrap: break-word; } /* tables scroll inside .table-wrap instead of squeezing columns */
+main svg text { overflow-wrap: normal; }
+main input, main select, main textarea { max-width: 100%; min-width: 0; } /* no form field wider than its box */
+@media (max-width: 600px) {
+  main input, main select, main textarea { min-width: 0 !important; } /* beats the forms' inline min-widths */
+  /* in a wrapping row of fields, each text field gets a line of its own */
+  main form input:not([type=checkbox]):not([type=radio]), main form select, main form textarea { flex: 1 1 100% !important; }
+}
 #app:focus, #app:focus-visible { outline: none; }
 .tiles-dark { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); }
 .tiles-light { filter: sepia(.25) saturate(.8); }
@@ -69,9 +77,9 @@ button { font: inherit; color: inherit; }
 /* ---------- header ---------- */
 .site-header { background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 50; }
 .header-inner { display: flex; align-items: center; gap: 16px; height: 60px; }
-.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); white-space: nowrap; }
-.brand-mark { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font: 700 18px var(--serif); }
-.brand-text { font: 600 1.15rem var(--serif); }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); white-space: nowrap; min-width: 0; }
+.brand-mark { flex: none;  width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font: 700 18px var(--serif); }
+.brand-text { font: 600 1.15rem var(--serif); overflow: hidden; text-overflow: ellipsis; }
 .brand-text em { font-style: normal; font-weight: 400; color: var(--muted); }
 .site-nav { display: flex; gap: 2px; margin-left: 8px; }
 .site-nav a { padding: 6px 10px; border-radius: 8px; color: var(--ink-2); text-decoration: none; font-weight: 500; font-size: .95rem; }
@@ -94,13 +102,27 @@ button { font: inherit; color: inherit; }
   .search input { width: 140px; }
   .brand-text em { display: none; }
 }
-@media (max-width: 420px) { .search input { width: 110px; } }
+@media (max-width: 420px) {
+  .header-inner { gap: 8px; }
+  .search { flex: 1 1 90px; min-width: 0; }
+  .search input { width: 100%; font-size: 16px; } /* 16px keeps iOS from zooming in on focus */
+  .search-results { position: fixed; left: 8px; right: 8px; top: 56px; width: auto; }
+}
+@media (max-width: 360px) { .brand-text { display: none; } }
 
 .site-footer { border-top: 1px solid var(--line); padding: 20px 0; margin-top: 48px; font-size: .85rem; color: var(--muted); }
 .site-footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 
 /* ---------- generic components ---------- */
-.page { padding: 32px 0 16px; }
+.page { padding-top: 32px; padding-bottom: 16px; } /* top and bottom only: .wrap keeps its side margins */
+/* wide tables become one card per row on phones */
+@media (max-width: 600px) {
+  table.data.stack, table.data.stack tbody, table.data.stack tr, table.data.stack td { display: block; width: auto; }
+  table.data.stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  table.data.stack tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  table.data.stack td { border: 0; padding: 2px 0; }
+  table.data.stack td:empty { display: none; }
+}
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px; }
 .grid { display: grid; gap: 16px; }
 .g2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
@@ -110,8 +132,9 @@ button { font: inherit; color: inherit; }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .section-head h2 { margin: 0; }
 .eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: .72rem; font-weight: 600; color: var(--muted); }
-.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: .78rem; font-weight: 500; border: 1px solid var(--line); background: var(--paper); color: var(--ink-2); white-space: nowrap; text-decoration: none; }
-.chip .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.chip { max-width: 100%; display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: .78rem; font-weight: 500; border: 1px solid var(--line); background: var(--paper); color: var(--ink-2); white-space: nowrap; text-decoration: none; }
+.chip { overflow: hidden; text-overflow: ellipsis; } /* a very long name is cut short rather than widening the page */
+.chip .dot { flex: none;  width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .chip.branch { border-color: transparent; color: #fff; background: var(--bc, #888); }
 .badge { display: inline-flex; align-items: center; gap: 5px; font-size: .75rem; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
 .badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
@@ -199,6 +222,12 @@ table.data th { font-size: .75rem; text-transform: uppercase; letter-spacing: .0
 .timeline-list li.kin .t-body b { font-weight: 500; }
 .timeline-list li.kin .t-body .t-place { color: var(--muted); }
 .timeline-list li.kin .t-date { font-size: .8rem; }
+@media (max-width: 480px) { /* a narrower date column on phones */
+  .timeline-list::before { left: 70px; }
+  .timeline-list li { grid-template-columns: 58px 24px 1fr; }
+  .timeline-list .t-date { font-size: .78rem; }
+  .timeline-list li.kin .t-body { padding-left: 6px; }
+}
 .life-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .kin-toggle { cursor: pointer; white-space: nowrap; }
 sup.cite a { text-decoration: none; font-size: .72rem; padding: 0 1px; }
@@ -226,17 +255,20 @@ sup.cite a { text-decoration: none; font-size: .72rem; padding: 0 1px; }
 .prose h2 { margin-top: 1.4em; }
 
 /* ---------- tree ---------- */
-.tree-page { display: flex; flex-direction: column; height: calc(100vh - 60px); }
+.tree-page { display: flex; flex-direction: column; height: calc(100vh - 60px); height: calc(100dvh - 60px); }
 .tree-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--card); }
 .tree-bar .who { font: 600 1.1rem var(--serif); margin-right: auto; }
 .tree-canvas { flex: 1; position: relative; overflow: hidden; background:
   radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--muted) 22%, transparent) 1px, transparent 0) 0 0 / 22px 22px, var(--paper); touch-action: none; cursor: grab; }
 .tree-canvas.dragging { cursor: grabbing; }
 .tree-canvas svg { width: 100%; height: 100%; display: block; user-select: none; }
-.tree-zoom { position: absolute; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 6px; }
+.tree-zoom { position: absolute; right: 16px; top: 16px; display: flex; flex-direction: column; gap: 6px; }
 .tree-zoom button { width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); cursor: pointer; font-size: 1.1rem; box-shadow: var(--shadow); }
 .tree-legend { position: absolute; left: 16px; bottom: 16px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; font-size: .78rem; display: flex; gap: 10px; flex-wrap: wrap; max-width: calc(100% - 90px); box-shadow: var(--shadow); }
 .tree-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.tree-legend .hint-touch { display: none; }
+@media (pointer: coarse) { .tree-legend .hint-touch { display: inline-flex; } .tree-legend .hint-mouse { display: none; } }
+@media (max-width: 600px) { .tree-legend { max-width: calc(100% - 132px); } } /* clear of the assistant button */
 .tree-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .node rect.box { fill: var(--card); stroke: var(--line); }
 .node.root rect.box { stroke: var(--accent); stroke-width: 2; }
@@ -388,11 +420,11 @@ dialog.lightbox img { max-width: 100%; max-height: 62vh; display: block; margin:
 /* ---------- page assistant (Chat.tsx) ---------- */
 .chat-fab { position: fixed; right: 20px; bottom: 20px; z-index: 40; display: inline-flex; align-items: center; gap: 6px; padding: 10px 16px; border-radius: 999px; border: 0; background: var(--accent); color: var(--accent-ink); font: 600 .95rem var(--sans); box-shadow: var(--shadow); cursor: pointer; }
 .chat-fab:hover { filter: brightness(1.08); }
-.chat-panel { position: fixed; right: 20px; bottom: 20px; z-index: 41; width: min(420px, calc(100vw - 32px)); height: min(640px, calc(100vh - 40px)); display: flex; flex-direction: column; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 10px 40px rgba(0,0,0,.18); overflow: hidden; }
+.chat-panel { overflow-wrap: anywhere; position: fixed; right: 20px; bottom: 20px; z-index: 60; width: min(420px, calc(100vw - 32px)); height: min(640px, calc(100vh - 40px)); display: flex; flex-direction: column; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 10px 40px rgba(0,0,0,.18); overflow: hidden; }
 .chat-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--paper-2); }
 .chat-head .chat-where { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-head .icon-btn { font-size: .85rem; width: auto; min-width: 34px; height: 30px; border-radius: 8px; padding: 0 8px; color: var(--ink); }
-.chat-log { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.chat-log { flex: 1; overflow-y: auto; overscroll-behavior: contain; min-height: 0; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .chat-msg { max-width: 92%; padding: 8px 12px; border-radius: 12px; font-size: .92rem; line-height: 1.5; overflow-wrap: anywhere; }
 .chat-msg p { margin: 0 0 .5em; } .chat-msg p:last-child { margin: 0; }
 .chat-msg ul { margin: .2em 0 .5em; padding-left: 1.2em; }
@@ -416,9 +448,18 @@ dialog.lightbox img { max-width: 100%; max-height: 62vh; display: block; margin:
 .chat-typing span:nth-child(2) { animation-delay: .15s; } .chat-typing span:nth-child(3) { animation-delay: .3s; }
 @keyframes chat-dot { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
 @media (max-width: 600px) {
-  .chat-panel { right: 0; bottom: 0; width: 100vw; height: 85vh; border-radius: var(--radius) var(--radius) 0 0; }
-  .chat-fab { right: 16px; bottom: 16px; }
+  /* a full-screen sheet sized to what's visible above the on-screen keyboard (Chat.tsx sets --chat-top/--chat-h) */
+  .chat-panel { left: 0; right: 0; bottom: auto; top: var(--chat-top, 0px); width: 100%; height: var(--chat-h, 100dvh); border: 0; border-radius: 0; box-shadow: none; }
+  .chat-head { padding-top: max(10px, env(safe-area-inset-top)); }
+  .chat-head .icon-btn { min-width: 44px; height: 40px; }
+  .chat-form { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+  .chat-form textarea { font-size: 16px; } /* below 16px, iOS zooms the page in on focus */
+  .chat-msg { max-width: 100%; }
+  .chat-fab { right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); }
+  html.chat-open, html.chat-open body { overflow: hidden; } /* the page behind doesn't scroll */
 }
+/* form fields at 16px on phones, so iOS doesn't zoom in when one is tapped */
+@media (max-width: 600px) { input:not([type=checkbox]):not([type=radio]), select, textarea { font-size: 16px; } }
 @media print { .chat-fab, .chat-panel { display: none !important; } }
 
 /* ---------- story revision diff (review queue) ---------- */

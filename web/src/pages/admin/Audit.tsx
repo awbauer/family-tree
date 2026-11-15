@@ -161,7 +161,7 @@ export function Audit() {
         <input name="q" type="search" placeholder="Search reasons, ids, edit ids" defaultValue={st.q} style={{ flex: 1, minWidth: 180 }} /><button className="btn">Filter</button>
       </form>
       {st.rows.length ? (
-        <div className="table-wrap"><table className="data audit"><thead><tr><th>When (UTC)</th><th>Who</th><th>What</th><th>Why</th><th></th></tr></thead>
+        <div className="table-wrap"><table className="data stack audit"><thead><tr><th>When (UTC)</th><th>Who</th><th>What</th><th>Why</th><th></th></tr></thead>
           <tbody>{st.rows.map((b) => <Batch key={b.key} b={b} open={open.has(b.key)} onToggle={() => toggle(b.key)} onUndone={() => load(true)} />)}</tbody></table></div>
       ) : <div className="empty">No changes match.</div>}
       {st.next && <p><button className="btn" id="au-more" onClick={() => load(false)}>Load older changes</button></p>}

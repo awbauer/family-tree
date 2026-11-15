@@ -131,7 +131,7 @@ export function Todos() {
         {state.loading ? <p className="muted">Loading…</p>
           : state.error ? <div className="empty">{state.error}</div>
           : state.todos!.length ? (
-            <div className="table-wrap"><table className="data"><thead><tr><th>Priority</th><th>Person</th><th>Task</th><th>Status</th><th>Assigned</th><th></th></tr></thead>
+            <div className="table-wrap"><table className="data stack"><thead><tr><th>Priority</th><th>Person</th><th>Task</th><th>Status</th><th>Assigned</th><th></th></tr></thead>
               <tbody>{state.todos!.map((t) => <Fragment key={t.id}>{Row({ t })}{hist[t.id] && <History t={t} events={hist[t.id]} onComment={(text) => comment(t, text)} />}</Fragment>)}</tbody></table></div>
           ) : <div className="empty">Nothing here.</div>}
       </div>
