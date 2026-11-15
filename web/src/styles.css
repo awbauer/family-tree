@@ -192,6 +192,15 @@ table.data th { font-size: .75rem; text-transform: uppercase; letter-spacing: .0
 .timeline-list li.misfiled { opacity: .55; }
 .timeline-list li.ctx .t-dot { border-style: dashed; border-color: var(--muted); }
 .timeline-list li.ctx .t-body { color: var(--muted); font-style: italic; font-size: .9rem; }
+/* close-family events: muted and indented under the person's own */
+.timeline-list li.kin { padding: 4px 0; }
+.timeline-list li.kin .t-dot { width: 8px; height: 8px; margin: 6px 0 0 8px; border-color: var(--muted); }
+.timeline-list li.kin .t-body { color: var(--muted); font-size: .9rem; padding-left: 14px; }
+.timeline-list li.kin .t-body b { font-weight: 500; }
+.timeline-list li.kin .t-body .t-place { color: var(--muted); }
+.timeline-list li.kin .t-date { font-size: .8rem; }
+.life-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.kin-toggle { cursor: pointer; white-space: nowrap; }
 sup.cite a { text-decoration: none; font-size: .72rem; padding: 0 1px; }
 .sources-list { font-size: .88rem; padding-left: 22px; }
 .sources-list li { margin-bottom: 6px; }

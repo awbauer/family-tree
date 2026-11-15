@@ -1,33 +1,27 @@
-// Life events (own, family, children's births, parents' deaths, historical context) with footnoted citations, and,
-// when the API is live, each fact's verification badge, review form and provenance.
+// Life events (own, own marriages, close family's births/deaths/marriages, historical context) with footnoted
+// citations, and, when the API is live, each fact's verification badge, review form and provenance.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
-import { useData } from "../../data";
+import { store, useData } from "../../data";
+import { familyEvents } from "../../familyEvents";
 import { PersonLink, norm } from "../../lib";
 import { CitationFields, Cite, fillCitation, readCitation, SourceLink } from "../../ops";
-import { ago, apidLink, eventLabel, parentsOf, spousesOf } from "../../tree";
+import { ago, apidLink, eventLabel, spousesOf } from "../../tree";
 import { Linkify, useBranchStyle, useWho } from "../../ui";
 import type { Tree } from "../../types";
 import { usePerson } from "./context";
 
-interface Item { e: any; sort?: number | null; kind: "own" | "fam" | "child" | "rel" | "ctx" }
+interface Item { e: any; sort?: number | null; kind: "own" | "fam" | "kin" | "ctx" }
 
 /** The timeline items and the footnotes they cite (numbered in the order they first appear, then the person's own). */
 export function buildTimeline(D: Tree, id: string) {
-  const p = D.people[id] as any, P = D.people, R = D.research as any;
-  const parents = parentsOf(D, id), spouses = spousesOf(D, id);
+  const p = D.people[id] as any, R = D.research as any;
+  const spouses = spousesOf(D, id);
   const items: Item[] = [];
   p.events.forEach((e: any) => items.push({ e, sort: e.sort, kind: "own" }));
   spouses.forEach(({ fam, spouse }) => (fam.events || []).forEach((e) => items.push({ e: { ...e, withWho: spouse }, sort: e.sort, kind: "fam" })));
-  spouses.forEach(({ children }) => children.forEach((c) => {
-    const cp: any = P[c];
-    if (cp && cp.birth && cp.birth.sort) items.push({ e: { type: "Child born", dateDisplay: cp.birth.date, place: cp.birth.place, child: c }, sort: cp.birth.sort, kind: "child" });
-  }));
-  parents.forEach(({ father, mother }) => [father, mother].forEach((x) => {
-    const xp: any = x && P[x];
-    if (xp && xp.death && xp.death.sort && p.birth && p.birth.sort && xp.death.sort > p.birth.sort && (!p.death || !p.death.sort || xp.death.sort < p.death.sort))
-      items.push({ e: { type: (xp.sex === "F" ? "Mother" : "Father") + " died", dateDisplay: xp.death.date, place: xp.death.place, child: x }, sort: xp.death.sort, kind: "rel" });
-  }));
+  // close family's births, deaths and marriages in the person's lifetime (after their own events on the same date: the sort is stable)
+  familyEvents(D, id).forEach((fe) => items.push({ e: { type: fe.label, dateDisplay: fe.dateDisplay, place: fe.place, who: fe.who, partner: fe.partner }, sort: fe.sort, kind: "kin" }));
   const by = p.birth && p.birth.year, dy = (p.death && p.death.year) || (p.living ? new Date().getFullYear() : by && by + 80);
   (R.context || []).forEach((c: any) => {
     if (by && dy && c.year >= by && c.year <= dy && (!c.branches || c.branches.includes(p.branch)) && (!c.places || p.events.some((e: any) => c.places.includes(e.placeKey))))
@@ -38,7 +32,7 @@ export function buildTimeline(D: Tree, id: string) {
   const kept: Item[] = [];
   items.forEach((it) => {
     const e = it.e;
-    if (it.kind === "ctx" || e.misfiled) return kept.push(it);
+    if (it.kind === "ctx" || it.kind === "kin" || e.misfiled) return kept.push(it);
     const pl = (x?: string) => norm((x || "").split(",")[0]);
     const dupe = kept.find((k) => k.kind === it.kind && k.e.type === e.type && (!e.place || !k.e.place || pl(k.e.place) === pl(e.place)) && (k.e.withWho || null) === (e.withWho || null) &&
       (!it.sort || (k.sort && Math.floor(k.sort / 10000) === Math.floor(it.sort / 10000) && (e.type === "Marriage" || e.type === "Birth" || e.type === "Death"))));
@@ -66,11 +60,17 @@ export function FactBadge({ r }: { r?: any }) {
   return <>{" "}<span className={`badge st-${r.status === "verified" ? "verified" : "disputed"}`} title={tip}>{r.status}</span></>;
 }
 
+/** Set to "0" (per browser) when the viewer turns family events off; they're on by default. */
+const KIN_KEY = "lifeEvents:family";
+
 export function LifeEvents() {
   const { D, live } = useData();
   const { id, p } = usePerson();
   const bstyle = useBranchStyle();
-  const { rows } = buildTimeline(D, id);
+  const [showKin, setShowKin] = useState(() => store.get(KIN_KEY) !== "0");
+  const all = buildTimeline(D, id).rows;
+  const hasKin = all.some((r) => r.kind === "kin");
+  const rows = showKin ? all : all.filter((r) => r.kind !== "kin");
   // #/person/I5?fact=e3 (e.g. from a source's page) points at one fact
   const target = useSearchParams()[0].get("fact");
   useEffect(() => {
@@ -78,7 +78,11 @@ export function LifeEvents() {
   }, [target]);
   return (
     <section className="card">
-      <h2>Life events</h2>
+      <div className="life-head">
+        <h2>Life events</h2>
+        {hasKin && <label className="small muted kin-toggle"><input type="checkbox" checked={showKin}
+          onChange={(ev) => { setShowKin(ev.target.checked); store.set(KIN_KEY, ev.target.checked ? null : "0"); }} /> Family events</label>}
+      </div>
       {rows.length ? (
         <ul className="timeline-list" style={bstyle(p.branch)}>
           {rows.map((it, i) => {
@@ -86,11 +90,10 @@ export function LifeEvents() {
             if (kind === "ctx") return <li className="ctx" key={i}><div className="t-date">{String(it.sort).slice(0, 4)}</div><span className="t-dot"></span><div className="t-body">{e.text}</div></li>;
             let what: ReactNode = <><b>{eventLabel(e)}</b>{e.value && e.type !== "Residence" ? ` — ${e.value}` : ""}</>;
             if (kind === "fam") what = <><b>{e.type === "Marriage" ? "Married" : e.type}</b>{e.withWho ? <> <PersonLink id={e.withWho} /></> : null}</>;
-            if (kind === "child") what = <><b>Child born:</b> <PersonLink id={e.child} /></>;
-            if (kind === "rel") what = <><b>{e.type}:</b> <PersonLink id={e.child} /></>;
+            if (kind === "kin") what = <><b>{e.type}{e.who ? ":" : ""}</b>{e.who && <> <PersonLink id={e.who} /></>}{e.partner && <> to <PersonLink id={e.partner} /></>}</>;
             const own = kind === "own" && e.fid;
             return (
-              <li key={i} className={e.misfiled ? "misfiled" : ""}>
+              <li key={i} className={kind === "kin" ? "kin" : e.misfiled ? "misfiled" : ""}>
                 <div className="t-date">{e.dateDisplay || "undated"}</div><span className="t-dot"></span>
                 <div className={`t-body${own && e.fid === target ? " fact-target" : ""}`} data-fid={own ? e.fid : undefined}>
                   {what}{e.place && <> <span className="t-place">· {e.place}</span></>}
