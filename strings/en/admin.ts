@@ -6,12 +6,32 @@ export const admin = {
   page: {
     title: "Admin",
     heading: "Admin",
-    tabs: { access: "Access", sites: "Research sites", audit: "Audit history" },
+    tabs: { access: "Access", sites: "Research sites", stories: "Hidden stories", audit: "Audit history" },
     intro: {
       audit: "Every change to every tree and to the sharing settings, newest first: who made it (and on whose behalf), what changed and why. Select a row for the full detail.",
       sites: "The genealogy sites every research agent works from. Agents prefer these, follow your notes on each, and for subscription or institution sites they can't sign in to, log the search as inconclusive and leave you a to-do. Switch a site off to stop pointing agents to it.",
+      stories: "A tree shows a story only when everyone the story is about is in that tree. These stories are missing from at least one tree: here’s which, and why.",
       access: "Who can see which tree, and how much of it. Signing in happens through Cloudflare Access; a person also needs a grant here, or they see nothing.",
     },
+  },
+
+  // Admin → Hidden stories (web/src/pages/admin/HiddenStories.tsx): stories some tree doesn't show, and why.
+  hiddenStories: {
+    loading: "Loading…",
+    none: "Every story shows in every tree.",
+    count: (n: number) => `${plural(n, "story is", "stories are")} hidden from at least one tree.`,
+    hiddenEverywhere: "Hidden from every tree",
+    hiddenFrom: "Hidden from: ",
+    shownIn: "Shown in: ",
+    removed: (n: number) => `Names ${plural(n, "person", "people")} no longer in the tree, so no tree can show it:`,
+    removedNoName: "(name not recorded)",
+    outside: (tree: string) => `Not in ${tree}: `,
+    merged: "Merged since the story was written (counted as who they became): ",
+    mergedInto: " → ",
+    spans: "It’s about people from more than one branch, so it shows only in trees that include them all. That’s expected; nothing needs fixing unless a tree should take in those people.",
+    fix: "To show it again, the story must stop naming people who aren’t in the tree. Run “Review the story library” (Research → Agent runs): the librarian flags these stories and suggests a revision, which you approve or reject in Research → Suggestions.",
+    read: "Read the story",
+    sources: "Sources",
   },
 
   // Admin → Access: people and grants, views, data storage and tree definitions.
