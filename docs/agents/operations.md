@@ -216,6 +216,18 @@ npm run dev
 - The site-side logic is tested in `tests/agents.test.mjs` against the example family, with a fake agents Worker.
 - Version pins, with their reasons in `agents/package.json`: Flue 2.3.0 needs Pi 1.4.x, and the Agents SDK web tools need `agents` ≥ 0.28, which Flue accepts as a project-level override. Remove the pins when Flue catches up.
 
+## Page assistant (chat on every page)
+
+Editors get an **Ask** button on every page. It opens a chat with an agent (`agents/src/agents/assistant.js`, Flue) that knows the page you're on: each message carries the page's address, its visible text and, on a person or tree page, that person's full record (names and events with their fact ids, sources, photos, families, open findings and to-dos). It reads more of the tree with tools, always as you see it.
+
+- **It drafts, you decide.** When you describe a change, the assistant checks it against the tree and files a draft. The chat shows it as a card with exactly what would change and **Apply** / **Dismiss** buttons. Nothing changes until you press Apply. **Undo** on the card reverts it. A newer draft replaces one still waiting.
+- **Who made the change.** An applied draft is logged as made by `agent:assistant` **on behalf of** the editor who pressed Apply (`changes.actor` / `actor_kind = 'agent'` / `on_behalf_of`, plus `via` = the chat and draft). History shows "🤖 assistant on behalf of …"; PROV-O (`/api/prov`) has the agent with a `prov:qualifiedDelegation` from the editor for that activity. Undo is logged as the editor's own act.
+- **Where chats live.** Each conversation is a Flue `FlueAssistantAgent` Durable Object (id = chat id). The chat list (`chats`: owner, tree, title, tokens) and the drafted changes (`chat_changes`) are in D1, so applying a draft marks it applied in the same transaction as the edit. Only the editor who started a chat can read or use it.
+- **Who:** editors and the owner, only for trees they edit. Losing editor access stops it.
+- **What it sees:** what you see, living relatives included, so it can help keep them current. It has no web access and never deletes people (duplicates are merged).
+- **Model and cost:** the same model as research (`AI_MODEL`), at `AI_CHAT_EFFORT` (default `low`), counted against `AI_DAILY_TOKEN_BUDGET`. With AI Gateway logs on (`AI_GATEWAY_LOGS`), chat messages, page context included, are kept in the gateway's logs like research prompts.
+- **Setup:** none beyond the agents Worker. Migration `0006_chat.sql` adds `chats`, `chat_changes` and the attribution columns on `changes`; the agents Worker's `v2` Durable Object migration adds `FlueAssistantAgent`. Routes: `worker/agent/chat-routes.js`.
+
 ## GEDCOM X storage, export and import
 
 The tree is stored as GEDCOM X (docs/design/standards.md):

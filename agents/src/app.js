@@ -8,7 +8,9 @@ import { createCloudflareTracing } from "@flue/runtime/cloudflare";
 import { cloudflareBindingProvider } from "@flue/runtime/cloudflare/workers-ai";
 import { settings } from "../../worker/agent/config.js";
 import { RESEARCHER_PATH } from "../../worker/agent/runs.js";
+import { CHAT_PATH } from "../../worker/agent/chat.js";
 import { Researcher } from "./agents/researcher.js";
+import { Assistant } from "./agents/assistant.js";
 import { queueProfile, runContentJob } from "./content-jobs.js";
 
 const S = settings(env);
@@ -29,6 +31,7 @@ app.use("*", async (c, next) => {
 
 app.get("/health", (c) => c.json({ ok: true, model: S.model }));
 app.route(RESEARCHER_PATH, createAgentRouter(Researcher));
+app.route(CHAT_PATH, createAgentRouter(Assistant));
 app.post("/internal/profiles", async (c) => {
   const d = await c.req.json();
   return c.json(await queueProfile(String(d.person || ""), { force: !!d.force }), 202);

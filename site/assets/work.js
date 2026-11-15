@@ -287,7 +287,7 @@
         const diffs = (b) => window.FamilyPerson && b.entities.some((e) => e.before !== undefined || e.after !== undefined)
           ? window.FamilyPerson.diffHtml(c, b.entities.map((e) => ({ type: e.type, id: e.id, before: e.before, after: e.after })))
           : `<span class="muted">(${b.entities.map((e) => `${e.change} ${e.type}`).join(", ")})</span>`;
-        out.innerHTML = history.length ? `<ul class="history">${history.map((b) => `<li><div><span class="muted">${esc(b.at.slice(0, 16).replace("T", " "))} · ${esc(c.who(b.actor))}${b.proposal ? ` · suggestion #${b.proposal}` : ""}</span> <b>${esc(OPS[b.op] || b.op)}</b>${b.reason ? `: ${esc(b.reason)}` : ""}
+        out.innerHTML = history.length ? `<ul class="history">${history.map((b) => `<li><div><span class="muted">${esc(b.at.slice(0, 16).replace("T", " "))} · ${esc(c.who(b.actor))}${b.on_behalf_of ? ` on behalf of ${esc(c.who(b.on_behalf_of))}` : ""}${b.proposal ? ` · suggestion #${b.proposal}` : ""}</span> <b>${esc(OPS[b.op] || b.op)}</b>${b.reason ? `: ${esc(b.reason)}` : ""}
           ${c.EDITOR && b.batch && b.op !== "revert" && b.op !== "import" ? ` <button class="linklike" data-revert="${b.batch}">undo</button>` : ""}</div>
           <details><summary class="small">details</summary>${diffs(b)}</details></li>`).join("")}</ul>` : `<p class="muted">No changes since the import.</p>`;
         out.querySelectorAll("[data-revert]").forEach((btn) => (btn.onclick = async () => {

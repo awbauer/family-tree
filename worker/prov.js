@@ -88,9 +88,19 @@ export function toProv({ rows = [], runs = [], proposals = [], base = "", detail
     const used = [...sources];
     if (r.proposal_id) used.push(proposal(r.proposal_id));
     const cur = graph.get(actId);
+    // a software agent acting for a person (the page assistant applying a draft the editor confirmed): PROV delegation
+    const actor = agent(r.actor, r.actor_kind);
+    if (r.on_behalf_of) {
+      const principal = agent(r.on_behalf_of, "person");
+      const a = graph.get(actor["@id"]);
+      const dels = (a["prov:qualifiedDelegation"] || []).filter((x) => x["prov:hadActivity"]["@id"] !== actId);
+      node(actor["@id"], { "prov:qualifiedDelegation": [...dels, { "@type": "prov:Delegation", "prov:agent": principal, "prov:hadActivity": { "@id": actId } }] });
+    }
     node(actId, {
       "@type": ["prov:Activity", OP_TYPE[r.op] || "ft:Change"],
-      "prov:startedAtTime": dt(r.at), "prov:wasAssociatedWith": agent(r.actor, r.actor_kind),
+      "prov:startedAtTime": dt(r.at), "prov:wasAssociatedWith": actor,
+      "ft:onBehalfOf": r.on_behalf_of ? { "@id": `agent/${encodeURIComponent(who(r.on_behalf_of))}` } : undefined,
+      "ft:via": detail && r.via ? r.via : undefined,
       "rdfs:comment": r.reason, "prov:used": [...((cur && cur["prov:used"]) || []), ...used].filter((x, i, a) => a.findIndex((y) => y["@id"] === x["@id"]) === i),
     });
     const rec = `${r.entity_type}/${r.entity_id}`;
@@ -125,7 +135,8 @@ export function factHistory(doc, fid) {
       const act = byId.get(n["prov:wasGeneratedBy"]["@id"]) || {};
       const ag = byId.get((act["prov:wasAssociatedWith"] || {})["@id"]) || {};
       const used = (act["prov:used"] || []).map((u) => byId.get(u["@id"]) || u);
-      out.push({ at: (n["prov:generatedAtTime"] || {})["@value"], who: ag["rdfs:label"], kind: (act["@type"] || [])[1], change: f.change, reason: act["rdfs:comment"],
+      const behalf = byId.get((act["ft:onBehalfOf"] || {})["@id"]);
+      out.push({ at: (n["prov:generatedAtTime"] || {})["@value"], who: ag["rdfs:label"], onBehalfOf: behalf && behalf["rdfs:label"], kind: (act["@type"] || [])[1], change: f.change, reason: act["rdfs:comment"],
         sources: used.filter((u) => (u["@type"] || []).includes("gx:SourceDescription")).map((u) => ({ title: u["rdfs:label"], url: u["ft:url"] })),
         suggestion: used.filter((u) => (u["@type"] || []).includes("ft:Suggestion")).map((u) => u["@id"].split("/").pop())[0] });
     }

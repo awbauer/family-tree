@@ -260,12 +260,12 @@
         const used = (act["prov:used"] || []).map((u) => byId.get(u["@id"]) || u);
         const sugg = used.find((u) => (u["@type"] || []).includes("ft:Suggestion"));
         const run = sugg && sugg["prov:wasGeneratedBy"] && byId.get(sugg["prov:wasGeneratedBy"]["@id"]);
-        steps.push({ at: (n["prov:generatedAtTime"] || {})["@value"] || "", who: label(act["prov:wasAssociatedWith"]), kind: (act["@type"] || [])[1] || "", change: f.change, reason: act["rdfs:comment"],
+        steps.push({ at: (n["prov:generatedAtTime"] || {})["@value"] || "", who: label(act["prov:wasAssociatedWith"]), behalf: label(act["ft:onBehalfOf"]), kind: (act["@type"] || [])[1] || "", change: f.change, reason: act["rdfs:comment"],
           sources: used.filter((u) => (u["@type"] || []).includes("gx:SourceDescription")), sugg, author: sugg && label(sugg["prov:wasAttributedTo"]), run,
           onBehalf: run && label((byId.get((run["prov:wasAssociatedWith"] || {})["@id"]) || {})["prov:actedOnBehalfOf"]) });
       }
       const KIND = { "ft:Import": "imported", "ft:Edit": "edited", "ft:Revert": "undone", "ft:Resolution": "resolved" };
-      panel.innerHTML = steps.length ? `<b>History of this fact</b><ol class="prov-steps">${steps.map((s) => `<li><span class="muted">${esc(s.at.slice(0, 16).replace("T", " "))} · ${esc(c.who(s.who))}</span> ${esc(KIND[s.kind] || "changed")}: <b>${esc(s.change)}</b>${s.reason ? ` — ${esc(s.reason)}` : ""}
+      panel.innerHTML = steps.length ? `<b>History of this fact</b><ol class="prov-steps">${steps.map((s) => `<li><span class="muted">${esc(s.at.slice(0, 16).replace("T", " "))} · ${esc(c.who(s.who))}${s.behalf ? ` on behalf of ${esc(c.who(s.behalf))}` : ""}</span> ${esc(KIND[s.kind] || "changed")}: <b>${esc(s.change)}</b>${s.reason ? ` — ${esc(s.reason)}` : ""}
           ${s.sugg ? `<div>from <a href="#/research/queue">${esc(s.sugg["rdfs:label"])}</a> by ${esc(c.who(s.author))}${s.run ? `, written by a research agent on behalf of ${esc(c.who(s.onBehalf))} after reading ${(s.run["prov:used"] || []).length} page${(s.run["prov:used"] || []).length === 1 ? "" : "s"}` : ""}</div>` : ""}
           ${s.sources.length ? `<div>Evidence: ${s.sources.map((x) => x["ft:url"] ? `<a href="${esc(x["ft:url"])}" target="_blank" rel="noopener">${esc(x["rdfs:label"] || x["ft:url"])}</a>` : esc(x["rdfs:label"] || "")).join("; ")}</div>` : ""}</li>`).join("")}</ol>
         <a class="muted" href="api/prov?id=${encodeURIComponent(id)}${c.TREE ? `&tree=${encodeURIComponent(c.TREE)}` : ""}" target="_blank" rel="noopener">Provenance as PROV-O (JSON-LD)</a>`

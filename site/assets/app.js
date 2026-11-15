@@ -1125,6 +1125,7 @@ function startFamilyApp(D) {
   }
 
   route();
+  if (AI && LIVE && !D.previewView && window.FamilyChat) window.FamilyChat.mount(CTX()); // the page assistant
 }
 
 (function boot() {
