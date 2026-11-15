@@ -26,7 +26,7 @@ function startFamilyApp(D) {
   const whoTxt = (x) => !x ? "—" : ME && x === ME.principal ? "me" : x.startsWith("service:") || x.startsWith("agent:") ? "🤖 " + x.replace(/^(service|agent):/, "") : x.split("@")[0];
   const CTX = () => ({ P, F, S, R, D, ME, ACCOUNT, TREE, EDITOR, AI, app, api, esc, plink, findingHtml, people, isUnknown, mediaUrl, who: whoTxt });
   if (ACCOUNT && ACCOUNT.isOwner) {
-    const a = document.createElement("a"); a.href = "#/admin"; a.textContent = "Sharing";
+    const a = document.createElement("a"); a.href = "#/admin"; a.textContent = "Admin";
     document.querySelector(".site-nav").appendChild(a);
   }
   if (D.previewView) {
@@ -182,7 +182,7 @@ function startFamilyApp(D) {
     nav.classList.remove("open");
     document.querySelectorAll(".site-nav a").forEach((a) => a.classList.toggle("active", a.getAttribute("href") === "#/" + (parts[0] || "")));
     const views = { "": viewHome, tree: viewTree, person: viewPerson, people: viewPeople, stories: viewStories, story: viewStory, map: viewMap, timeline: viewTimeline, research: viewResearch, about: viewAbout, branch: viewBranch,
-      admin: () => (ACCOUNT && ACCOUNT.isOwner && window.FamilyWork ? (setTitle("Sharing"), window.FamilyWork.admin(CTX())) : viewNotFound()) };
+      admin: ([tab]) => (ACCOUNT && ACCOUNT.isOwner && window.FamilyWork ? (setTitle(tab === "audit" ? "Audit history" : "Admin"), window.FamilyWork.admin(CTX(), tab === "audit" ? "audit" : "access")) : viewNotFound()) };
     const v = views[parts[0] || ""] || viewNotFound;
     v(parts.slice(1), params);
     if (!["tree"].includes(parts[0])) window.scrollTo(0, 0);

@@ -3,7 +3,7 @@
 **Status:** built.
 - Phase 1, provenance: `worker/prov.js`, `/api/prov`.
 - Phases 2–4: `worker/gedcomx.js` (lossless conversion, export and import) and `worker/storage.js` (GEDCOM X storage, with Couple/ParentChild relationships instead of families).
-- An existing database moves over with **Sharing → Data storage** (`POST /api/admin/storage`).
+- An existing database moves over with **Admin → Data storage** (`POST /api/admin/storage`).
 
 ## Decision
 
