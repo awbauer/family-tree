@@ -312,9 +312,14 @@
   };
 
   // ---------------------------------------------------------------- admin (#9, owner only)
-  W.admin = async function (c) {
+  W.admin = async function (c, tab = "access") {
     const esc = c.esc;
-    c.app.innerHTML = `<div class="wrap page"><h1>Sharing</h1><p class="muted">Who can see which tree, and how much of it. Signing in happens through Cloudflare Access; a person also needs a grant here, or they see nothing.</p><div id="adm"><p class="muted">Loading…</p></div></div>`;
+    const tabs = `<nav class="tabs">${[["access", "Access", "#/admin"], ["audit", "Audit history", "#/admin/audit"]].map(([k, l, h]) => `<a href="${h}" class="${k === tab ? "on" : ""}"${k === tab ? ' aria-current="page"' : ""}>${l}</a>`).join("")}</nav>`;
+    if (tab === "audit") {
+      c.app.innerHTML = `<div class="wrap page"><h1>Admin</h1>${tabs}<p class="muted">Every change to every tree and to the sharing settings, newest first: who made it (and on whose behalf), what changed and why. Select a row for the full detail.</p><div id="audit"><p class="muted">Loading…</p></div></div>`;
+      return W.audit(c, document.getElementById("audit"));
+    }
+    c.app.innerHTML = `<div class="wrap page"><h1>Admin</h1>${tabs}<p class="muted">Who can see which tree, and how much of it. Signing in happens through Cloudflare Access; a person also needs a grant here, or they see nothing.</p><div id="adm"><p class="muted">Loading…</p></div></div>`;
     const draw = async () => {
       const a = await c.api("GET", "admin");
       const viewOpts = (sel) => `<option value="">Full view</option>${a.views.map((v) => `<option value="${esc(v.id)}"${v.id === sel ? " selected" : ""}>${esc(v.name)}</option>`).join("")}`;
@@ -403,5 +408,125 @@
       }));
     };
     try { await draw(); } catch (e) { document.getElementById("adm").innerHTML = `<p>${esc(e.message)}</p>`; }
+  };
+
+  // ---------------------------------------------------------------- audit history (owner only)
+  const AUDIT_OPS = { edit: "Edit", revert: "Undo", import: "Import", "storage-upgrade": "Storage move", resolve: "Finding resolved", resolved: "Finding resolved", dismissed: "Finding dismissed", reopen: "Finding reopened",
+    create: "Created", update: "Updated", put: "Set", delete: "Removed", set: "Status set", revise: "Story revised", approve: "Approved", reject: "Rejected", withdraw: "Withdrawn" };
+  const AUDIT_TYPES = { person: ["person", "people"], family: ["family", "families"], source: ["source", "sources"], config: ["setting", "settings"], media: ["photo", "photos"], todo: ["to-do", "to-dos"], finding: ["finding", "findings"],
+    proposal: ["suggestion", "suggestions"], story: ["story", "stories"], status: ["status", "statuses"], grant: ["grant", "grants"], view: ["view", "views"], tree: ["tree", "trees"], member: ["member", "members"], comment: ["comment", "comments"] };
+  const typeName = (t, n) => { const x = AUDIT_TYPES[t] || [t, `${t}s`]; return n === 1 ? x[0] : x[1]; };
+
+  W.audit = function (c, el) {
+    const esc = c.esc, P = c.P;
+    const state = { actor: "", type: "", q: "", rows: [], next: null, actors: [], types: [] };
+    const fmt = (iso) => (iso ? iso.slice(0, 16).replace("T", " ") : "");
+    const who = (x) => esc(c.who(x));
+    const entityLink = (e) => {
+      const name = e.label ? esc(e.label) : esc(e.id);
+      if (e.type === "person" && P[e.id]) return c.plink(e.id, e.label || undefined);
+      if (e.type === "story") return `<a href="#/story/${esc(e.id)}">${name}</a>`;
+      return name;
+    };
+    function summary(b) {
+      const parts = Object.entries(b.types).map(([t, n]) => `${n} ${typeName(t, n)}`);
+      const names = b.entities.filter((e) => e.label || ["person", "family", "story", "grant", "tree", "view"].includes(e.type)).slice(0, 4).map(entityLink);
+      return `<span class="badge">${esc(AUDIT_OPS[b.op] || b.op)}</span> ${esc(parts.join(", "))}${names.length ? `<br><span class="small">${names.join(", ")}${b.count > names.length ? ", …" : ""}</span>` : ""}`;
+    }
+    const row = (b) => `<tr class="audit-row" data-key="${esc(b.key)}" tabindex="0" aria-expanded="false">
+      <td class="small nowrap">${esc(fmt(b.at))}</td>
+      <td class="small">${who(b.actor)}${b.on_behalf_of ? `<br><span class="muted">for ${who(b.on_behalf_of)}</span>` : ""}</td>
+      <td>${summary(b)}</td>
+      <td class="small">${esc((b.reason || "").slice(0, 160))}${(b.reason || "").length > 160 ? "…" : ""}</td>
+      <td class="small muted audit-caret" aria-hidden="true">▸</td></tr>`;
+    function draw() {
+      el.innerHTML = `<form class="filters" id="au-f">
+          <select name="actor" aria-label="Who"><option value="">Anyone</option>${state.actors.map((a) => `<option value="${esc(a.v)}"${a.v === state.actor ? " selected" : ""}>${esc(c.who(a.v))} (${a.n})</option>`).join("")}</select>
+          <select name="type" aria-label="What"><option value="">Any record</option>${state.types.map((t) => `<option value="${esc(t.v)}"${t.v === state.type ? " selected" : ""}>${esc(typeName(t.v, 2))} (${t.n})</option>`).join("")}</select>
+          <input name="q" type="search" placeholder="Search reasons, ids, edit ids" value="${esc(state.q)}" style="flex:1;min-width:180px"><button class="btn">Filter</button></form>
+        ${state.rows.length ? `<div class="table-wrap"><table class="data audit"><thead><tr><th>When (UTC)</th><th>Who</th><th>What</th><th>Why</th><th></th></tr></thead><tbody>${state.rows.map(row).join("")}</tbody></table></div>` : `<div class="empty">No changes match.</div>`}
+        ${state.next ? `<p><button class="btn" id="au-more">Load older changes</button></p>` : ""}`;
+      el.querySelector("#au-f").onsubmit = (ev) => { ev.preventDefault(); const f = ev.target; state.actor = f.actor.value; state.type = f.type.value; state.q = f.q.value.trim(); load(true); };
+      const more = el.querySelector("#au-more");
+      if (more) more.onclick = () => load(false);
+      el.querySelectorAll(".audit-row").forEach((tr) => {
+        tr.onclick = (ev) => { if (!ev.target.closest("a")) toggle(tr); };
+        tr.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggle(tr); } };
+      });
+    }
+    async function load(reset) {
+      const qs = new URLSearchParams({ limit: "40" });
+      if (state.actor) qs.set("actor", state.actor);
+      if (state.type) qs.set("type", state.type);
+      if (state.q) qs.set("q", state.q);
+      if (!reset && state.next) qs.set("before", String(state.next));
+      try {
+        const r = await c.api("GET", `admin/audit?${qs}`);
+        if (r.actors) state.actors = r.actors;
+        if (r.types) state.types = r.types;
+        state.rows = reset ? r.batches : [...state.rows, ...r.batches];
+        state.next = r.next;
+        draw();
+      } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    }
+
+    // ---- one batch in full
+    const short = (v) => { const s = typeof v === "string" ? v : JSON.stringify(v); return s == null ? "—" : s.length > 140 ? s.slice(0, 137) + "…" : s; };
+    function fieldDiff(a, b) {
+      if (a == null || b == null || typeof a !== "object" || typeof b !== "object") return "";
+      const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+      return keys.length ? `<ul class="diff-fields">${keys.map((k) => `<li><b>${esc(k)}</b>: <span class="d-from">${esc(short(a[k]))}</span> → <span class="d-to">${esc(short(b[k]))}</span></li>`).join("")}</ul>` : "";
+    }
+    function rowDetail(r) {
+      const X = window.FamilyPerson;
+      const label = r.type === "person" && P[r.entity] ? c.plink(r.entity) : esc(r.entity);
+      let body = "";
+      if (X && ["person", "family", "source", "media", "finding", "status"].includes(r.type)) {
+        try { body = X.diffHtml(c, [{ type: r.type, id: r.entity, before: r.before, after: r.after }]); } catch { body = ""; }
+      }
+      if (!body || /No visible differences/.test(body)) body = (r.change === "updated" ? fieldDiff(r.before, r.after) : "") || body;
+      const raw = `<details class="small"><summary>Stored values</summary><div class="audit-raw"><div><b>Before</b><pre>${esc(JSON.stringify(r.before, null, 1) || "—")}</pre></div><div><b>After</b><pre>${esc(JSON.stringify(r.after, null, 1) || "—")}</pre></div></div></details>`;
+      return `<div class="audit-entity"><div class="small"><b>${esc(typeName(r.type, 1))}</b> ${label} · ${esc(r.change)}${r.op !== "edit" ? ` (${esc(AUDIT_OPS[r.op] || r.op)})` : ""}${r.version_after ? ` · version ${esc(r.version_after)}` : ""}</div>${body}${raw}</div>`;
+    }
+    function detailHtml(d) {
+      const first = d.rows[0];
+      const sources = first.sources || d.rows.find((r) => r.sources) && d.rows.find((r) => r.sources).sources;
+      const reasons = [...new Set(d.rows.map((r) => r.reason).filter(Boolean))];
+      const undoable = d.batch && !d.rows.some((r) => r.op === "revert") && d.rows.some((r) => ["person", "family", "source", "config", "finding"].includes(r.type));
+      return `<div class="audit-detail">
+        <dl class="audit-meta small">
+          <dt>When</dt><dd>${esc(fmt(first.at))} UTC</dd>
+          <dt>Who</dt><dd>${who(first.actor)}${first.actor_kind === "agent" ? " (agent)" : ""}${first.on_behalf_of ? `, on behalf of ${who(first.on_behalf_of)}` : ""}</dd>
+          ${first.via ? `<dt>Via</dt><dd>${/^run-/.test(first.via) ? `<a href="#/research/agents">agent run ${esc(first.via)}</a>` : esc(first.via)}</dd>` : ""}
+          ${d.batch ? `<dt>Edit id</dt><dd><code>${esc(d.batch)}</code></dd>` : ""}
+          ${reasons.length ? `<dt>Why</dt><dd>${reasons.map(esc).join("<br>")}</dd>` : ""}
+          ${(sources || []).length ? `<dt>Sources</dt><dd>${sources.map((s) => s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title || s.url)}</a>` : esc(s.title || "")).join("; ")}</dd>` : ""}
+          ${d.proposals.map((p) => `<dt>Suggestion</dt><dd><a href="#/research/queue">#${esc(p.id)}</a> (${esc(p.kind)}) by ${who(p.author)}, ${esc(p.status)}${p.reviewed_by ? ` by ${who(p.reviewed_by)}` : ""}${p.rationale ? `<br><span class="muted">${esc(p.rationale.slice(0, 300))}</span>` : ""}</dd>`).join("")}
+          ${d.runs.map((r) => `<dt>Run</dt><dd>${esc(r.kind || "research")} run started by ${who(r.started_by)}${r.instructions ? `: ${esc(r.instructions)}` : ""} (${esc(r.status)})</dd>`).join("")}
+        </dl>
+        <div>${d.rows.map(rowDetail).join("")}</div>
+        ${undoable ? `<p><button class="btn" data-undo="${esc(d.batch)}">Undo this change</button> <span class="small muted">Records changed since then can't be undone this way.</span></p>` : ""}</div>`;
+    }
+    async function toggle(tr) {
+      const next = tr.nextElementSibling;
+      const caret = tr.querySelector(".audit-caret");
+      if (next && next.classList.contains("audit-detail-row")) { next.remove(); tr.setAttribute("aria-expanded", "false"); tr.classList.remove("open"); caret.textContent = "▸"; return; }
+      tr.setAttribute("aria-expanded", "true"); tr.classList.add("open"); caret.textContent = "▾";
+      const d = document.createElement("tr");
+      d.className = "audit-detail-row";
+      d.innerHTML = `<td colspan="5"><p class="small muted">Loading…</p></td>`;
+      tr.after(d);
+      try {
+        const r = await c.api("GET", `admin/audit/${encodeURIComponent(tr.dataset.key)}`);
+        d.firstElementChild.innerHTML = detailHtml(r);
+        const u = d.querySelector("[data-undo]");
+        if (u) u.onclick = async () => {
+          if (!confirm("Undo this change? The records go back to how they were before it; the undo is itself logged.")) return;
+          try { await c.api("POST", `changes/${encodeURIComponent(u.dataset.undo)}/revert`, {}); u.replaceWith(Object.assign(document.createElement("span"), { className: "small", textContent: "Undone. Reload to see the tree as it is now." })); load(true); }
+          catch (e) { alert(e.message); }
+        };
+      } catch (e) { d.firstElementChild.innerHTML = `<p class="small">${esc(e.message)}</p>`; }
+    }
+    load(true);
   };
 })();

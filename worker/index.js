@@ -15,6 +15,7 @@
  *   /api/agent/runs, /api/profiles/:id/refresh, /api/content/refresh   cloud research agents (worker/agent/routes.js)
  *   /api/chat…                           the page assistant: chat, drafted changes, apply/undo (worker/agent/chat-routes.js)
  *   GET  /api/admin, PUT /api/admin/{trees,views,members}/:id, PUT|DELETE /api/admin/grants   (owner only)
+ *   GET  /api/admin/audit, /api/admin/audit/:key   the audit history of every change (owner only; worker/audit.js)
  *   GET  /media/<key>                    photos/documents from R2, only if attached to someone you can see
  *   everything else                      static app from ./site (contains no family data)
  *
@@ -35,6 +36,7 @@ import * as Prov from "./prov.js";
 import * as GedcomX from "./gedcomx.js";
 import * as Storage from "./storage.js";
 import { exportGedcom } from "./gedcom_export.js";
+import * as Audit from "./audit.js";
 
 const TODO_STATUSES = ["open", "in_progress", "needs_review", "done", "wont_do"];
 const PRIORITY = ["high", "medium", "low"];
@@ -113,6 +115,8 @@ async function route(c) {
   if ((r = p.match(/^\/api\/chat\/(chat-[\w-]+)\/messages$/)) && m === "POST") return Chat.sendMessage(c, r[1], await body(c), { scoped });
   if ((r = p.match(/^\/api\/chat\/(chat-[\w-]+)\/abort$/)) && m === "POST") return Chat.abortChat(c, r[1]);
   if (p === "/api/admin" && m === "GET") return admin(c);
+  if (p === "/api/admin/audit" && m === "GET") return Audit.listAudit(c);
+  if ((r = p.match(/^\/api\/admin\/audit\/([\w-]+)$/)) && m === "GET") return Audit.auditDetail(c, r[1]);
   if ((r = p.match(/^\/api\/admin\/(trees|views|members)\/([^/]+)$/)) && m === "PUT") return adminPut(c, r[1], decodeURIComponent(r[2]));
   if (p === "/api/admin/grants" && (m === "PUT" || m === "DELETE")) return adminGrant(c, m);
   fail(404, "Not found");

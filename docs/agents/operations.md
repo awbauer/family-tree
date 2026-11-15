@@ -97,6 +97,18 @@ Set `OWNER_EMAIL` (and the Access values) in the dashboard under Variables and S
 
 Test the whole thing locally first: put `ALLOW_UNAUTHENTICATED=true` and `DEV_PRINCIPAL=you@example.com` in `.dev.vars`, then run `npm run db:migrate:local && npm run db:import:local && npm run dev`. Local D1 lives in `.wrangler/`, so delete `.wrangler/state` to start over.
 
+## Audit history
+
+**Admin → Audit history** (owner only) lists every change in the change log, for all trees and for the sharing settings (grants, views, trees, members), newest first and grouped by the edit that made it:
+- **Each row** shows when (UTC), who (and on whose behalf, for changes an agent made for someone), what kind of change and which records, and why.
+- **Selecting a row** opens the detail:
+  - each record's changes as a diff, plus its stored values before and after;
+  - the sources cited, the suggestion or agent run it came from, and the edit id;
+  - an **Undo** button for edits to the tree.
+- **Filters:** by who, by kind of record, or by searching reasons, record ids and edit ids. "Load older changes" pages back.
+
+API: `GET /api/admin/audit?before=&limit=&actor=&type=&q=` and `GET /api/admin/audit/<edit id>` (`worker/audit.js`).
+
 ## Who can see what (trees, views, grants)
 
 Owners (`OWNER_EMAIL`, or `members.is_owner`) see every tree. Everyone else needs a **grant**: principal + tree + role (`editor`, `member` or `agent`) + optional **view** (a filter: living people `full`/`names-only`/`anonymous`/`hidden`, branch subset, generation limit, research/notes/media/sources on or off). No grant means no data. The admin UI is phase 6 (#9). Until then, use the API as the owner:
@@ -117,7 +129,7 @@ Photos and documents uploaded in the app go to R2 under `uploads/`, after the br
 
 ## Invites
 
-Granting someone a tree on the **Sharing** page (owner only) also needs them allowed through Cloudflare Access. To have the app do that automatically, create an API token with only *Access: Organizations, Identity Providers, and Groups: Edit*, make an Access group used by the app's policy, then:
+Granting someone a tree on the **Admin** page (owner only) also needs them allowed through Cloudflare Access. To have the app do that automatically, create an API token with only *Access: Organizations, Identity Providers, and Groups: Edit*, make an Access group used by the app's policy, then:
 
 ```sh
 npx wrangler secret put CF_API_TOKEN -c wrangler.local.jsonc     # ⚠ ask
@@ -285,7 +297,7 @@ The tree is stored as GEDCOM X (docs/design/standards.md):
 
 **Moving an existing database (one time, owner):**
 1. Apply migration 0005.
-2. Open **Sharing → Data storage → Check**. That's a dry run: it converts every record, proves each converts back exactly, and reports the counts.
+2. Open **Admin → Access → Data storage → Check**. That's a dry run: it converts every record, proves each converts back exactly, and reports the counts.
 3. Then **Move to GEDCOM X storage**, which runs as one transaction. `meta.storage` becomes `gedcomx`.
 4. Undo: D1 Time Travel to just before the move. The old `families` rows are cleared by the move.
 
