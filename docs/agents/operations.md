@@ -152,7 +152,7 @@ Editors can hand a to-do or a person to a research agent that runs in Cloudflare
 **How it's built.** A second, private Worker, `family-tree-agents`, in `agents/`:
 
 - **[Flue](https://flueframework.com/)** agents on its Cloudflare target. Each run is one Flue conversation: a Durable Object on Cloudflare's **Agents SDK**, with **Pi** running the loop (model turns, tool calls, retries, compaction). If the object is evicted or crashes mid-run, Flue resumes from its durable records. It never re-runs a model call or tool call whose result was already recorded.
-- **The model runs on Workers AI by default.** The model is `cloudflare/<AI_MODEL>`, called through the Workers AI binding and your AI Gateway. The default, `@cf/moonshotai/kimi-k2.6`, is a strong tool-using model hosted on Workers AI. It's billed to your Workers plan, with a daily free allocation, and needs no AI Gateway credits or provider key.
+- **The models run on Workers AI by default.** Each agent has its own model (`AI_MODEL_<AGENT>`; defaults and reasons in [models.md](models.md)), called through the Workers AI binding and your AI Gateway. The defaults are billed to your Workers plan, with a daily free allocation, and need no AI Gateway credits or provider key.
   - To use Claude, set `AI_MODEL=anthropic/claude-opus-5-5` and load AI Gateway credits, or store an Anthropic key on the gateway.
   - With a zero credit balance, gateway models fail with error 2002, "Model execution failed".
 - **Cloudflare's agent tools:** `web_search` (Cloudflare Web Search API) and `web_fetch` (pages and PDFs to Markdown) from the Agents SDK.
@@ -253,7 +253,7 @@ Research → Agent runs → **Data quality review** starts an agent (`agents/src
   - A dry run changes nothing and keeps a report (`agent_runs.report`). **Apply these decisions** applies it later without running the model again, once per run.
   - Either way, every write is conditional on the item's version, so an item someone changed meanwhile is skipped, not overwritten.
 - **Attribution:** changes are logged as `agent:data-quality` on behalf of the editor who started the run, or who applied the dry run. This shows in to-do history (`on_behalf_of`), on finding resolutions and in the change log (`on_behalf_of`, `via` = the run id).
-- **Budget:** one run against `AGENT_MAX_RUNS_PER_DAY`, tokens against `AI_DAILY_TOKEN_BUDGET`, model effort `AI_CONTENT_EFFORT`. Migration `0007_agent_kinds.sql`; Durable Object migration `v3` (`FlueQualityReviewerAgent`).
+- **Budget:** one run against `AGENT_MAX_RUNS_PER_DAY`, spend against `AI_DAILY_BUDGET_USD` and `AGENT_MAX_RUN_USD`; model `AI_MODEL_QUALITY`, effort `AI_EFFORT_QUALITY`. Migration `0007_agent_kinds.sql`; Durable Object migration `v3` (`FlueQualityReviewerAgent`).
 
 ## Stories agent
 
@@ -267,7 +267,7 @@ Editors can have an agent (`agents/src/agents/stories.js`, Flue, one Durable Obj
   - every source is one the tree already cites for those people, or a context entry;
   - living people are never a subject, and come to the agent as a name only.
 - **No web access**, so nothing in a story can come from outside the tree.
-- **Budget:** one run against `AGENT_MAX_RUNS_PER_DAY`, effort `AI_CONTENT_EFFORT`. Durable Object migration `v4` (`FlueStoryWriterAgent`). The weekly content job's story check (`StoryReviewer`) is separate and unchanged.
+- **Budget:** one run against `AGENT_MAX_RUNS_PER_DAY`, spend against `AI_DAILY_BUDGET_USD` and `AGENT_MAX_RUN_USD`; model `AI_MODEL_STORIES` (default GLM-5.3), effort `AI_EFFORT_STORIES`. Durable Object migration `v4` (`FlueStoryWriterAgent`). The weekly content job's story check (`StoryReviewer`) is separate and unchanged.
 
 ## GEDCOM X storage, export and import
 
