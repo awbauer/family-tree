@@ -12,5 +12,5 @@ export default defineConfig({
   base: "./",
   plugins: [react()],
   build: { outDir: fileURLToPath(new URL("../dist/site", import.meta.url)), emptyOutDir: true, sourcemap: true },
-  server: { port: 5173, proxy: { "/api": api, "/media": api } },
+  server: { port: 5173, proxy: { "/api": api, "/media": api }, fs: { allow: [".."] } }, // ../strings is shared with the Worker
 });

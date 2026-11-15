@@ -27,9 +27,11 @@
     "dev:web": "vite --config web/vite.config.ts",
     "dev:example": "node tools/dev_server.mjs --site dist/site",
     "typecheck": "tsc -p web",
-    "test:e2e": "node --test --test-concurrency=1 e2e/"
+    "test:e2e": "node --test --test-concurrency=1 e2e/",
+    "check:strings": "node tools/check_strings.mjs"
   },
   "devDependencies": {
+    "@babel/parser": "7.29.12",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
