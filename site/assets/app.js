@@ -24,7 +24,7 @@ function startFamilyApp(D) {
     return data;
   }
   const whoTxt = (x) => !x ? "—" : ME && x === ME.principal ? "me" : x.startsWith("service:") || x.startsWith("agent:") ? "🤖 " + x.replace(/^(service|agent):/, "") : x.split("@")[0];
-  const CTX = () => ({ P, F, S, R, D, ME, ACCOUNT, TREE, EDITOR, AI, app, api, esc, plink, findingHtml, people, isUnknown, who: whoTxt });
+  const CTX = () => ({ P, F, S, R, D, ME, ACCOUNT, TREE, EDITOR, AI, app, api, esc, plink, findingHtml, people, isUnknown, mediaUrl, who: whoTxt });
   if (ACCOUNT && ACCOUNT.isOwner) {
     const a = document.createElement("a"); a.href = "#/admin"; a.textContent = "Sharing";
     document.querySelector(".site-nav").appendChild(a);
@@ -373,7 +373,7 @@ function startFamilyApp(D) {
     const parents = parentsOf(id);
     const spouses = spousesOf(id);
     const sibs = siblingsOf(id);
-    const findings = findingsFor(id);
+    const findings = findingsFor(id).slice().sort((a, b) => (a.resolution ? 1 : 0) - (b.resolution ? 1 : 0));
     const todos = todosFor(id);
     const stories = storiesFor(id);
     const media = (R.media || {})[id] || [];
@@ -384,7 +384,7 @@ function startFamilyApp(D) {
     const notes = [];
     const noteIdx = new Map();
     function cite(c) {
-      const key = c.source + "|" + (c.page || "");
+      const key = [c.source, c.title, c.url, c.page].map((x) => x || "").join("|");
       if (!noteIdx.has(key)) { notes.push(c); noteIdx.set(key, notes.length); }
       const n = noteIdx.get(key);
       return `<a href="#fn-${n}" onclick="event.preventDefault();document.getElementById('fn-${n}').scrollIntoView({behavior:'smooth',block:'center'})">${n}</a>`;
@@ -488,9 +488,15 @@ function startFamilyApp(D) {
 
           <section class="card" style="margin-top:20px">
             <h2>Research</h2>
-            ${findings.length ? `<h3>Findings</h3>${findings.map(findingHtml).join("")}` : `<p class="muted small">No independent research recorded yet beyond the Ancestry citations below.</p>`}
+            ${findings.length ? `<h3>Findings${findings.some((f) => !f.resolution && ["conflict", "correction", "data-error", "new-fact"].includes(f.kind)) ? ` <span class="count">${findings.filter((f) => !f.resolution && ["conflict", "correction", "data-error", "new-fact"].includes(f.kind)).length} to act on</span>` : ""}</h3>${findings.map(findingHtml).join("")}` : `<p class="muted small">No independent research recorded yet beyond the Ancestry citations below.</p>`}
             ${issues.length ? `<h3 style="margin-top:18px">Automatic data checks</h3>${issues.map(issueHtml).join("")}` : ""}
-            ${todos.length ? `<h3 style="margin-top:18px">Next steps</h3><ul>${todos.map((t) => `<li><span class="prio-${t.priority}">[${esc(t.priority)}]</span> ${esc(t.task)}${t.status && t.status !== "open" ? ` <span class="small muted">· ${esc((t.status || "").replace("_", " "))}${t.assignee ? ` · ${who(t.assignee)}` : ""}</span>` : t.assignee ? ` <span class="small muted">· ${who(t.assignee)}</span>` : ""}${t.where ? ` <span class="muted small">— ${linkify(t.where)}</span>` : ""}</li>`).join("")}</ul>` : ""}
+            <h3 style="margin-top:18px">Next steps</h3>
+            <div id="w-todos">${todos.length ? `<ul>${todos.map((t) => `<li><span class="prio-${t.priority}">[${esc(t.priority)}]</span> ${esc(t.task)}${t.where ? ` <span class="muted small">— ${linkify(t.where)}</span>` : ""}</li>`).join("")}</ul>` : `<p class="muted small">None yet.</p>`}</div>
+          </section>
+
+          <section class="card" id="w-photos" style="margin-top:20px">
+            <h2>Photos and documents</h2>
+            ${media.length ? `<div class="photo-grid">${media.map((m) => `<figure class="photo${m.portrait ? " main" : ""}">${/\.pdf$/i.test(m.file) ? `<div class="doc">PDF</div>` : `<img loading="lazy" src="${esc(mediaUrl(m.file))}" alt="${esc(m.caption || p.name)}">`}<figcaption>${esc(m.caption || "")}</figcaption></figure>`).join("")}</div>` : `<p class="muted small">No photos or documents yet.</p>`}
           </section>
 
           <section class="card" style="margin-top:20px">
@@ -498,8 +504,10 @@ function startFamilyApp(D) {
             ${notes.length ? `<ol class="sources-list">${notes.map((c, i) => {
               const s = S[c.source] || {};
               const url = apidLink(c.apid);
-              return `<li id="fn-${i + 1}">${esc(s.title || c.source)}${s.author ? `, ${esc(s.author)}` : ""}${url ? ` · <a href="${url}" target="_blank" rel="noopener">view record on Ancestry</a>` : ""}${c.page ? `<span class="pg">${esc(c.page)}</span>` : ""}${c.text ? `<span class="pg">“${esc(c.text)}”</span>` : ""}</li>`;
-            }).join("")}</ol><p class="small muted">Source titles are Ancestry collections; most are indexes or derivative records. “View record” links need an Ancestry login.</p>` : '<p class="muted small">No sources cited. Everything on this page is unsourced.</p>'}
+              const title = s.title || c.title || c.source || c.url || "Source";
+              const ev = [c.source_type && { original: "original record", derivative: "derivative (index, transcript)", authored: "authored work" }[c.source_type], c.information && `${c.information} information`, c.evidence && `${c.evidence} evidence`, c.quality != null && `quality ${c.quality} of 3`, c.accessed && `viewed ${c.accessed}`].filter(Boolean);
+              return `<li id="fn-${i + 1}">${c.url && !s.title ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(title)}</a>` : esc(title)}${s.author ? `, ${esc(s.author)}` : ""}${url ? ` · <a href="${url}" target="_blank" rel="noopener">view record on Ancestry</a>` : ""}${c.url && s.title ? ` · <a href="${esc(c.url)}" target="_blank" rel="noopener">view record</a>` : ""}${c.page ? `<span class="pg">${esc(c.page)}</span>` : ""}${c.text ? `<span class="pg">“${esc(c.text)}”</span>` : ""}${c.note ? `<span class="pg">${esc(c.note)}</span>` : ""}${ev.length ? `<span class="ev">${esc(ev.join(" · "))}</span>` : ""}</li>`;
+            }).join("")}</ol><p class="small muted">Imported source titles are Ancestry collections, mostly indexes or derivative records; “view record on Ancestry” needs a login. Sources added here record what kind of source each is and how strong the evidence is.</p>` : '<p class="muted small">No sources cited. Everything on this page is unsourced.</p>'}
           </section>
         </div>
       </div>
@@ -517,8 +525,9 @@ function startFamilyApp(D) {
   }
   function findingHtml(f) {
     const kinds = { confirmed: "Confirmed", correction: "Correction", conflict: "Conflict", "new-fact": "New fact", "new-person": "New person", "data-error": "Data error" };
-    return `<div class="finding">
-      <div class="f-head"><span class="f-kind k-${esc(f.kind)}">${kinds[f.kind] || esc(f.kind)}</span>${f.field ? `<span class="chip">${esc(f.field)}</span>` : ""}<span class="conf-${esc(f.confidence)}">● ${esc(f.confidence)} confidence</span>
+    const res = f.resolution;
+    return `<div class="finding${res ? " f-closed" : ""}"${f.id != null ? ` data-finding="${esc(f.id)}"` : ""}>
+      <div class="f-head"><span class="f-kind k-${esc(f.kind)}">${kinds[f.kind] || esc(f.kind)}</span>${res && !currentRoute.includes(f.person) ? `<span class="badge st-${res.status === "resolved" ? "verified" : "unverified"}">${res.status === "resolved" ? "resolved" : "kept as is"}</span>` : ""}${f.field ? `<span class="chip">${esc(f.field)}</span>` : ""}<span class="conf-${esc(f.confidence)}">● ${esc(f.confidence)} confidence</span>
       ${f.person && P[f.person] && !currentRoute.includes(f.person) ? `· ${plink(f.person)}` : f.personName && !f.person ? `· ${esc(f.personName)}` : ""}</div>
       ${f.claim ? `<div class="f-claim">Tree says: ${esc(f.claim)}</div>` : ""}
       <div>${esc(f.finding)}</div>
@@ -1053,12 +1062,20 @@ function startFamilyApp(D) {
         const { proposals } = await api("GET", `proposals?status=${status}`);
         out.innerHTML = proposals.length ? proposals.map(card).join("") : `<div class="empty">Nothing ${status === "open" ? "waiting for review" : "here"}.</div>`;
         out.querySelectorAll("[data-pa]").forEach((b) => b.onclick = () => decide(+b.dataset.id, b.dataset.pa));
+        out.querySelectorAll("details[data-preview]").forEach((d) => d.addEventListener("toggle", async () => {
+          if (!d.open || d.dataset.done) return;
+          d.dataset.done = "1";
+          const pr = proposals.find((x) => x.id === +d.dataset.preview);
+          try { d.lastElementChild.innerHTML = window.FamilyPerson.diffHtml(CTX(), (await api("POST", "edit/preview", { ops: pr.payload.ops })).touched); }
+          catch (e) { d.lastElementChild.innerHTML = `<span class="sev-error">No longer applies: ${esc(e.message)}</span>`; }
+        }));
       } catch (e) { out.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
     }
     function card(pr) {
       const b = pr.payload || {};
       const parts = [];
-      if (pr.kind === "edit") parts.push(`<h4>Proposed changes${b.origin ? ` <span class="small muted">(${esc(b.origin)})</span>` : ""}</h4><ol>${(b.ops || []).map((o) => `<li>${window.FamilyWork ? window.FamilyWork.opText(CTX(), o) : esc(o.op)}</li>`).join("")}</ol>${b.reason ? `<p class="small"><b>Why:</b> ${esc(b.reason)}</p>` : ""}${(b.sources || []).map((s) => `<p class="small">Source: ${s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>` : esc(s.title)}</p>`).join("")}`);
+      if (pr.kind === "edit") parts.push(`<h4>Proposed changes${b.origin ? ` <span class="small muted">(${esc(b.origin)})</span>` : ""}</h4><ol>${(b.ops || []).map((o) => `<li>${window.FamilyWork ? window.FamilyWork.opText(CTX(), o) : esc(o.op)}</li>`).join("")}</ol>${b.reason ? `<p class="small"><b>Why:</b> ${esc(b.reason)}</p>` : ""}${(b.sources || []).map((s) => `<p class="small">Source: ${s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>` : esc(s.title)}</p>`).join("")}${(b.resolves || []).length ? `<p class="small">Resolves finding ${b.resolves.map((x) => `#${esc(x)}`).join(", ")}.</p>` : ""}
+        ${pr.status === "open" && window.FamilyPerson ? `<details data-preview="${pr.id}"><summary class="small">What changes</summary><div class="small muted">Loading…</div></details>` : ""}`);
       if ((b.findings || []).length) parts.push(`<h4>Findings</h4>${b.findings.map((f) => findingHtml(Object.assign({}, f, { branch: f.branch || b.branch }))).join("")}`);
       if (Object.keys(b.people_status || {}).length) parts.push(`<h4>Status changes</h4><ul>${Object.entries(b.people_status).map(([id, s]) => `<li>${P[id] ? plink(id) : esc(id)}: <b>${esc(s.status)}</b> ${esc(s.note || "")}</li>`).join("")}</ul>`);
       if ((b.story_updates || []).length) parts.push(`<h4>Story revisions</h4>${b.story_updates.map((u) => `<p><b>${esc(u.title)}</b>${u.reason ? ` · ${esc(u.reason)}` : ""} <a class="small" href="#/story/${esc(u.slug)}">current version</a></p><details><summary>Revised text</summary><div class="prose small">${esc(u.body).replace(/\n\n+/g, "<br><br>")}</div></details>`).join("")}`);

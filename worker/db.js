@@ -38,7 +38,7 @@ export async function loadState(env) {
   const [people, families, sources, media, config, findings, statuses, stories, log, todos] = await Promise.all([
     q("SELECT id, data FROM people"), q("SELECT id, data FROM families"), q("SELECT id, data FROM sources"),
     q("SELECT id, data FROM media"), q("SELECT key, value FROM config"),
-    q("SELECT id, data FROM findings ORDER BY id"), q("SELECT person_id, data FROM statuses"),
+    q("SELECT id, version, data FROM findings ORDER BY id"), q("SELECT person_id, data FROM statuses"),
     q("SELECT slug, data FROM stories ORDER BY rowid"), q("SELECT id, data FROM research_log ORDER BY id"),
     q("SELECT * FROM todos ORDER BY id"),
   ]);
@@ -53,7 +53,7 @@ export async function loadState(env) {
     branches: cfg.branches || [], place_rules: cfg.place_rules || [], overrides: cfg.overrides || {},
     duplicates: cfg.duplicates || [], methodology: cfg.methodology || "", context: cfg.context || [],
     people_status: Object.fromEntries(statuses.map((r) => [r.person_id, parse(r.data)])),
-    findings: findings.map((r) => Object.assign({ id: r.id }, parse(r.data))),
+    findings: findings.map((r) => Object.assign({ id: r.id, version: r.version }, parse(r.data))),
     stories: stories.map((r) => parse(r.data)),
     research_log: log.map((r) => Object.assign({ id: r.id }, parse(r.data))),
     todo: open.map(todoOut), todo_done: closed.map(todoOut),

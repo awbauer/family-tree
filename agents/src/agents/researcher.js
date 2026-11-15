@@ -34,6 +34,8 @@ const Submission = v.object({
       person: opt(v.string()),
       kind: v.picklist(["confirmed", "correction", "conflict", "data-error", "new-fact", "new-person"]),
       field: opt(v.string()), claim: opt(str("What the tree currently says, if relevant")),
+      fact: opt(str("The fact id from get_person this is about (e3 for an event, n1 for a name), when it concerns one")),
+      proposed_ops: opt(v.pipe(v.array(v.looseObject({ op: v.string() })), v.description("For a correction or new fact: the edit ops that would fix the tree, so an editor can apply them in one step"))),
       finding: str("What the record says, plainly"),
       confidence: v.picklist(["high", "medium", "low"]),
       sources: v.array(Source),

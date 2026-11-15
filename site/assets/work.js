@@ -15,10 +15,10 @@
     "name.update": (o, c) => `change name ${o.fid} of ${who(c, o.person)}`,
     "name.remove": (o, c) => `remove name ${o.fid} from ${who(c, o.person)}`,
     "event.add": (o, c) => `add ${c.esc(o.event.type)}${o.event.date ? ` ${c.esc(o.event.date)}` : ""}${o.event.place ? `, ${c.esc(o.event.place)}` : ""}${o.event.value ? ` (${c.esc(o.event.value)})` : ""} to ${o.entity === "person" ? who(c, o.id) : `family ${c.esc(o.id)}`}`,
-    "event.update": (o, c) => `${o.conflict ? "<b>conflict</b>: " : ""}change ${c.esc(o.fid)} of ${o.entity === "person" ? who(c, o.id) : `family ${c.esc(o.id)}`}: ${Object.entries(o.set || {}).map(([k, v]) => `${k} → “${c.esc(v)}”`).join(", ")}`,
-    "event.remove": (o, c) => `remove ${c.esc(o.fid)} from ${o.entity === "person" ? who(c, o.id) : `family ${c.esc(o.id)}`}`,
-    "fact.review": (o, c) => `mark ${c.esc(o.fid)} of ${who(c, o.id)} as <b>${c.esc(o.status)}</b>${o.note ? `: ${c.esc(o.note)}` : ""}`,
-    "citation.add": (o, c) => `cite ${c.esc(o.citation.url || o.citation.note || o.citation.source)} on ${o.fid ? `${c.esc(o.fid)} of ` : ""}${who(c, o.id)}`,
+    "event.update": (o, c) => `${o.conflict ? "<b>conflict</b>: " : ""}change ${c.esc(o.entity === "person" ? factName(c, o.id, o.fid) : o.fid)} of ${o.entity === "person" ? who(c, o.id) : `family ${c.esc(o.id)}`}: ${Object.entries(o.set || {}).filter(([, v]) => v !== "").map(([k, v]) => `${k} → “${c.esc(v)}”`).join(", ")}`,
+    "event.remove": (o, c) => `remove ${c.esc(o.entity === "person" ? factName(c, o.id, o.fid) : o.fid)} from ${o.entity === "person" ? who(c, o.id) : `family ${c.esc(o.id)}`}`,
+    "fact.review": (o, c) => `mark ${c.esc(factName(c, o.id, o.fid))} of ${who(c, o.id)} as <b>${c.esc(o.status)}</b>${o.note ? `: ${c.esc(o.note)}` : ""}${(o.evidence || []).length ? ` <span class="muted">(${o.evidence.length} source${o.evidence.length > 1 ? "s" : ""})</span>` : ""}`,
+    "citation.add": (o, c) => `cite ${c.esc(o.citation.title || o.citation.url || o.citation.note || (c.S[o.citation.source] || {}).title || o.citation.source)} on ${o.fid ? `${c.esc(factName(c, o.id, o.fid))} of ` : ""}${who(c, o.id)}`,
     "citation.remove": (o, c) => `remove a citation from ${who(c, o.id)}`,
     "family.create": (o, c) => `create a family: ${[o.husband, o.wife].filter(Boolean).map((x) => who(c, x)).join(" & ") || "(no spouses)"}${(o.children || []).length ? `, children ${o.children.map((x) => who(c, x)).join(", ")}` : ""}`,
     "family.set_spouse": (o, c) => `set ${o.role} of family ${c.esc(o.family)} to ${o.person ? who(c, o.person) : "nobody"}`,
@@ -30,7 +30,14 @@
     "source.upsert": (o, c) => `add/update source “${c.esc(o.data.title)}”`,
     "media.attach": (o, c) => `attach a photo/document to ${who(c, o.person)}${o.caption ? `: ${c.esc(o.caption)}` : ""}`,
     "media.detach": (o, c) => `detach a photo/document from ${who(c, o.person)}`,
+    "media.update": (o, c) => `update photo details on ${who(c, o.person)}: ${Object.entries(o.set || {}).filter(([, v]) => v).map(([k, v]) => `${k} “${c.esc(v)}”`).join(", ") || "clear details"}`,
+    "media.set_primary": (o, c) => `make a photo the main photo of ${who(c, o.person)}`,
   };
+  function factName(c, pid, fid) {
+    const p = c.P[pid];
+    const e = p && [...(p.events || []), ...(p.names || [])].find((x) => x.fid === fid);
+    return e ? (e.type ? [e.type, e.date].filter(Boolean).join(" ") : `name ${`${e.given || ""} ${e.surname || ""}`.trim()}`) : fid;
+  }
   function who(c, id) { if (!id) return "—"; if (String(id).startsWith("$")) return "the new person"; return c.P[id] ? c.plink(id) : c.esc(id); }
   W.opText = (c, o) => (OP_LABEL[o.op] ? OP_LABEL[o.op](o, c) : c.esc(o.op));
   const personOptions = (c) => c.people.filter((p) => !c.isUnknown(p)).map((p) => `<option value="${c.esc(p.name)} (${p.id})">`).join("");
@@ -103,27 +110,54 @@
     const meBtn = document.getElementById("w-me");
     if (meBtn) meBtn.onclick = async () => { if (!confirm(`Link your account to ${p.name}? Relationships will then be shown relative to them.`)) return; await c.api("PUT", "me/person", { person_id: id }); location.reload(); };
 
-    // pending ops, saved together with a reason
-    const pending = [];
+    // pending ops, saved together with a reason. Other tools (photos, findings, fact reviews) add to the same list,
+    // and every change is previewed as a diff of the records it will touch before it is saved.
+    const pending = [], meta = { resolves: new Set(), reason: "", sources: [] };
+    let previewSeq = 0;
     const drawPending = () => {
       const el = document.getElementById("w-pending");
-      if (!pending.length) { el.innerHTML = ""; return; }
+      if (!pending.length) { el.innerHTML = ""; meta.resolves.clear(); meta.reason = ""; meta.sources = []; return; }
+      const src0 = meta.sources[0] || {};
       el.innerHTML = `<div class="pending"><h3>${pending.length} change${pending.length > 1 ? "s" : ""} to ${canEdit ? "save" : "suggest"}</h3><ol>${pending.map((o, i) => `<li>${W.opText(c, o)} <button class="linklike" data-undo="${i}">remove</button></li>`).join("")}</ol>
-        <form id="w-save" class="filters"><input name="reason" required placeholder="Why? What's the evidence?" style="flex:2;min-width:220px"><input name="src" placeholder="Source title (optional)" style="flex:1;min-width:160px"><input name="url" placeholder="Link (optional)" style="flex:1;min-width:160px">
+        ${meta.resolves.size ? `<p class="small">Resolves finding ${[...meta.resolves].map((x) => `#${x}`).join(", ")}.</p>` : ""}
+        <details open><summary class="small">What will change</summary><div id="w-diff" class="small muted">Working out the differences…</div></details>
+        <form id="w-save" class="filters"><input name="reason" required placeholder="Why? What's the evidence?" value="${esc(meta.reason)}" style="flex:2;min-width:220px"><input name="src" placeholder="Source title (optional)" value="${esc(src0.title || "")}" style="flex:1;min-width:160px"><input name="url" placeholder="Link (optional)" value="${esc(src0.url || "")}" style="flex:1;min-width:160px">
         <button class="btn primary">${canEdit ? "Save changes" : "Send suggestion"}</button></form></div>`;
       el.querySelectorAll("[data-undo]").forEach((b) => (b.onclick = () => { pending.splice(+b.dataset.undo, 1); drawPending(); }));
+      const seq = ++previewSeq;
+      c.api("POST", "edit/preview", { ops: pending }).then((r) => {
+        if (seq !== previewSeq) return;
+        document.getElementById("w-diff").innerHTML = window.FamilyPerson ? window.FamilyPerson.diffHtml(c, r.touched) : "";
+      }).catch((e) => { if (seq === previewSeq) document.getElementById("w-diff").innerHTML = `<span class="sev-error">This can't be applied: ${esc(e.message)}</span>`; });
       el.querySelector("#w-save").onsubmit = async (ev) => {
         ev.preventDefault();
-        const f = ev.target, sources = f.src.value || f.url.value ? [{ title: f.src.value || f.url.value, url: f.url.value || undefined }] : undefined;
+        const f = ev.target;
+        const sources = f.src.value || f.url.value ? [{ title: f.src.value || f.url.value, url: f.url.value || undefined }, ...meta.sources.slice(1)] : meta.sources.length ? meta.sources : undefined;
+        const resolves = meta.resolves.size ? [...meta.resolves] : undefined;
         try {
-          if (canEdit) await c.api("POST", "edit", { reason: f.reason.value, sources, ops: pending });
-          else await c.api("POST", "proposals", { kind: "edit", payload: { reason: f.reason.value, sources, ops: pending }, rationale: f.reason.value });
+          if (canEdit) await c.api("POST", "edit", { reason: f.reason.value, sources, ops: pending, resolves });
+          else await c.api("POST", "proposals", { kind: "edit", payload: { reason: f.reason.value, sources, ops: pending, resolves }, rationale: f.reason.value });
           if (!canEdit) say("Thanks. Your suggestion is waiting for an editor.");
           location.reload();
         } catch (e) { say(e.status === 409 ? "Someone else changed this person meanwhile. Reload and try again." : e.message); }
       };
     };
     const add = (o) => { pending.push(o); drawPending(); document.getElementById("w-form").innerHTML = ""; };
+    /** Add ops to the pending list (with what they resolve and the evidence), and show the editor where they are. */
+    const queue = (ops, m = {}) => {
+      pending.push(...ops);
+      for (const r of m.resolves || []) meta.resolves.add(r);
+      if (m.reason && !meta.reason) meta.reason = m.reason;
+      if (m.sources) meta.sources = (m.sources || []).filter((x) => x && (x.title || x.url));
+      drawPending();
+      document.getElementById("w-pending").scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    /** Save one small change right away (editors), or queue it as a suggestion (members). Returns true when done. */
+    const change = async (ops, m = {}) => {
+      if (!canEdit) { queue(ops, m); return true; }
+      try { await c.api("POST", "edit", { reason: m.reason || "Edit", ops }); location.reload(); return true; }
+      catch (e) { say(e.message); return false; }
+    };
     const form = (html, onsubmit) => {
       const el = document.getElementById("w-form");
       el.innerHTML = `<form class="card sub filters">${html}<button class="btn primary">Add to list</button><button type="button" class="btn" data-cancel>Cancel</button></form>`;
@@ -186,8 +220,11 @@
         }),
       photo: () => {
         const el = document.getElementById("w-form");
-        el.innerHTML = `<form class="card sub filters"><input type="file" name="file" accept="image/jpeg,image/png,image/webp,application/pdf" required><input name="caption" placeholder="Caption" style="flex:1"><input name="date" placeholder="Date" style="max-width:120px">
-          <label class="small"><input type="checkbox" name="portrait"> portrait</label><button class="btn primary">Upload</button></form><p class="small muted">Location and camera data are removed from photos in your browser before upload.</p>`;
+        const TYPES = (window.FamilyPerson && window.FamilyPerson.MEDIA_TYPES) || { photo: "Photo" };
+        el.innerHTML = `<form class="card sub filters"><input type="file" name="file" accept="image/jpeg,image/png,image/webp,application/pdf" required><input name="caption" placeholder="Caption: who and what" style="flex:1;min-width:200px">
+          <select name="type">${Object.entries(TYPES).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select>
+          <input name="date" placeholder="Date taken" style="max-width:130px"><input name="place" placeholder="Place" style="max-width:180px">
+          <label class="small"><input type="checkbox" name="portrait"> main photo</label><button class="btn primary">Upload</button></form><p class="small muted">Location and camera data are removed from photos in your browser before upload.</p>`;
         el.querySelector("form").onsubmit = async (ev) => {
           ev.preventDefault();
           const f = ev.target, file = await stripImage(f.file.files[0]);
@@ -195,7 +232,7 @@
             const r = await fetch(`api/media/upload?tree=${encodeURIComponent(c.TREE)}&name=${encodeURIComponent(file.name)}`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": file.type }, body: file });
             const d = await r.json();
             if (!r.ok) throw new Error(d.error || `Upload failed (${r.status})`);
-            add({ op: "media.attach", person: id, file: d.key, caption: f.caption.value || undefined, date: f.date.value || undefined, portrait: f.portrait.checked || undefined });
+            add({ op: "media.attach", person: id, file: d.key, caption: f.caption.value || undefined, type: f.type.value || undefined, date: f.date.value || undefined, place: f.place.value || undefined, portrait: f.portrait.checked || undefined });
           } catch (e) { say(e.message); }
         };
       },
@@ -242,9 +279,13 @@
       const out = document.getElementById("w-h-out");
       try {
         const { history } = await c.api("GET", `history?id=${encodeURIComponent(id)}`);
-        out.innerHTML = history.length ? `<ul class="history">${history.map((b) => `<li><span class="muted">${esc(b.at.slice(0, 16).replace("T", " "))} · ${esc(c.who(b.actor))}${b.proposal ? ` · suggestion #${b.proposal}` : ""}</span> ${esc(b.op)}: ${esc(b.reason || "")}
-          <span class="muted">(${b.entities.map((e) => `${e.change} ${e.type} ${esc(e.id)}`).join(", ")})</span>
-          ${c.EDITOR && b.batch && b.op !== "revert" && b.op !== "import" ? ` <button class="linklike" data-revert="${b.batch}">undo</button>` : ""}</li>`).join("")}</ul>` : `<p class="muted">No changes since the import.</p>`;
+        const OPS = { edit: "edited", revert: "undid a change", resolve: "resolved a finding", dismissed: "kept the tree as is", reopen: "reopened a finding", set: "set the research status", import: "imported" };
+        const diffs = (b) => window.FamilyPerson && b.entities.some((e) => e.before !== undefined || e.after !== undefined)
+          ? window.FamilyPerson.diffHtml(c, b.entities.map((e) => ({ type: e.type, id: e.id, before: e.before, after: e.after })))
+          : `<span class="muted">(${b.entities.map((e) => `${e.change} ${e.type}`).join(", ")})</span>`;
+        out.innerHTML = history.length ? `<ul class="history">${history.map((b) => `<li><div><span class="muted">${esc(b.at.slice(0, 16).replace("T", " "))} · ${esc(c.who(b.actor))}${b.proposal ? ` · suggestion #${b.proposal}` : ""}</span> <b>${esc(OPS[b.op] || b.op)}</b>${b.reason ? `: ${esc(b.reason)}` : ""}
+          ${c.EDITOR && b.batch && b.op !== "revert" && b.op !== "import" ? ` <button class="linklike" data-revert="${b.batch}">undo</button>` : ""}</div>
+          <details><summary class="small">details</summary>${diffs(b)}</details></li>`).join("")}</ul>` : `<p class="muted">No changes since the import.</p>`;
         out.querySelectorAll("[data-revert]").forEach((btn) => (btn.onclick = async () => {
           if (!confirm("Undo this change?")) return;
           try { await c.api("POST", `changes/${btn.dataset.revert}/revert`); location.reload(); }
@@ -253,11 +294,15 @@
       } catch (e) { out.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
     })();
 
-    // fact review badges next to each event (data already in the bundle)
-    for (const e of p.events || []) {
-      if (!e.review) continue;
-      const row = c.app.querySelector(`[data-fid="${e.fid}"]`);
-      if (row) row.insertAdjacentHTML("beforeend", ` <span class="badge st-${e.review.status === "verified" ? "verified" : e.review.status === "disputed" ? "disputed" : "unverified"}" title="${esc(e.review.note || "")} (${esc(c.who(e.review.by))})">${esc(e.review.status)}</span>`);
+    // photos, fact verification, finding remediation and next steps (site/assets/person.js)
+    const X = window.FamilyPerson;
+    if (X) {
+      const ctx = { queue, change, actions };
+      c.LIVE = true;
+      X.photos(c, id, ctx);
+      X.facts(c, id, ctx);
+      X.findings(c, id, ctx);
+      X.todos(c, id, ctx);
     }
   };
 
