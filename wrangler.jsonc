@@ -32,5 +32,14 @@
   // The AGENTS service binding to the private agents Worker (agents/) is added at build time by tools/ci_config.mjs
   // once a Worker named family-tree-agents exists (or per the AGENTS_SERVICE build variable); see
   // docs/agents/operations.md → Cloud research agents.
+  // Workers Logs and Traces, everything kept: every invocation (request URL, status, timing), every console line, and
+  // every trace span, unsampled. Readable only by members of the Cloudflare account (Workers → this Worker →
+  // Observability). Request and response bodies are never logged; agent traces carry no prompt or tool content.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": true, "persist": true },
+    "traces": { "enabled": true, "head_sampling_rate": 1, "persist": true }
+  },
   "keep_vars": true
 }
