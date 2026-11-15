@@ -42,8 +42,8 @@ export function QualityReviewer({ id }) {
 
   useTool({
     name: "get_item",
-    description: "One item to review in full: a to-do with its history and comments, or a finding with its claim, sources and the fact it concerns.",
-    input: v.object({ item: str("todo:<id> or finding:<id>") }),
+    description: "One item to review in full: a to-do with its history and comments, a finding with its claim, sources and the fact it concerns, or a tree check with what it found and any suggested_ops.",
+    input: v.object({ item: str("todo:<id>, finding:<id> or check:<kind>:<key>") }),
     async run({ data }) { const { b } = await ctx(); return { output: await itemView(env, b, data.item) }; },
   });
   useTool({
@@ -68,7 +68,7 @@ export function QualityReviewer({ id }) {
     name: "record_decision",
     description: "Your decision on one item, once per item. Outside a dry run it is applied at once (if the item hasn't changed meanwhile); in a dry run it is recorded for an editor to apply later. A fix is always filed as a suggestion, never applied.",
     input: v.object({
-      item: str("todo:<id> or finding:<id>"),
+      item: str("todo:<id>, finding:<id> or check:<kind>:<key>"),
       verdict: v.picklist(["still_valid", "resolved", "obsolete", "duplicate", "needs_human"]),
       note: str("What you checked and why you decided this, in one to three sentences"),
       evidence: v.optional(v.array(v.string()), []),

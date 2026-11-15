@@ -11,6 +11,7 @@ import { J, now, parse, write } from "../db.js";
 import { scopedFor } from "../bundle.js";
 import { can } from "../auth.js";
 import { checkChange } from "./chat.js";
+import { treeChecks } from "./checks.js";
 
 export const QUALITY_AGENT = "agent:data-quality";
 export const QUALITY_PATH = "/agents/quality"; // where agents/src/app.js mounts the QualityReviewer
@@ -18,7 +19,7 @@ export const MAX_ITEMS = 100;
 export const VERDICTS = ["still_valid", "resolved", "obsolete", "duplicate", "needs_human"];
 const PRIORITIES = ["high", "medium", "low"];
 
-export const QUALITY_SYSTEM = `You review the open items of a private family-history tree: research to-dos and findings (conclusions or conflicts someone recorded about a person). The tree has changed since many of them were written. For each item, decide whether it is still valid, using only what the tree now records.
+export const QUALITY_SYSTEM = `You review the open items of a private family-history tree: research to-dos and findings (conclusions or conflicts someone recorded about a person), and tree checks (problems the site's own checks found in the records: possible duplicate people, the same couple recorded twice, impossible dates and ages, two sets of parents, repeated birth or death events, empty records, people not connected to the rest of the tree, and dates and places not in standard form). The tree has changed since many to-dos and findings were written. For each item, decide whether it is still valid, using only what the tree now records.
 
 How to work, one item at a time, in the order given:
 1. get_item for the item. Then get_person for the people it concerns, and anyone else the tree links that could answer it (parents, spouses, children, people with the same name). search_people finds duplicates and namesakes.
@@ -31,6 +32,12 @@ How to work, one item at a time, in the order given:
 3. If the tree itself has a clear, provable error that the item points at (a date typed wrong, a fact recorded twice), you may attach a fix: edit ops with a reason. Fixes are never applied by you: they become a suggestion an editor approves. Don't attach a fix on a guess.
 4. If reviewing turns up a concrete next step that no open to-do covers, add it in new_todos.
 After the last item, call finish_review with a short summary.
+
+Tree checks (items "check:<kind>:…"): get_item shows what the check found and, when the fix is mechanical, suggested_ops. Look at the people involved before deciding:
+   - still_valid: the problem is real. If the fix is clear and safe (two records really are one person, the same couple really was recorded twice, a date or place only needs its standard form), attach it as fix, usually the suggested_ops, edited if needed. Otherwise add a to-do saying what to check.
+   - obsolete: a false alarm (namesakes who are different people, siblings given the same name after one died, a date that is fine as it is).
+   - needs_human: real, but deciding needs records or the owner's judgement (which of two birth dates is right, whether a disconnected family belongs in the tree). Add a to-do.
+   Never suggest deleting a person; a person with no facts or links gets a to-do for the owner instead.
 
 Rules:
 - Never invent facts or sources. You have no web access: "the tree records nothing about this" means still_valid or needs_human, not resolved.
@@ -46,8 +53,13 @@ const isOpenFinding = (f) => !f.resolution || f.resolution.status === "open";
 const label = (b, pid) => (pid && b.people[pid] ? `${b.people[pid].name} (${pid})` : null);
 
 /** The items a run will review, oldest-updated first: [{ref, type, id, version, person, text}]. */
+export const SCOPES = ["both", "todos", "findings", "checks", "all"];
+
 export function planItems(b, { scope = "both", person = null, limit = 10, starter }) {
   const R = b.research || {}, items = [];
+  // tree checks come first: they are found fresh each time, most serious first
+  if (scope === "checks" || scope === "all") items.push(...treeChecks(b, { person }).map(({ detail, ...c }) => ({ ...c, at: "" })));
+  if (scope === "checks") return items.slice(0, Math.max(1, Math.min(MAX_ITEMS, limit | 0 || 10))).map(({ at, ...x }) => x);
   if (scope !== "findings") {
     for (const t of R.todo || []) {
       if (!isOpenTodo(t, starter) || (person && t.person !== person)) continue;
@@ -62,7 +74,9 @@ export function planItems(b, { scope = "both", person = null, limit = 10, starte
       items.push({ ref: `finding:${f.id}`, type: "finding", id: f.id, version: f.version, person: f.person || null, text: f.finding || f.claim || f.kind, at: f.date || "" });
     }
   }
-  items.sort((x, y) => String(x.at).localeCompare(String(y.at)) || x.ref.localeCompare(y.ref));
+  const checks = items.filter((x) => x.type === "check"), rest = items.filter((x) => x.type !== "check");
+  rest.sort((x, y) => String(x.at).localeCompare(String(y.at)) || x.ref.localeCompare(y.ref));
+  items.splice(0, items.length, ...checks, ...rest);
   return items.slice(0, Math.max(1, Math.min(MAX_ITEMS, limit | 0 || 10))).map(({ at, ...x }) => x);
 }
 
@@ -94,7 +108,12 @@ export async function itemView(env, b, ref) {
     if (!f) return { error: `No finding ${id} in this tree.` };
     return { ref, type, id, person: label(b, f.person), kind: f.kind, field: f.field, fact: f.fact, claim: f.claim, finding: f.finding, confidence: f.confidence, date: f.date, sources: f.sources, resolution: f.resolution };
   }
-  return { error: "An item is todo:<id> or finding:<id>." };
+  if (type === "check") {
+    const c = treeChecks(b).find((x) => x.ref === ref);
+    if (!c) return { ref, gone: true, note: "This check no longer finds anything: the problem was fixed or the records changed. Decide it as resolved." };
+    return { ref, type, kind: c.kind, found: c.text, ...c.detail, people: (c.detail.people || []).map((id) => label(b, id) || id) };
+  }
+  return { error: "An item is todo:<id>, finding:<id> or check:<kind>:<key>." };
 }
 
 // ---------------------------------------------------------------- deciding
@@ -140,6 +159,7 @@ export async function checkDecision(env, sc, run, input) {
 
 /** What a decision does to its item (null = keep it as it is). */
 function itemAction(d) {
+  if (d.type === "check") return null; // a check has no record of its own; its outcome is the fix or the to-do
   if (d.type === "todo") {
     if (d.verdict === "resolved") return { status: "done" };
     if (d.verdict === "obsolete" || d.verdict === "duplicate") return { status: "wont_do" };
@@ -151,6 +171,7 @@ function itemAction(d) {
 }
 export function describe(d) {
   const a = itemAction(d);
+  if (d.type === "check") return [d.fix ? "suggest the fix" : null, d.new_todos && d.new_todos.length ? `add ${d.new_todos.length} to-do${d.new_todos.length > 1 ? "s" : ""}` : null].filter(Boolean).join("; ") || "no action";
   const what = !a ? (d.type === "todo" ? "keep, with a comment" : "keep") : a.priority ? `keep, priority → ${a.priority}` : d.type === "todo" ? (a.status === "done" ? "close as done" : "close as won't do") : a.status === "resolved" ? "mark resolved" : "dismiss";
   return [what, d.fix && "suggest a fix", d.new_todos && d.new_todos.length && `add ${d.new_todos.length} to-do${d.new_todos.length > 1 ? "s" : ""}`].filter(Boolean).join("; ");
 }
@@ -166,7 +187,12 @@ export async function applyDecision(env, run, d, { onBehalfOf }) {
   const changeRow = (type, id, op, before, after, reason) => env.DB.prepare("INSERT INTO changes (at, actor, actor_kind, entity_type, entity_id, op, before, after, reason, on_behalf_of, via) VALUES (?, ?, 'agent', ?, ?, ?, ?, ?, ?, ?, ?)")
     .bind(t, A, type, String(id), op, before === undefined ? null : J(before), after === undefined ? null : J(after), reason || null, onBehalfOf, via);
   let guarded = false;
-  if (d.type === "todo") {
+  if (d.type === "check") {
+    // only while the check still finds the same thing
+    const sc = await runScope(env, run);
+    const now = sc && treeChecks(sc.bundle).find((x) => x.ref === d.item);
+    if (!now || now.version !== d.version) return { status: "skipped", detail: "the problem changed or was fixed since the review" };
+  } else if (d.type === "todo") {
     const row = await env.DB.prepare("SELECT * FROM todos WHERE id = ?").bind(d.id).first();
     if (!row || row.version !== d.version || !["open", "in_progress"].includes(row.status)) return { status: "skipped", detail: "the to-do changed since the review read it" };
     const set = {};
