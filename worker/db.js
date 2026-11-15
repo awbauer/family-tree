@@ -1,3 +1,5 @@
+import { readTree } from "./storage.js";
+
 // Small helpers over the D1 binding. Every write goes through `write()`, which records an audit row in `changes`
 // and bumps meta.data_version in the same batch, so readers can cache derived data per version.
 
@@ -35,16 +37,14 @@ export async function write(env, statements) {
 /** Load everything derive.js needs: {raw, research, places}. */
 export async function loadState(env) {
   const q = (sql) => env.DB.prepare(sql).all().then((r) => r.results);
-  const [people, families, sources, media, config, findings, statuses, stories, log, todos] = await Promise.all([
-    q("SELECT id, data FROM people"), q("SELECT id, data FROM families"), q("SELECT id, data FROM sources"),
-    q("SELECT id, data FROM media"), q("SELECT key, value FROM config"),
+  const [tree, config, findings, statuses, stories, log, todos] = await Promise.all([
+    readTree(env), q("SELECT key, value FROM config"),
     q("SELECT id, version, data FROM findings ORDER BY id"), q("SELECT person_id, data FROM statuses"),
     q("SELECT slug, data FROM stories ORDER BY rowid"), q("SELECT id, data FROM research_log ORDER BY id"),
     q("SELECT * FROM todos ORDER BY id"),
   ]);
   // AI-written profiles (migration 0003). Optional, so a database that hasn't been migrated yet still loads.
   const profiles = await q("SELECT person_id, text, generated_at, model FROM profiles").catch(() => []);
-  const byId = (rows) => Object.fromEntries(rows.map((r) => [r.id, parse(r.data)]));
   const cfg = Object.fromEntries(config.map((r) => [r.key, parse(r.value)]));
   const open = todos.filter((t) => !["done", "wont_do"].includes(t.status));
   const closed = todos.filter((t) => ["done", "wont_do"].includes(t.status));
@@ -60,7 +60,7 @@ export async function loadState(env) {
     media: cfg.media_map || {},
   };
   return {
-    raw: { people: byId(people), families: byId(families), sources: byId(sources), media: byId(media) },
+    raw: { people: tree.people, families: tree.families, sources: tree.sources, media: tree.media },
     research, places: cfg.places || {}, aliases: cfg.aliases || {}, profiles,
   };
 }

@@ -26,10 +26,12 @@ import { scopeFor } from "./bundle.js";
 import * as Agent from "./agent/routes.js";
 import { validateBatch, researchStatements } from "./research.js";
 import { J, now, parse, loadState, todoOut, write, audit, meta } from "./db.js";
-import { OpError, referencedIds, applyOps } from "./ops.js";
+import { OpError, referencedIds, applyOps, assignFids } from "./ops.js";
 import { loadEditable, applyAndCommit, revertBatch, isConflict, newBatchId } from "./store.js";
 import * as Graph from "./graph.js";
 import * as Prov from "./prov.js";
+import * as GedcomX from "./gedcomx.js";
+import * as Storage from "./storage.js";
 import { exportGedcom } from "./gedcom_export.js";
 
 const TODO_STATUSES = ["open", "in_progress", "needs_review", "done", "wont_do"];
@@ -80,6 +82,9 @@ async function route(c) {
   if ((r = p.match(/^\/api\/proposals\/(\d+)\/(approve|reject|withdraw)$/)) && m === "POST") return reviewProposal(c, +r[1], r[2]);
   if (p === "/api/export.ged" && m === "GET") return exportGed(c);
   if (p === "/api/export.json" && m === "GET") return exportJson(c);
+  if (p === "/api/export.gedcomx" && m === "GET") return exportGedcomx(c);
+  if (p === "/api/admin/storage" && m === "POST") return adminStorage(c);
+  if (p === "/api/admin/import.gedcomx" && m === "POST") return adminImportGx(c);
   if (p === "/api/edit" && m === "POST") return edit(c);
   if (p === "/api/edit/preview" && m === "POST") return previewEdit(c);
   if ((r = p.match(/^\/api\/findings\/(\d+)$/)) && m === "PATCH") return updateFinding(c, +r[1]);
@@ -626,6 +631,32 @@ async function exportGed(c) {
   const ged = exportGedcom(b, { title: b.scope.treeName, now: new Date() });
   return new Response(ged, { headers: { "Content-Type": "text/plain; charset=utf-8", "Content-Disposition": `attachment; filename="${g.tree_id}-${now().slice(0, 10)}.ged"`, "Cache-Control": "private, no-store" } });
 }
+/** GEDCOM X JSON of what the caller can see (docs/design/standards.md). */
+async function exportGedcomx(c) {
+  const g = grantOrFail(c);
+  if (!can.review(g)) fail(403, "Only editors and the owner can export.");
+  const b = await scoped(c, g);
+  const doc = GedcomX.exportDoc(b, { title: b.scope.treeName });
+  return new Response(JSON.stringify(doc), { headers: { "Content-Type": `${GedcomX.MEDIA_TYPE}; charset=utf-8`, "Content-Disposition": `attachment; filename="${g.tree_id}-${now().slice(0, 10)}.gedcomx.json"`, "Cache-Control": "private, no-store", "X-Robots-Tag": "noindex" } });
+}
+
+/** Owner: see (dry_run, the default) or carry out the move to GEDCOM X storage. */
+async function adminStorage(c) {
+  if (!can.admin(c.access)) fail(403, "Owner only.");
+  const d = await c.request.json().catch(() => ({}));
+  const report = await Storage.upgrade(c.env, { dryRun: d.dry_run !== false, actor: self(c) });
+  return json({ mode: await Storage.mode(c.env), report }, report.ok || report.already ? 200 : 422);
+}
+
+/** Owner: start an empty tree from a GEDCOM X document (another GEDCOM X app, FamilySearch, or our own export). */
+async function adminImportGx(c) {
+  if (!can.admin(c.access)) fail(403, "Owner only.");
+  const doc = await body(c);
+  if (!doc || !Array.isArray(doc.persons)) fail(400, "Send a GEDCOM X JSON document (with persons).");
+  try { return json({ ok: true, ...(await Storage.importDoc(c.env, doc, { actor: self(c), assignFids })) }, 201); }
+  catch (e) { if (e.status) fail(e.status, e.message); throw e; }
+}
+
 async function exportJson(c) {
   if (!c.access.isOwner) fail(403, "Only the owner can export the whole database.");
   const st = await loadState(c.env);

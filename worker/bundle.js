@@ -7,12 +7,12 @@ import { scopeBundle } from "./scope.js";
 import { now, parse, dataVersion, loadState } from "./db.js";
 import { fail } from "./http.js";
 
-let derivedCache = { version: -1, full: null };
+let derivedCache = { version: -1, full: null, db: null };
 const scopedCache = new Map();
 
 export async function fullBundle(env) {
   const v = await dataVersion(env);
-  if (derivedCache.version !== v) {
+  if (derivedCache.version !== v || derivedCache.db !== env.DB) { // per database too (one Worker, one DB; tests use many)
     const state = await loadState(env);
     if (!state.research.home_person && !Object.keys(state.raw.people).length) fail(404, "The database is empty. Run the one-time import (README → Deploy).");
     const full = Derive.derive({ raw: state.raw, research: state.research, places: state.places }, { today: now().slice(0, 10) });
@@ -22,7 +22,7 @@ export async function fullBundle(env) {
       const p = full.people[r.person_id];
       if (p && !p.living) p.profile = { text: r.text, generated_at: r.generated_at, model: r.model };
     }
-    derivedCache = { version: v, full };
+    derivedCache = { version: v, full, db: env.DB };
     scopedCache.clear();
   }
   return derivedCache;
@@ -31,7 +31,7 @@ export async function fullBundle(env) {
 /** The bundle as `access` sees it under `grant` (cached). */
 export async function scopeFor(env, access, grant) {
   const { version, full } = await fullBundle(env);
-  const key = `${version}|${access.principal}|${grant.tree_id}|${grant.view_id || ""}|${access.personId || ""}|${access.isOwner}|${grant.role}`;
+  const key = `${version}|${derivedCache.db === env.DB ? "" : "x"}|${access.principal}|${grant.tree_id}|${grant.view_id || ""}|${access.personId || ""}|${access.isOwner}|${grant.role}`;
   if (scopedCache.has(key)) return scopedCache.get(key);
   const t = access.treeById[grant.tree_id];
   const tree = { id: t.id, name: t.name, definition: parse(t.definition, { branches: ["*"] }) };

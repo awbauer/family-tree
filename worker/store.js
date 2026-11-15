@@ -4,28 +4,23 @@
 
 import { applyOps } from "./ops.js";
 import { J, now, parse, bumpVersion } from "./db.js";
-
-const TABLE = { person: "people", family: "families", source: "sources" };
+import { readTree, writeRecord, restoreRecord, mode as storageMode } from "./storage.js";
 
 export async function loadEditable(env) {
-  const q = (sql) => env.DB.prepare(sql).all().then((r) => r.results);
-  const [people, families, sources, cfg] = await Promise.all([
-    q("SELECT id, data, version FROM people"), q("SELECT id, data, version FROM families"), q("SELECT id, data, version FROM sources"),
-    q("SELECT key, value, version FROM config WHERE key IN ('media_map', 'aliases')"),
-  ]);
-  const versions = {};
-  const by = (rows, t) => Object.fromEntries(rows.map((r) => { versions[`${t}:${r.id}`] = r.version; return [r.id, parse(r.data)]; }));
+  const tree = await readTree(env);
+  const cfg = (await env.DB.prepare("SELECT key, value, version FROM config WHERE key IN ('media_map', 'aliases')").all()).results;
+  const versions = { ...tree.versions };
   const c = Object.fromEntries(cfg.map((r) => { versions[`config:${r.key}`] = r.version; return [r.key, parse(r.value, {})]; }));
   return {
-    state: { people: by(people, "person"), families: by(families, "family"), sources: by(sources, "source"), media_map: c.media_map || {}, aliases: c.aliases || {} },
-    versions,
+    state: { people: tree.people, families: tree.families, sources: tree.sources, media_map: c.media_map || {}, aliases: c.aliases || {} },
+    versions, mode: tree.mode,
   };
 }
 
 const guard = (env, sql, ...args) => env.DB.prepare(`INSERT INTO _guard (x) SELECT NULL WHERE ${sql}`).bind(...args);
 
 /** Statements that write `touched` (from applyOps) with version guards and audit rows. */
-export function commitStatements(env, { touched, versions, state, actor, actorKind, reason, sources, proposalId, batchId, op = "edit" }) {
+export function commitStatements(env, { touched, versions, state, actor, actorKind, reason, sources, proposalId, batchId, op = "edit", mode = "working" }) {
   const t = now();
   const st = [];
   // the evidence cited for this change (prov:used), kept with every row of the batch
@@ -34,17 +29,9 @@ export function commitStatements(env, { touched, versions, state, actor, actorKi
   for (const x of touched) {
     if (x.type === "media_map") { mediaTouched = true; continue; }
     if (x.type === "aliases") { aliasesTouched = true; continue; }
-    const tbl = TABLE[x.type];
-    const v = versions[`${x.type}:${x.id}`];
-    if (x.before === undefined || x.before === null) {
-      st.push(guard(env, `EXISTS (SELECT 1 FROM ${tbl} WHERE id = ?)`, x.id));
-      st.push(env.DB.prepare(`INSERT INTO ${tbl} (id, data, version, updated_at, updated_by) VALUES (?, ?, 1, ?, ?)`).bind(x.id, J(x.after), t, actor));
-    } else {
-      st.push(guard(env, `NOT EXISTS (SELECT 1 FROM ${tbl} WHERE id = ? AND version = ?)`, x.id, v));
-      if (x.after === undefined || x.after === null) st.push(env.DB.prepare(`DELETE FROM ${tbl} WHERE id = ?`).bind(x.id));
-      else st.push(env.DB.prepare(`UPDATE ${tbl} SET data = ?, version = version + 1, updated_at = ?, updated_by = ? WHERE id = ?`).bind(J(x.after), t, actor, x.id));
-    }
-    const vAfter = x.after == null ? null : (x.before == null ? 1 : v + 1);
+    const w = writeRecord(env, mode, x, versions, t, actor);
+    st.push(...w.statements);
+    const vAfter = w.versionAfter;
     st.push(env.DB.prepare("INSERT INTO changes (at, actor, actor_kind, entity_type, entity_id, op, before, after, reason, proposal_id, batch_id, version_after, sources) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
       .bind(t, actor, actorKind, x.type, x.id, op, x.before == null ? null : J(x.before), x.after == null ? null : J(x.after), reason || null, proposalId || null, batchId, vAfter, src));
   }
@@ -84,11 +71,11 @@ export const newBatchId = () => `b${Date.now().toString(36)}${Math.random().toSt
 
 /** Apply ops and write them. Throws OpError for bad ops, or a D1 error (guard) on a version conflict. */
 export async function applyAndCommit(env, ops, meta) {
-  const { state, versions } = await loadEditable(env);
+  const { state, versions, mode } = await loadEditable(env);
   const res = applyOps(state, ops, { actor: meta.actor });
   if (!res.touched.length) return { batchId: null, touched: [], created: res.created };
   const batchId = meta.batchId || newBatchId();
-  const st = commitStatements(env, { ...meta, touched: res.touched, versions, state: res.state, batchId });
+  const st = commitStatements(env, { ...meta, touched: res.touched, versions, state: res.state, batchId, mode });
   if (meta.extra) st.push(...meta.extra);
   await env.DB.batch(st);
   return { batchId, touched: res.touched.map((x) => ({ type: x.type, id: x.id, op: x.before == null ? "created" : x.after == null ? "deleted" : "updated" })), created: res.created };
@@ -101,6 +88,7 @@ export async function revertBatch(env, batchId, { actor, actorKind, reason }) {
   const rows = (await env.DB.prepare("SELECT * FROM changes WHERE batch_id = ? ORDER BY id").bind(batchId).all()).results;
   if (!rows.length) return null;
   const t = now(), nb = newBatchId(), st = [];
+  const mode = await storageMode(env);
   for (const r of rows) {
     const before = parse(r.before), after = parse(r.after);
     if (r.entity_type === "config") {
@@ -130,18 +118,10 @@ export async function revertBatch(env, batchId, { actor, actorKind, reason }) {
         .bind(t, actor, actorKind, r.entity_id, r.after, r.before, reason || `revert ${batchId}`, nb));
       continue;
     }
-    const tbl = TABLE[r.entity_type];
-    if (!tbl) continue;
-    if (after == null) {
-      st.push(guard(env, `EXISTS (SELECT 1 FROM ${tbl} WHERE id = ?)`, r.entity_id));
-      st.push(env.DB.prepare(`INSERT INTO ${tbl} (id, data, version, updated_at, updated_by) VALUES (?, ?, 1, ?, ?)`).bind(r.entity_id, r.before, t, actor));
-    } else {
-      // allowed only if the record still holds exactly what this batch wrote (content, not version: undoing a
-      // later change restores this batch's result, after which this batch can be undone too)
-      st.push(guard(env, `NOT EXISTS (SELECT 1 FROM ${tbl} WHERE id = ? AND data = ?)`, r.entity_id, r.after));
-      if (before == null) st.push(env.DB.prepare(`DELETE FROM ${tbl} WHERE id = ?`).bind(r.entity_id));
-      else st.push(env.DB.prepare(`UPDATE ${tbl} SET data = ?, version = version + 1, updated_at = ?, updated_by = ? WHERE id = ?`).bind(r.before, t, actor, r.entity_id));
-    }
+    if (!["person", "family", "source"].includes(r.entity_type)) continue;
+    // allowed only if the record still holds exactly what this batch wrote (content, not version: undoing a later
+    // change restores this batch's result, after which this batch can be undone too)
+    st.push(...await restoreRecord(env, mode, r.entity_type, r.entity_id, before, after, t, actor));
     st.push(env.DB.prepare("INSERT INTO changes (at, actor, actor_kind, entity_type, entity_id, op, before, after, reason, batch_id, version_after) VALUES (?, ?, ?, ?, ?, 'revert', ?, ?, ?, ?, ?)")
       .bind(t, actor, actorKind, r.entity_type, r.entity_id, r.after, r.before, reason || `revert ${batchId}`, nb, before == null ? null : (after == null ? 1 : r.version_after + 1)));
   }

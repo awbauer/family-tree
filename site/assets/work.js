@@ -341,10 +341,24 @@
             <input name="branches" placeholder="Branches (comma-separated; empty = all)"><input name="max_generations" type="number" min="1" placeholder="Max generations" style="max-width:150px">
             ${["research", "notes", "media", "sources"].map((k) => `<label class="small"><input type="checkbox" name="${k}" checked> ${k}</label>`).join("")}
             <input name="exclude" placeholder="Exclude people (IDs)"><button class="btn primary">Save view</button></form></section>
+        <section class="card" id="adm-storage"><h2>Data storage</h2>
+          <p class="small muted">The tree is stored as GEDCOM X: people as Persons, families as Couple and Parent–Child relationships, sources as Source Descriptions. A database created before that change can be moved over here, in one step, after a check that every record converts back exactly.</p>
+          <div class="btn-row"><button class="btn" id="st-check">Check</button><button class="btn primary" id="st-go" hidden>Move to GEDCOM X storage</button></div><div id="st-out" class="small"></div></section>
         <section class="card"><h2>Trees</h2>
           ${a.trees.map((t) => `<form class="filters tree-def" data-tree="${esc(t.id)}"><b style="min-width:160px">${esc(t.name)}</b><input name="name" value="${esc(t.name)}"><textarea name="def" rows="2" style="flex:1;min-width:260px;font-family:monospace;font-size:.8rem">${esc(JSON.stringify(t.definition))}</textarea><button class="btn">Save</button></form>`).join("")}
           <p class="small muted">A tree is <code>{"branches": ["*"] or [keys], "include": [ids], "exclude": [ids], "root": id}</code>. Branch keys: ${(c.R.branches || []).map((b) => `<code>${esc(b.key)}</code>`).join(" ")}</p></section>`;
       const msg = (t) => (document.getElementById("adm-msg").innerHTML = t);
+      const stOut = document.getElementById("st-out"), stGo = document.getElementById("st-go");
+      const stReport = (r) => r.report.already ? "Stored as GEDCOM X." : `${!r.report.ok ? "<b>Not safe to move</b>" : r.report.dryRun ? "Ready to move" : "Moved"}: ${r.report.persons} people, ${r.report.families} families → ${r.report.relationships} relationships (${Object.entries(r.report.relationshipTypes || {}).map(([k, v]) => `${v} ${esc(k)}`).join(", ")}), ${r.report.sourceDescriptions} sources and media.${(r.report.mismatched || []).length ? ` These wouldn't convert back exactly: ${r.report.mismatched.map(esc).join(", ")}` : ""}`;
+      document.getElementById("st-check").onclick = async () => {
+        try { const r = await c.api("POST", "admin/storage", { dry_run: true }); stOut.innerHTML = stReport(r); stGo.hidden = !(r.report.ok && !r.report.already); }
+        catch (e) { stOut.textContent = e.message; }
+      };
+      stGo.onclick = async () => {
+        if (!confirm("Move the tree to GEDCOM X storage now? It runs as one transaction; D1 Time Travel can restore the previous state.")) return;
+        try { const r = await c.api("POST", "admin/storage", { dry_run: false }); stOut.innerHTML = stReport(r); stGo.hidden = true; }
+        catch (e) { stOut.textContent = e.message; }
+      };
       document.getElementById("adm-g").onsubmit = async (ev) => {
         ev.preventDefault(); const f = ev.target;
         try {

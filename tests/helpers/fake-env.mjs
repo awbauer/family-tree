@@ -65,9 +65,18 @@ export function makeEnv(extra = {}) {
   };
 }
 
-/** Call the Worker as `principal`. */
+/** Call the Worker as `principal`. With FT_STORAGE=gedcomx, the seeded database is first moved to GEDCOM X
+ *  storage, so the whole suite also runs against relationships instead of families (npm run test:gedcomx). */
 export function client(worker, env) {
+  let ready = null;
+  const prepare = async () => {
+    if (process.env.FT_STORAGE !== "gedcomx") return;
+    const { upgrade } = await import("../../worker/storage.js");
+    const r = await upgrade(env, { dryRun: false, actor: "test" });
+    if (!r.ok) throw new Error(`storage upgrade failed: ${JSON.stringify(r.mismatched)}`);
+  };
   return async (method, path, { as = "owner@example.test", body } = {}) => {
+    await (ready = ready || prepare());
     const req = new Request(`https://tree.example.test${path}`, {
       method, headers: { "X-Dev-Principal": as, ...(body ? { "Content-Type": "application/json" } : {}) },
       body: body ? JSON.stringify(body) : undefined,

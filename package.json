@@ -21,7 +21,8 @@
     "db:import:local": "python3 tools/guard_load.py --local && wrangler d1 execute family-tree -c wrangler.local.jsonc --local --file build/seed-app.sql",
     "test": "node --test tests/",
     "deploy:ci": "node tools/ci_config.mjs && node tools/wait_migrations.mjs && wrangler deploy -c wrangler.ci.jsonc",
-    "upload:ci": "node tools/ci_config.mjs && wrangler versions upload -c wrangler.ci.jsonc"
+    "upload:ci": "node tools/ci_config.mjs && wrangler versions upload -c wrangler.ci.jsonc",
+    "test:gedcomx": "FT_STORAGE=gedcomx node --test tests/"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

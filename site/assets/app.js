@@ -879,7 +879,7 @@ function startFamilyApp(D) {
           <div class="card"><div class="eyebrow">Open tasks</div><div class="stat"><b>${todos.length}</b></div><p class="small">${todos.filter((t) => t.priority === "high").length} high priority</p><a class="small" href="#/research/todo">See list →</a></div>
           <div class="card"><div class="eyebrow">Sources</div><div class="stat"><b>${Object.keys(S).length}</b></div><p class="small">record collections cited from Ancestry</p><a class="small" href="#/research/sources">Browse →</a></div>
         </div>
-        ${LIVE && EDITOR ? `<p class="btn-row" style="margin-top:14px"><a class="btn" href="api/export.ged?tree=${encodeURIComponent(TREE)}" download>Download GEDCOM (what you can see)</a>${ACCOUNT && ACCOUNT.isOwner ? `<a class="btn" href="api/export.json" download>Download everything (JSON)</a>` : ""}</p>` : ""}
+        ${LIVE && EDITOR ? `<p class="btn-row" style="margin-top:14px"><a class="btn" href="api/export.gedcomx?tree=${encodeURIComponent(TREE)}" download title="GEDCOM X JSON: the full model, with evidence and provenance">Download GEDCOM X</a><a class="btn" href="api/export.ged?tree=${encodeURIComponent(TREE)}" download title="GEDCOM 5.5.1, for Ancestry and older software">Download GEDCOM 5.5.1</a>${ACCOUNT && ACCOUNT.isOwner ? `<a class="btn" href="api/export.json" download>Download everything (JSON)</a>` : ""}</p>` : ""}
         ${R.methodology ? `<section class="section prose">${R.methodology.split(/\n\n+/).map((t) => `<p>${inline(t)}</p>`).join("")}</section>` : ""}`;
     } else if (tab === "review") {
       const groups = {};
