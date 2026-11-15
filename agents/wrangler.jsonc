@@ -26,7 +26,8 @@
     { "tag": "v1", "new_sqlite_classes": ["FlueResearcherAgent", "FlueProfileWriterAgent", "FlueStoryReviewerAgent"] },
     { "tag": "v2", "new_sqlite_classes": ["FlueAssistantAgent"] },
     { "tag": "v3", "new_sqlite_classes": ["FlueQualityReviewerAgent"] },
-    { "tag": "v4", "new_sqlite_classes": ["FlueStoryWriterAgent"] }
+    { "tag": "v4", "new_sqlite_classes": ["FlueStoryWriterAgent"] },
+    { "tag": "v5", "new_sqlite_classes": ["FlueStoryLibrarianAgent"] }
   ],
   // Weekly content job, Sundays 03:23 UTC (src/cloudflare.js). Does nothing unless CONTENT_JOB_ENABLED=true.
   "triggers": { "crons": ["23 3 * * SUN"] },

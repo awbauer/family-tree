@@ -66,6 +66,10 @@ export function firstMessage(b, o) {
 const clip = (s, n) => String(s == null ? "" : s).trim().slice(0, n);
 const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
 const linked = (body) => [...String(body || "").matchAll(/\[\[([^|\]]+)/g)].map((m) => m[1].trim());
+/** The person ids a story's text links, in order (with repeats). */
+export const linkedIds = linked;
+/** A person id as the tree knows it now: itself, the person it was merged into, or null when it is gone. */
+export const currentId = (b, id) => ((b.people || {})[id] ? id : (b.aliases || {})[id] && (b.people || {})[b.aliases[id]] ? b.aliases[id] : null);
 
 /** Source titles the tree cites for these people (and the site's context entries), for checking a story's sources. */
 function knownSources(b, ids) {
@@ -106,7 +110,8 @@ export function checkStory(b, o, input) {
     const changes = (Array.isArray(input.changes) ? input.changes : []).slice(0, 40).map((c) => ({ change: clip(c && c.change, 500), reason: clip(c && c.reason, 1000), facts: (Array.isArray(c && c.facts) ? c.facts : []).map((f) => clip(f, 40)).slice(0, 10) }));
     if (!changes.length || changes.some((c) => !c.change || !c.reason)) errors.push("changes: list each change with its reason");
     for (const id of linked(body)) if (!P[id]) errors.push(`body links [[${id}]], who isn't in this tree`);
-    const people = [...new Set([...(cur.people || []), ...linked(body).filter((id) => P[id] && !P[id].living && !P[id].private)])];
+    // people merged away since the story was written follow the merge; people removed from the tree drop out
+    const people = [...new Set([...(cur.people || []).map((id) => currentId(b, id)).filter(Boolean), ...linked(body).filter((id) => P[id] && !P[id].living && !P[id].private)])];
     const batch = { agent: "cloud", story_updates: [{ slug: cur.slug, title: clip(input.title, 200) || cur.title, body, people, sources: cur.sources && cur.sources.length ? cur.sources : sourcesFrom(b, people, input.sources, errors), reason: summary, changes }] };
     if (!errors.length) errors.push(...validateBatch(batch, (pid) => !!P[pid] && !P[pid].private));
     return errors.length ? { ok: false, errors } : { ok: true, value: { batch, summary } };

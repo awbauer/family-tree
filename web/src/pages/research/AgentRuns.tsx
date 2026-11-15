@@ -1,6 +1,6 @@
-// Cloud research runs (editors with the agents set up): start a research run or a data quality review, and follow
-// runs (polled every 8 s while any is queued or running).
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+// Cloud research runs (editors with the agents set up): start a research run, a data quality review or a story
+// library review, and follow runs (polled every 8 s while any is queued or running).
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useData } from "../../data";
 import { isUnknown, PersonLink } from "../../lib";
@@ -44,6 +44,68 @@ function QualityReport({ r, onApply }: { r: any; onApply: (id: string, b: HTMLBu
   );
 }
 
+const LIB_VERDICT: Record<string, string> = { up_to_date: "Up to date", revised: "Revision suggested", needs_editor: "Needs an editor" };
+const FLAG_TXT: Record<string, string> = { contradiction: "contradicted by the records", unsupported: "not in the records", broken_link: "links someone not in the tree", removed: "lists someone no longer in the tree", merged: "links someone merged into another person", living_details: "details of a living person" };
+
+function Flag({ f }: { f: any }) {
+  const { D } = useData();
+  const pl = (id: string) => (D.people[id] ? <PersonLink id={id} /> : id);
+  return <><b>{FLAG_TXT[f.kind] || f.kind}</b>{f.text ? `: “${f.text}”` : ""}{f.tree_says ? ` (records: ${f.tree_says})` : ""}{f.person ? <> · {pl(f.person)}{f.into ? <> → {pl(f.into)}</> : ""}</> : null}</>;
+}
+
+/** A link to another run's card on this page (the site uses hash routing, so not a #fragment). */
+function RunLink({ id, children }: { id: string; children: ReactNode }) {
+  return <a href="" data-run-link={id} onClick={(e) => { e.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>{children}</a>;
+}
+
+/** A story library review: what it checked and flagged, the candidates, and the story runs it started. */
+function LibraryReport({ r, runs }: { r: any; runs: any[] }) {
+  const { D } = useData();
+  const rep = r.report || {}, o = r.options || {};
+  const checked: any[] = rep.checked || [], children: any[] = rep.children || [], planned: any[] = o.stories || [];
+  const flagged = planned.filter((s) => (s.flags || []).length).length;
+  const byId = Object.fromEntries(runs.map((x) => [x.id, x]));
+  const verdictOf = (slug: string) => checked.find((c) => c.slug === slug);
+  return (
+    <>
+      <p className="small">{checked.length} of {planned.length} stories checked · {flagged} flagged by the checks · {checked.filter((c) => c.proposal).length} revisions suggested · {children.length} of {o.n ?? 2} new stories started</p>
+      {r.summary && <p className="small">{r.summary}</p>}
+      {planned.length > 0 && (
+        <details open={flagged > 0 || undefined}><summary className="small">Stories</summary><div className="table-wrap"><table className="data small"><thead><tr><th>Story</th><th>Checks found</th><th>Verdict</th></tr></thead><tbody>
+          {planned.map((s) => {
+            const v = verdictOf(s.slug);
+            return (
+              <tr key={s.slug}>
+                <td><Link to={`/story/${encodeURIComponent(s.slug)}`}>{s.title || s.slug}</Link>{s.pending && <><br /><span className="muted">revision <Link to="/research/queue">#{s.pending}</Link> waiting</span></>}</td>
+                <td>{(s.flags || []).length ? <ul className="small" style={{ margin: 0, paddingLeft: 16 }}>{s.flags.map((f: any, i: number) => <li key={i}><Flag f={f} /></li>)}</ul> : <span className="muted">nothing</span>}</td>
+                <td>{v ? <>{LIB_VERDICT[v.verdict] || v.verdict}{v.proposal && <> · <Link to="/research/queue">suggestion #{v.proposal}</Link></>}<br /><span className="muted">{v.note}</span></> : <span className="muted">not checked yet</span>}</td>
+              </tr>
+            );
+          })}
+        </tbody></table></div></details>
+      )}
+      {(o.candidates || []).length > 0 && (
+        <details><summary className="small">Candidates for new stories</summary><ol className="small">
+          {o.candidates.map((c: any) => (
+            <li key={c.key}>{c.kind === "group" && `${c.label}: `}{c.people.map((id: string, i: number) => <span key={id}>{i > 0 && ", "}{D.people[id] ? <PersonLink id={id} /> : id}</span>)}
+              <span className="muted"> · score {c.score}{c.covered_by && c.covered_by.length ? ` · covered by ${c.covered_by.join(", ")}` : ""}</span></li>
+          ))}
+        </ol></details>
+      )}
+      {children.length > 0 && (
+        <div className="small"><b>Story runs started</b><ul className="small">
+          {children.map((ch) => {
+            const k = byId[ch.run];
+            return <li key={ch.run} data-child-run={ch.run}><RunLink id={ch.run}>{ch.run}</RunLink> · {ch.people.map((id: string, i: number) => <span key={id}>{i > 0 && ", "}{D.people[id] ? <PersonLink id={id} /> : id}</span>)} · {ch.length}{k ? <> · {RUN_TXT[k.status] || k.status}{k.proposals.length > 0 && <> · <Link to="/research/queue">suggestion #{k.proposals[0]}</Link></>}</> : ""}<br /><span className="muted">{ch.brief}</span></li>;
+          })}
+        </ul></div>
+      )}
+    </>
+  );
+}
+
+const KIND_TXT: Record<string, string> = { quality: "Data quality review · ", library: "Story library review · ", story: "Story · " };
+
 export function AgentRuns() {
   const { D, api, people } = useData();
   const who = useWho();
@@ -85,6 +147,12 @@ export function AgentRuns() {
     try { await api("POST", "agent/runs", { kind: "quality", scope: f.scope.value, person: person || undefined, limit: +f.limit.value || 10, dry_run: f.dry.checked }); load(); }
     catch (e) { alert((e as Error).message); }
   }
+  async function startLibrary(ev: FormEvent<HTMLFormElement>) {
+    ev.preventDefault();
+    const form = ev.currentTarget, f = form.elements as any;
+    try { await api("POST", "agent/runs", { kind: "library", n: f.n.value === "" ? 2 : +f.n.value, instructions: f.instructions.value || undefined }); form.reset(); load(); }
+    catch (e) { alert((e as Error).message); }
+  }
   async function startRun(ev: FormEvent<HTMLFormElement>) {
     ev.preventDefault();
     const form = ev.currentTarget, f = form.elements as any, person = pickId(f.person.value);
@@ -113,14 +181,23 @@ export function AgentRuns() {
           <button className="btn primary">Start review</button>
         </form>
       </details>
+      <details className="card" style={{ marginBottom: 16 }}><summary><b>Review the story library</b> <span className="small muted">· audit every story, suggest fixes, and start new stories</span></summary>
+        <p className="small muted">The agent checks every published story against what the tree now records: claims the records contradict or don't record, and links to people who were merged or removed. Each fix is a suggested revision, shown as a diff in Suggestions; nothing published changes until an editor approves it. It then ranks people who have died, and events several people share, by how much sourced material exists and whether a story covers them, and starts story-writer runs for the best ones, each with a brief. Each started run counts against today's run budget. People who are or could be living are never a story's subject.</p>
+        <form id="lib-new" className="filters" onSubmit={startLibrary}>
+          <label className="small">Start up to <input name="n" type="number" min="0" max="5" defaultValue="2" style={{ width: 56 }} /> new stories</label>
+          <input name="instructions" placeholder="Anything to focus on (optional)" style={{ flex: 2, minWidth: 240 }} />
+          <button className="btn primary">Start review</button>
+        </form>
+      </details>
       <div id="ar-out">
         {state.error ? <div className="empty">{state.error}</div> : !d ? <p className="muted">Loading…</p> : <>
-          <p className="small muted">Today: {d.today ? d.today.runs : 0} of {d.limits.runs_per_day} runs, ${(d.today ? d.today.usd : 0).toFixed(2)} of ${(+d.limits.usd_per_day).toFixed(2)} · up to ${(+d.limits.usd_per_run).toFixed(2)}, {d.limits.searches_per_run} searches and {d.limits.minutes_per_run} minutes per run · models: research {mdl("research")}, review {mdl("quality")}</p>
+          <p className="small muted">Today: {d.today ? d.today.runs : 0} of {d.limits.runs_per_day} runs, ${(d.today ? d.today.usd : 0).toFixed(2)} of ${(+d.limits.usd_per_day).toFixed(2)} · up to ${(+d.limits.usd_per_run).toFixed(2)}, {d.limits.searches_per_run} searches and {d.limits.minutes_per_run} minutes per run · models: research {mdl("research")}, review {mdl("quality")}, library {mdl("library")}, stories {mdl("stories")}</p>
           {d.runs.length ? d.runs.map((r: any) => (
-            <section key={r.id} className="card" style={{ marginBottom: 12 }}>
-              <div className="eyebrow">{r.created_at.slice(0, 16).replace("T", " ")} · {who(r.started_by)} · {r.kind === "quality" ? "Data quality review · " : ""}<span className={`badge st-${r.status === "succeeded" ? "verified" : r.status === "failed" ? "disputed" : "unverified"}`}>{RUN_TXT[r.status]}</span></div>
+            <section key={r.id} id={r.id} className="card" style={{ marginBottom: 12 }}>
+              <div className="eyebrow">{r.created_at.slice(0, 16).replace("T", " ")} · {who(r.started_by)} · {KIND_TXT[r.kind] || ""}{r.options && r.options.parent ? <><RunLink id={r.options.parent}>started by a library review</RunLink> · </> : ""}<span className={`badge st-${r.status === "succeeded" ? "verified" : r.status === "failed" ? "disputed" : "unverified"}`}>{RUN_TXT[r.status]}</span></div>
               <p>{r.todo_id ? `To-do #${r.todo_id}` : ""}{r.person && D.people[r.person] && <> <PersonLink id={r.person} /></>}{r.instructions ? ` · ${r.instructions}` : ""}</p>
               {r.kind === "quality" && <QualityReport r={r} onApply={apply} />}
+              {r.kind === "library" && <LibraryReport r={r} runs={d.runs} />}
               <p className="small muted">{r.steps} model responses · {(r.tokens.input + r.tokens.output).toLocaleString()} tokens{r.usd ? ` · $${r.usd.toFixed(2)}` : ""}{r.model ? ` · ${model(r.model)}` : ""}
                 {r.proposals.length > 0 && <> · suggestion {r.proposals.map((x: any, i: number) => <span key={x}>{i > 0 && ", "}<Link to="/research/queue">#{x}</Link></span>)}</>}{r.error ? ` · ${r.error}` : ""}</p>
               {r.log.length > 0 && <details><summary className="small">{r.log.length} steps</summary><ul className="small">{r.log.map((l: any, i: number) => <li key={i}>{l.text}</li>)}</ul></details>}
