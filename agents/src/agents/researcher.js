@@ -6,25 +6,15 @@
 import { env } from "cloudflare:workers";
 import { useAgentFinish, useAgentStart, useInitialData, useModel, usePersistentState, useTool } from "@flue/runtime";
 import * as v from "valibot";
-import { createAIWebSearch, renderWebSearchResults } from "agents/websearch";
-import { fetchWeb, windowWebFetchPage, renderWebFetchPage } from "agents/webfetch";
 import { scopedFor } from "../../../worker/bundle.js";
-import { settings, checkDaily, compactAt, modelSpec, BudgetError } from "../../../worker/agent/config.js";
-import { usedUsd } from "../meter.js";
-import { pageView } from "../../../worker/agent/pages.js";
-import { SYSTEM, loadRun, markRunning, logRun, recordRunUsage, recordUsed, submitResults, endRun } from "../../../worker/agent/runs.js";
+import { settings, compactAt, modelSpec } from "../../../worker/agent/config.js";
+import { SYSTEM, loadRun, markRunning, logRun, recordRunUsage, submitResults, endRun } from "../../../worker/agent/runs.js";
 import { personView, searchPeople, relationship, checkSubmission } from "../../../worker/agent/tools.js";
 import { useUsage } from "./usage.js";
+import { useWebTools } from "../web.js";
 
 const S = settings(env);
-// General search engines forbid scraping their result pages (and mostly block it anyway). Search goes through the
-// Web Search API; without it, the agent uses record sites' own search pages.
-const BLOCKED_HOSTS = ["google.com", "*.google.com", "*.google.co.uk", "bing.com", "*.bing.com", "duckduckgo.com", "*.duckduckgo.com", "search.yahoo.com", "yandex.com", "*.yandex.com", "*.baidu.com"];
 const FINISHED = ["succeeded", "failed", "cancelled"];
-const PAGE_CHARS = 6000; // one window of a fetched page (the library default is 20,000)
-// Pages this conversation fetched, so reading on or searching within one doesn't download it again (per isolate).
-const pageCache = new Map();
-const remember = (url, page) => { pageCache.set(url, page); if (pageCache.size > 12) pageCache.delete(pageCache.keys().next().value); };
 const str = (d) => v.pipe(v.string(), v.description(d));
 const opt = (schema) => v.optional(schema);
 
@@ -77,14 +67,6 @@ export function Researcher({ id }) {
     if (!sc) throw new Error(`${run.started_by} no longer has access to this tree. Stop working.`);
     return sc.bundle;
   }
-  /** Count a web call against the run's budget (atomically, in D1); null when the budget is used up. */
-  async function spend(kind, max) {
-    if (usedUsd(id) >= S.runUsd) return null; // this run's own spending cap
-    try { await checkDaily(env, S); } catch (e) { if (e instanceof BudgetError) return null; throw e; }
-    const r = await env.DB.prepare(`UPDATE agent_runs SET ${kind} = ${kind} + 1 WHERE id = ? AND ${kind} < ? RETURNING ${kind}`).bind(runId, max).first();
-    return r ? r[kind] : null;
-  }
-
   useAgentStart(async () => { await markRunning(env, runId); });
   useUsage((u, model) => recordRunUsage(env, runId, u, model), { model: M.model });
 
@@ -106,52 +88,7 @@ export function Researcher({ id }) {
     input: v.object({ from: v.string(), to: v.string() }),
     async run({ data }) { return { output: relationship(await tree(), data.from, data.to) }; },
   });
-  useTool({
-    name: "web_search",
-    description: `Search the public web (Cloudflare Web Search API). Returns numbered results with title, URL and a short description; read promising ones with web_fetch. Budget: ${S.maxSearches} searches per run.`,
-    input: v.object({ query: v.pipe(v.string(), v.minLength(1), v.maxLength(1000)), limit: opt(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(10))) }),
-    timeoutMs: 45_000,
-    async run({ data, signal }) {
-      await tree();
-      const n = await spend("searches", S.maxSearches);
-      if (n == null) return "The search budget for this run (or today's AI budget) is used up. Submit what you have with submit_results now.";
-      try {
-        const res = await createAIWebSearch({ binding: env.AI, gateway: S.gateway, provider: S.searchProvider, byokAlias: S.searchByokAlias }).search({ query: data.query, limit: data.limit || 6 }, { signal });
-        await logRun(env, runId, `web_search: ${data.query}`);
-        await recordUsed(env, runId, { kind: "search", query: data.query, provider: S.searchProvider });
-        return renderWebSearchResults(res);
-      } catch (e) {
-        // Search bills to AI Gateway credits (or a stored provider key). Without them, keep researching by reading
-        // record sites' own search pages directly.
-        if (!/payment|credit|402|byok/i.test(String(e && (e.code || e.message)))) throw e;
-        await logRun(env, runId, "web_search unavailable (no AI Gateway credits); using sites' own search pages");
-        return "Web search is not available for this run (no AI Gateway credits). Don't call web_search again, and don't fetch general search engines (Google, Bing, DuckDuckGo): they're blocked. Instead, use web_fetch on the search pages of free record sites with the query in the URL, for example https://www.findagrave.com/memorial/search?firstname=…&lastname=…&deathyear=…, https://www.freebmd.org.uk/, https://www.familysearch.org/search/ (may need a login), https://billiongraves.com/search/results?given_names=…&family_names=…, and national archive catalogues. Cite only pages you actually read.";
-      }
-    },
-  });
-  useTool({
-    name: "web_fetch",
-    description: `Read a web page, PDF or document as Markdown, a piece at a time. The first call returns the page's outline (its headings, with offsets) and the first ${PAGE_CHARS.toLocaleString("en")} characters. To read on, pass offset; to see only the passages that mention something (a name, a year, a place), pass find, e.g. find: "Smith 1923". Prefer find on long pages. Reading more of a page you already fetched doesn't count against the budget. Only cite pages you have read this way. Budget: ${S.maxFetches} pages per run.`,
-    input: v.object({
-      url: v.pipe(v.string(), v.url()),
-      offset: opt(v.pipe(v.number(), v.integer(), v.minValue(0))),
-      find: opt(str("Words to look for on the page; returns only the passages that mention them, with their offsets")),
-    }),
-    timeoutMs: 60_000,
-    async run({ data, signal }) {
-      await tree();
-      let page = pageCache.get(data.url);
-      if (!page) {
-        const n = await spend("fetches", S.maxFetches);
-        if (n == null) return "The page budget for this run (or its budget, or today's AI budget) is used up. Submit what you have with submit_results now.";
-        page = await fetchWeb({ url: data.url }, { binding: env.AI, timeoutMs: 45_000, maxBytes: 4_000_000, blockedHosts: BLOCKED_HOSTS, signal });
-        remember(data.url, page);
-        await logRun(env, runId, `web_fetch: ${data.url}`);
-        await recordUsed(env, runId, { kind: "page", url: page.finalUrl || data.url, title: page.title, status: page.status, contentType: page.contentType });
-      } else if (usedUsd(id) >= S.runUsd) return "This run's budget is used up. Submit what you have with submit_results now.";
-      return pageView(page, { offset: data.offset, find: data.find, chars: PAGE_CHARS, render: (w) => renderWebFetchPage(windowWebFetchPage(page, w)) });
-    },
-  });
+  useWebTools({ id, runId, check: () => tree(), submitTool: "submit_results" });
   useTool({
     name: "submit_results",
     description: "Submit your work once, at the end. It is checked and, if valid, becomes suggestions an editor reviews; nothing changes in the tree until they approve. If it comes back with errors, fix them and call it again. Include every search you ran in batch.log, including the ones that found nothing.",

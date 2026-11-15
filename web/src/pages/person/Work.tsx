@@ -24,6 +24,7 @@ export function Work() {
       <Comments />
       <History />
       {ai && !p.living && <AiResearch />}
+      {ai && !p.living && <FindRelatives />}
       <datalist id="w-people">{people.filter((x) => !isUnknown(x)).map((x) => <option key={x.id} value={`${x.name} (${x.id})`} />)}</datalist>
     </div>
   );
@@ -335,6 +336,41 @@ function AiResearch() {
       }}><input name="instructions" placeholder="What should it look for? (optional)" style={{ flex: 1, minWidth: 220 }} /><button className="btn primary">Start</button></form>
       <div id="w-ai-out" className="small">{state.error ? state.error : state.runs && state.runs.length > 0 && <>
         <ul>{state.runs.slice(0, 5).map((r, i) => <li key={i}>{r.created_at.slice(0, 10)} · {STATE[r.status]}{r.proposals.length > 0 && <> · <Link to="/research/queue">suggestion #{r.proposals.join(", #")}</Link></>}{r.error && <> · <span className="muted">{r.error}</span></>}</li>)}</ul>
+        <Link to="/research/agents">All runs →</Link></>}</div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- Sherlock: relatives not yet in the tree (#44)
+const LOOKING: [string, string][] = [["any", "Any relative"], ["parents", "Parents"], ["siblings", "Brothers and sisters"], ["spouse", "Spouse"], ["children", "Children"], ["named", "A named relative…"]];
+function FindRelatives() {
+  const { api } = useData();
+  const { id, p } = usePerson();
+  const [looking, setLooking] = useState("any");
+  const [state, setState] = useState<{ runs?: any[]; error?: string }>({});
+  const load = useCallback(async () => {
+    try { setState({ runs: (await api("GET", `agent/runs?person=${encodeURIComponent(id)}`)).runs.filter((r: any) => r.kind === "relatives") }); } catch (e: any) { setState({ error: e.message }); }
+  }, [api, id]);
+  useEffect(() => { load(); }, [load]);
+  return (
+    <section className="card" id="w-relatives"><h2>Find relatives</h2>
+      <p className="small muted">Sherlock, a cloud agent, searches records for {p.name}'s parents, siblings, spouses and children who aren't in the tree yet. Each one it finds becomes a suggestion you can accept in one step; it never adds anyone itself, and anyone who could still be alive is only noted, not researched.</p>
+      <form id="w-relatives-f" className="filters" onSubmit={async (ev) => {
+        ev.preventDefault();
+        const f = ev.currentTarget;
+        try {
+          await api("POST", "agent/runs", { kind: "relatives", person: id, looking_for: looking, named: looking === "named" ? val(f, "named") : undefined, hints: val(f, "hints") || undefined, depth: +val(f, "depth") || 1 });
+          f.reset(); setLooking("any"); load();
+        } catch (e: any) { alert(e.message); }
+      }}>
+        <label className="small">Looking for <select name="looking_for" value={looking} onChange={(e) => setLooking(e.target.value)}>{LOOKING.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+        {looking === "named" && <input name="named" required placeholder="e.g. a brother called Example" style={{ flex: "1 1 180px" }} />}
+        <input name="hints" placeholder="Hints (optional): where or when to look" style={{ flex: "2 1 220px" }} />
+        <label className="small">Depth <select name="depth" defaultValue="1"><option value="1">One generation</option><option value="2">Two generations</option></select></label>
+        <button className="btn primary">Find relatives</button>
+      </form>
+      <div id="w-relatives-out" className="small">{state.error ? state.error : state.runs && state.runs.length > 0 && <>
+        <ul>{state.runs.slice(0, 5).map((r, i) => <li key={i}>{r.created_at.slice(0, 10)} · {STATE[r.status]}{r.report && r.report.candidates ? ` · ${r.report.candidates.length} found` : ""}{r.proposals.length > 0 && <> · <Link to="/research/queue">suggestion #{r.proposals.join(", #")}</Link></>}{r.error && <> · <span className="muted">{r.error}</span></>}</li>)}</ul>
         <Link to="/research/agents">All runs →</Link></>}</div>
     </section>
   );

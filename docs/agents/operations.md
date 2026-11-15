@@ -169,7 +169,7 @@ Editors can hand a to-do or a person to a research agent that runs in Cloudflare
 - **The models run on Workers AI by default.** Each agent has its own model (`AI_MODEL_<AGENT>`; defaults and reasons in [models.md](models.md)), called through the Workers AI binding and your AI Gateway. The defaults are billed to your Workers plan, with a daily free allocation, and need no AI Gateway credits or provider key.
   - To use Claude, set `AI_MODEL=anthropic/claude-opus-5-5` and load AI Gateway credits, or store an Anthropic key on the gateway.
   - With a zero credit balance, gateway models fail with error 2002, "Model execution failed".
-- **Cloudflare's agent tools:** `web_search` (Cloudflare Web Search API) and `web_fetch` (pages and PDFs to Markdown) from the Agents SDK.
+- **Cloudflare's agent tools:** `web_search` (Cloudflare Web Search API) and `web_fetch` (pages and PDFs to Markdown) from the Agents SDK, shared by every agent that reads the web (`agents/src/web.js`), with `research_sites` for the owner's list of sites (see "Research sites" below).
   - Web search bills to AI Gateway credits, or to a search provider key you store on the gateway. Set its alias as `WEB_SEARCH_BYOK_ALIAS`.
   - Without either, the agent is told search is unavailable and works from record sites' own search pages through `web_fetch`, which needs neither.
 - **The site's own code for everything that matters.** Scoping (`worker/bundle.js`, `worker/scope.js`), submission checks (`worker/agent/tools.js`, `worker/research.js`, the edit-ops dry run) and filing suggestions (`worker/agent/runs.js`) are the same modules the site uses, imported into the agents Worker. The Flue files (`agents/src/`) only declare tools and wiring.
@@ -202,7 +202,7 @@ Spend is priced per model from published rates (`worker/agent/models.js`), so th
 
 Each model call logs a `[turn]` line with its model, tokens and cost (no content) to Workers Logs.
 
-**Models:** each agent's model and effort are set separately: `AI_MODEL_<AGENT>` and `AI_EFFORT_<AGENT>`, for `RESEARCH`, `CHAT`, `QUALITY`, `STORIES`, `LIBRARY`, `PROFILES` and `STORY_CHECKS`. [models.md](models.md) has the defaults and why each was chosen.
+**Models:** each agent's model and effort are set separately: `AI_MODEL_<AGENT>` and `AI_EFFORT_<AGENT>`, for `RESEARCH`, `CHAT`, `QUALITY`, `STORIES`, `LIBRARY`, `RELATIVES`, `PROFILES` and `STORY_CHECKS`. [models.md](models.md) has the defaults and why each was chosen.
 
 Also set a **spend limit and rate limit on the AI Gateway itself** (dashboard → AI → AI Gateway → your gateway → Settings). That is the hard stop if anything here misbehaves. Other variables: `AI_MODEL` (overrides every agent's default model; prefer the per-agent ones), `WEB_SEARCH_BYOK_ALIAS`, `AI_GATEWAY_ID` (`default`), `WEB_SEARCH_PROVIDER` (`exa`), `CONTENT_JOB_ENABLED` (`false`).
 
@@ -215,7 +215,7 @@ Also set a **spend limit and rate limit on the AI Gateway itself** (dashboard �
    - Deploy command: `npm run deploy:ci`
    - Build variable: `D1_DATABASE_ID`
    - Install: Workers Builds runs `npm ci` in `agents/`, which has its own lockfile.
-3. **Variables on `family-tree-agents`:** the budgets above if you want other values, `AI_GATEWAY_ID` if not `default`, and later `CONTENT_JOB_ENABLED=true`.
+3. **Variables on `family-tree-agents`:** the budgets above if you want other values, `AI_GATEWAY_ID` if not `default`, and later `CONTENT_JOB_ENABLED=true`. To let agents sign in to sites with an API key, also set the secret `SITE_CREDENTIALS_KEY` on both Workers (see "Research sites" below).
 4. **Connect the site to it:** nothing to set. On each build, `tools/ci_config.mjs` checks with the Workers Builds token whether a Worker named `family-tree-agents` exists, and adds the `AGENTS` service binding if it does. A binding to a missing Worker would fail the deploy, so it's skipped until then. To choose explicitly, set the build variable `AGENTS_SERVICE` to another Worker name, or to `off`.
 5. Redeploy the site (or push to `main`). Editors now see **Research with AI** on to-dos and person pages, and the **Agent runs** tab under Research.
 
@@ -311,6 +311,43 @@ Research → Agent runs → **Review the story library** starts an agent (`agent
 - **Commission:** up to N story-writer runs for the best candidates, each with a brief from the librarian. Each is an ordinary stories-agent draft run (`kind: "story"`, the stories agent's model, its own suggestion), started as the editor who started the librarian. Its `options.parent` names the librarian run; the librarian's report (`agent_runs.report.children`) lists it. No migration was needed for the link.
 - **Report:** each story's flags and verdict, with links to the suggested revisions; the candidates; and the story runs started, with their status.
 - **Budget:** the librarian is one run against `AGENT_MAX_RUNS_PER_DAY`; its own spend is capped by `AGENT_MAX_RUN_USD`. Each child run counts against the daily run and spend budgets as usual, and isn't started once they're used up. Model `AI_MODEL_LIBRARY` (default DeepSeek V4.1 Flash, the quality reviewer's model), effort `AI_EFFORT_LIBRARY`. Durable Object migration `v5` (`FlueStoryLibrarianAgent`). Stopping a librarian run doesn't stop story runs it already started; stop those separately.
+
+## Research sites (the shared list)
+
+Admin → **Research sites** (`#/admin/sites`, owner only) is the list of genealogy sites every research agent works from: the researcher, Sherlock, and Claude Code agents through `python3 tools/agent_api.py sites`. Migration `0010_research_sites.sql` seeds about 40 broadly useful, international resources (free archives, indexes, newspapers, cemeteries, directories, and the major subscription sites marked as such).
+
+- **Each site:** name, home page, an optional search URL template (`{given}`, `{surname}`, `{birth_year}`, `{place}`), the domains it covers, coverage, record types, access (`open`, `free-account`, `subscription`, `institution`), source quality (`original-images`, `indexes`, `compiled`), whether it has an official API, notes for agents, and an on/off switch.
+- **What the agents get:** a compact summary of the enabled sites in the first message of every research and Sherlock run (name, domain, access group, credential yes/no, a one-line note; at most 4,000 characters), plus a `research_sites` tool for full details or filtering by record type. They prefer listed sites, follow the notes, and for a subscription or institution site without a credential they log the search as inconclusive and leave the owner a to-do. The other agents (stories, librarian, data quality, assistant) don't read the web, so they don't get the list.
+- **API:** `GET /api/research-sites` (editors and agents; `has_credential`, never a value); `POST`, `PUT /:id`, `DELETE /:id`, and `PUT|DELETE /:id/credential` (owner). Code: `worker/sites.js`, `worker/agent/sites.js`.
+- **History:** adding, editing, switching on or off and removing a site, and setting, replacing or removing a credential, are all in Admin → Audit history (`entity_type` `research_site`). The log keeps the credential's kind, never its value.
+
+**Credentials (optional).** For sites with an official API key or HTTP sign-in, the owner can save one credential per site:
+
+- **Kinds:** `header` (a header name and value: an API key or a bearer token), `query` (a URL parameter and value), or `basic` (username and password, sent as HTTP Basic auth).
+- **No form logins.** Agents never fill in sign-in forms or carry cookies. Ancestry, MyHeritage, Findmypast and similar sites forbid automated access, and trying would put the owner's account at risk; agents leave a to-do for those instead.
+- **Storage:** encrypted at rest in D1 (AES-GCM, WebCrypto) in their own table, `research_site_credentials`, which list queries never read. Values are write-only: no API or page shows them, only "credential set (kind, date, by)" with Replace and Remove.
+- **Use:** the agents Worker decrypts a credential only inside `web_fetch` (`agents/src/web.js`, shared by every agent that reads the web), and adds it when the requested URL's host is one of that site's domains, over https only. Each redirect hop is checked again: a redirect to a host outside the site's domains is followed without it. The model never sees the value; the run's record of pages read (`agent_runs.used`) marks pages read with a credential.
+- **The key:** `SITE_CREDENTIALS_KEY`, 32 random bytes in base64, set as a secret on **both** Workers with the same value. Without it, saving a credential fails with the commands below, and everything else works. Changing the key makes saved credentials unreadable: save them again.
+
+  ```bash
+  openssl rand -base64 32
+  npx wrangler secret put SITE_CREDENTIALS_KEY --name family-tree
+  npx wrangler secret put SITE_CREDENTIALS_KEY --name family-tree-agents
+  ```
+
+## Sherlock: find relatives (agent)
+
+**Find relatives** on a person page (editors, people who have died) starts Sherlock (`agents/src/agents/sherlock.js`, Flue, one Durable Object per run; shared logic in `worker/agent/relatives.js`). It searches records for the person's parents, siblings, spouses and children who aren't in the tree yet, and suggests them. It never adds anyone itself.
+
+- **Options (all optional):** looking for any relative, parents, siblings, a spouse, children, or a named relative ("a brother called Example"); free-text hints; depth one generation (default) or two (also the relatives of the person's immediate family).
+- **What it starts with:** the person's full view (names, events with places, sources, findings, the research log, open to-dos), their immediate family already in the tree, and the research sites summary. It fetches anything else with the researcher's tools, under the same lean-context rules, and the same `web_search`, `web_fetch` and `research_sites`.
+- **What it files:** each candidate becomes its own **suggestion** in Research → Suggestions: a `new-person` finding (confidence, the records seen) carrying the edit ops that add the person and link them to the family (`person.create` plus `family.set_spouse`, `family.add_child` or `family.create`). Approving it applies both in one step. The change is logged as `agent:sherlock` **on behalf of** the approving editor (`via` = the run), and the finding is recorded on the relative's page as resolved. Rejecting it keeps the finding, dismissed, with the reviewer's note. The searches, negative ones included, and any to-dos for the owner go in one research suggestion.
+- **Checks before filing:**
+  - **Already in the tree:** a candidate with the same first given name and surname as anyone in the tree (any recorded name, accents and case ignored), and birth and death years within two years where both are known, is dropped and listed as "already in the tree".
+  - **Living people:** a candidate with no death record who was born within 110 years, or whose birth year isn't known, is reported only as "possible living relative, not researched", with no name or details, and no suggestion is filed.
+  - Every candidate needs a source with a URL or a note saying where the record is, and its ops must apply to the tree as it is.
+- **Report:** Research → Agent runs shows each Sherlock run with what it suggested (and the suggestion numbers), how many possible living relatives it noted, who it found already in the tree, and the searches it logged.
+- **Model and budget:** `AI_MODEL_RELATIVES` / `AI_EFFORT_RELATIVES` (default: the researcher's model, DeepSeek V4.1 Flash, high). One run against `AGENT_MAX_RUNS_PER_DAY`, spend against `AI_DAILY_BUDGET_USD` and `AGENT_MAX_RUN_USD`, pages and searches against `AGENT_MAX_FETCHES` and `AGENT_MAX_SEARCHES`. Durable Object migration `v6` (`FlueSherlockAgent`). API: `POST /api/agent/runs {tree, kind: "relatives", person, looking_for?, named?, hints?, depth?}`.
 
 ## GEDCOM X storage, export and import
 

@@ -11,6 +11,7 @@
 //   POST /api/agent/runs               {tree, kind: "story", mode: "review", slug, instructions?}
 //                                      {tree, kind: "story", mode: "draft", people: [ids], instructions?, length?}
 //   POST /api/agent/runs               {tree, kind: "library", n?, instructions?}  review the story library (#36)
+//   POST /api/agent/runs               {tree, kind: "relatives", person, looking_for?, named?, hints?, depth?}  Sherlock (#44)
 //   POST /api/profiles/:id/refresh     queue a rewrite of one person's AI profile (editors)
 //   POST /api/content/refresh          run the content job now (owner)
 import { J, now, parse, write } from "../db.js";
@@ -21,9 +22,15 @@ import { AGENT, RESEARCHER_PATH, firstMessage, endRun } from "./runs.js";
 import * as Quality from "./quality.js";
 import * as Stories from "./stories.js";
 import * as Library from "./library.js";
+import * as Relatives from "./relatives.js";
+import { listSites, sitesSummary } from "./sites.js";
+import { OpError } from "../ops.js";
 
 /** Where each kind of run's agent is mounted in the agents Worker. */
-const PATHS = { research: RESEARCHER_PATH, quality: Quality.QUALITY_PATH, story: Stories.STORY_PATH, library: Library.LIBRARY_PATH };
+const PATHS = { research: RESEARCHER_PATH, quality: Quality.QUALITY_PATH, story: Stories.STORY_PATH, library: Library.LIBRARY_PATH, relatives: Relatives.RELATIVES_PATH };
+
+/** The research sites list, compact, for the first message of agents that search the web. */
+export const sitesText = async (env) => sitesSummary(await listSites(env, { enabledOnly: true }));
 
 export const enabled = agentsEnabled;
 
@@ -67,7 +74,8 @@ export async function startRun(c, d, { grantOrFail, scoped, loadTodo }) {
   if (d.kind === "quality") return startQuality(c, d, g, { scoped });
   if (d.kind === "story") return startStory(c, d, g, { scoped });
   if (d.kind === "library") return startLibrary(c, d, g, { scoped });
-  if (d.kind && d.kind !== "research") fail(400, "kind must be research, quality, story or library");
+  if (d.kind === "relatives") return startRelatives(c, d, g, { scoped });
+  if (d.kind && d.kind !== "research") fail(400, "kind must be research, quality, story, library or relatives");
   const env = c.env, s = settings(env), b = await scoped(c, g);
   let todo = null;
   if (d.todo_id) {
@@ -105,7 +113,7 @@ export async function startRun(c, d, { grantOrFail, scoped, loadTodo }) {
   // Hand the run to its own Flue agent conversation (one Durable Object per run, id = run id). Admission is durable:
   // once this returns, the agent owes the run an outcome even across restarts.
   try {
-    await agentsFetch(env, `${RESEARCHER_PATH}/${id}`, { kind: "user", body: firstMessage({ instructions, person }, b, todo), initialData: { runId: id } });
+    await agentsFetch(env, `${RESEARCHER_PATH}/${id}`, { kind: "user", body: `${firstMessage({ instructions, person }, b, todo)}\n\n${await sitesText(env)}`, initialData: { runId: id } });
   } catch (e) {
     await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
     fail(502, `Couldn't start the run: ${e.message}`);
@@ -272,6 +280,34 @@ async function startLibrary(c, d, g, { scoped }) {
   } catch (e) {
     await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
     fail(502, `Couldn't start the review: ${e.message}`);
+  }
+  return json({ run: runOut(await env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) }, 201);
+}
+
+// ---------------------------------------------------------------- Sherlock, the relatives finder (#44)
+async function startRelatives(c, d, g, { scoped }) {
+  const env = c.env, s = settings(env), b = await scoped(c, g);
+  const person = d.person ? String(d.person) : null;
+  if (!person) fail(400, "Say whose relatives to look for (person).");
+  const p = b.people[person];
+  if (!p) fail(404, "That person isn't in this tree.");
+  if (p.living || p.private) fail(400, "Relatives are only looked for from people who have died. Living people aren't researched.");
+  let o;
+  try { o = Relatives.cleanOptions(d); } catch (e) { if (e instanceof OpError) fail(400, e.message); throw e; }
+  try { await checkDaily(env, s, { runs: true }); } catch (e) { if (e instanceof BudgetError) fail(429, e.message); throw e; }
+  const id = `run-${now().slice(0, 10).replace(/-/g, "")}-${crypto.randomUUID().slice(0, 8)}`;
+  const want = o.looking_for === "named" ? o.named : o.looking_for === "any" ? "any relatives" : o.looking_for;
+  const label = `Find relatives of ${p.name}: ${want}${o.depth === 2 ? ", two generations" : ""}${o.hints ? `. Hints: ${o.hints}` : ""}`;
+  await write(env, [
+    env.DB.prepare("INSERT INTO agent_runs (id, kind, person_id, tree_id, started_by, instructions, options, created_at) VALUES (?, 'relatives', ?, ?, ?, ?, ?, ?)")
+      .bind(id, person, g.tree_id, c.access.principal, label.slice(0, 2000), J(o), now()),
+    recordUsage(env, { runs: 1 }),
+  ]);
+  try {
+    await agentsFetch(env, `${Relatives.RELATIVES_PATH}/${id}`, { kind: "user", body: Relatives.firstMessage(b, person, o, await sitesText(env)), initialData: { runId: id } });
+  } catch (e) {
+    await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
+    fail(502, `Couldn't start the run: ${e.message}`);
   }
   return json({ run: runOut(await env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) }, 201);
 }

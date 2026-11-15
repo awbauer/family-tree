@@ -52,7 +52,7 @@ after(async () => { await browser?.close(); await srv?.close(); });
 test("no page is wider than a 320px screen, even with very long text", async () => {
   const wide = [];
   for (const p of ["/", "/people", `/person/${longId}`, "/person/I5", `/tree/${longId}`, "/branch/novak", "/stories", "/map", "/timeline",
-    "/research", "/research/todo", "/research/queue", "/sources", "/source/S99", "/admin", "/admin/audit", "/about"]) {
+    "/research", "/research/todo", "/research/queue", "/sources", "/source/S99", "/admin", "/admin/sites", "/admin/audit", "/about"]) {
     await page.evaluate((h) => { location.hash = h; }, "#" + p);
     await page.waitForTimeout(500);
     const w = await page.evaluate(() => document.documentElement.scrollWidth);
