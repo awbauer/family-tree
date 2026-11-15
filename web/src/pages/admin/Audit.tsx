@@ -1,0 +1,170 @@
+// Admin → Audit history (owner only): every change, newest first, with filters, paging, and rows that open to the
+// full detail (diffs, stored values, linked suggestions and runs) and an undo.
+import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { Link } from "react-router";
+import { useData } from "../../data";
+import { PersonLink } from "../../lib";
+import { Diff, diffItems } from "../../ops";
+import { useWho } from "../../ui";
+
+const AUDIT_OPS: Record<string, string> = { edit: "Edit", revert: "Undo", import: "Import", "storage-upgrade": "Storage move", resolve: "Finding resolved", resolved: "Finding resolved", dismissed: "Finding dismissed", reopen: "Finding reopened",
+  create: "Created", update: "Updated", put: "Set", delete: "Removed", set: "Status set", revise: "Story revised", approve: "Approved", reject: "Rejected", withdraw: "Withdrawn" };
+const AUDIT_TYPES: Record<string, [string, string]> = { person: ["person", "people"], family: ["family", "families"], source: ["source", "sources"], config: ["setting", "settings"], media: ["photo", "photos"], todo: ["to-do", "to-dos"], finding: ["finding", "findings"],
+  proposal: ["suggestion", "suggestions"], story: ["story", "stories"], status: ["status", "statuses"], grant: ["grant", "grants"], view: ["view", "views"], tree: ["tree", "trees"], member: ["member", "members"], comment: ["comment", "comments"] };
+const typeName = (t: string, n: number) => { const x = AUDIT_TYPES[t] || [t, `${t}s`]; return n === 1 ? x[0] : x[1]; };
+const fmt = (iso?: string) => (iso ? iso.slice(0, 16).replace("T", " ") : "");
+const short = (v: unknown) => { const s = typeof v === "string" ? v : JSON.stringify(v); return s == null ? "—" : s.length > 140 ? s.slice(0, 137) + "…" : s; };
+const DIFF_TYPES = ["person", "family", "source", "media", "finding", "status"];
+
+function EntityLink({ e }: { e: any }) {
+  const { D } = useData();
+  if (e.type === "person" && D.people[e.id]) return <PersonLink id={e.id}>{e.label || undefined}</PersonLink>;
+  if (e.type === "story") return <Link to={`/story/${e.id}`}>{e.label || e.id}</Link>;
+  return <>{e.label || e.id}</>;
+}
+
+function Summary({ b }: { b: any }) {
+  const parts = Object.entries(b.types).map(([t, n]) => `${n} ${typeName(t, n as number)}`);
+  const names = b.entities.filter((e: any) => e.label || ["person", "family", "story", "grant", "tree", "view"].includes(e.type)).slice(0, 4);
+  return <><span className="badge">{AUDIT_OPS[b.op] || b.op}</span> {parts.join(", ")}{names.length > 0 && <><br /><span className="small">{names.map((e: any, i: number) => <span key={i}>{i > 0 && ", "}<EntityLink e={e} /></span>)}{b.count > names.length ? ", …" : ""}</span></>}</>;
+}
+
+function FieldDiff({ a, b }: { a: any; b: any }) {
+  const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+  return <ul className="diff-fields">{keys.map((k) => <li key={k}><b>{k}</b>: <span className="d-from">{short(a[k])}</span> → <span className="d-to">{short(b[k])}</span></li>)}</ul>;
+}
+const hasFieldDiff = (a: any, b: any) => a != null && b != null && typeof a === "object" && typeof b === "object" &&
+  [...new Set([...Object.keys(a), ...Object.keys(b)])].some((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+
+function RowDetail({ r }: { r: any }) {
+  const { D } = useData();
+  const ch = { type: r.type, id: r.entity, before: r.before, after: r.after };
+  const canDiff = DIFF_TYPES.includes(r.type);
+  let visible = false;
+  if (canDiff) { try { visible = diffItems(D, ch).length > 0; } catch { visible = false; } }
+  const body = visible ? <Diff changes={[ch]} />
+    : r.change === "updated" && hasFieldDiff(r.before, r.after) ? <FieldDiff a={r.before} b={r.after} />
+    : canDiff ? <p className="small muted">No visible differences.</p> : null;
+  return (
+    <div className="audit-entity">
+      <div className="small"><b>{typeName(r.type, 1)}</b> {r.type === "person" && D.people[r.entity] ? <PersonLink id={r.entity} /> : r.entity} · {r.change}{r.op !== "edit" ? ` (${AUDIT_OPS[r.op] || r.op})` : ""}{r.version_after ? ` · version ${r.version_after}` : ""}</div>
+      {body}
+      <details className="small"><summary>Stored values</summary><div className="audit-raw">
+        <div><b>Before</b><pre>{JSON.stringify(r.before, null, 1) || "—"}</pre></div>
+        <div><b>After</b><pre>{JSON.stringify(r.after, null, 1) || "—"}</pre></div>
+      </div></details>
+    </div>
+  );
+}
+
+function Detail({ d, onUndone }: { d: any; onUndone: () => void }) {
+  const { api } = useData();
+  const who = useWho();
+  const [undone, setUndone] = useState(false);
+  const first = d.rows[0];
+  const sources = first.sources || (d.rows.find((r: any) => r.sources) || {}).sources;
+  const reasons = [...new Set<string>(d.rows.map((r: any) => r.reason).filter(Boolean))];
+  const undoable = d.batch && !d.rows.some((r: any) => r.op === "revert") && d.rows.some((r: any) => ["person", "family", "source", "config", "finding"].includes(r.type));
+  async function undo() {
+    if (!confirm("Undo this change? The records go back to how they were before it; the undo is itself logged.")) return;
+    try { await api("POST", `changes/${encodeURIComponent(d.batch)}/revert`, {}); setUndone(true); onUndone(); }
+    catch (e) { alert((e as Error).message); }
+  }
+  return (
+    <div className="audit-detail">
+      <dl className="audit-meta small">
+        <dt>When</dt><dd>{fmt(first.at)} UTC</dd>
+        <dt>Who</dt><dd>{who(first.actor)}{first.actor_kind === "agent" ? " (agent)" : ""}{first.on_behalf_of ? `, on behalf of ${who(first.on_behalf_of)}` : ""}</dd>
+        {first.via && <><dt>Via</dt><dd>{/^run-/.test(first.via) ? <Link to="/research/agents">agent run {first.via}</Link> : first.via}</dd></>}
+        {d.batch && <><dt>Edit id</dt><dd><code>{d.batch}</code></dd></>}
+        {reasons.length > 0 && <><dt>Why</dt><dd>{reasons.map((x, i) => <Fragment key={i}>{i > 0 && <br />}{x}</Fragment>)}</dd></>}
+        {(sources || []).length > 0 && <><dt>Sources</dt><dd>{sources.map((s: any, i: number) => <Fragment key={i}>{i > 0 && "; "}{s.url ? <a href={s.url} target="_blank" rel="noopener">{s.title || s.url}</a> : s.title || ""}</Fragment>)}</dd></>}
+        {d.proposals.map((p: any) => <Fragment key={`p${p.id}`}><dt>Suggestion</dt><dd><Link to="/research/queue">#{p.id}</Link> ({p.kind}) by {who(p.author)}, {p.status}{p.reviewed_by ? ` by ${who(p.reviewed_by)}` : ""}{p.rationale && <><br /><span className="muted">{p.rationale.slice(0, 300)}</span></>}</dd></Fragment>)}
+        {d.runs.map((r: any, i: number) => <Fragment key={`r${i}`}><dt>Run</dt><dd>{r.kind || "research"} run started by {who(r.started_by)}{r.instructions ? `: ${r.instructions}` : ""} ({r.status})</dd></Fragment>)}
+      </dl>
+      <div>{d.rows.map((r: any, i: number) => <RowDetail key={i} r={r} />)}</div>
+      {undoable && <p>{undone ? <span className="small">Undone. Reload to see the tree as it is now.</span>
+        : <><button className="btn" data-undo={d.batch} onClick={undo}>Undo this change</button> <span className="small muted">Records changed since then can't be undone this way.</span></>}</p>}
+    </div>
+  );
+}
+
+function Batch({ b, open, onToggle, onUndone }: { b: any; open: boolean; onToggle: () => void; onUndone: () => void }) {
+  const { api } = useData();
+  const who = useWho();
+  const [d, setD] = useState<{ data?: any; error?: string } | null>(null);
+  useEffect(() => {
+    if (!open) { setD(null); return; }
+    let live = true;
+    api("GET", `admin/audit/${encodeURIComponent(b.key)}`).then((data) => live && setD({ data }), (e) => live && setD({ error: e.message }));
+    return () => { live = false; };
+  }, [open, api, b.key]);
+  const click = (ev: MouseEvent) => { if (!(ev.target as HTMLElement).closest("a")) onToggle(); };
+  const key = (ev: KeyboardEvent) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); onToggle(); } };
+  return (
+    <>
+      <tr className={`audit-row${open ? " open" : ""}`} data-key={b.key} tabIndex={0} aria-expanded={open} onClick={click} onKeyDown={key}>
+        <td className="small nowrap">{fmt(b.at)}</td>
+        <td className="small">{who(b.actor)}{b.on_behalf_of && <><br /><span className="muted">for {who(b.on_behalf_of)}</span></>}</td>
+        <td><Summary b={b} /></td>
+        <td className="small">{(b.reason || "").slice(0, 160)}{(b.reason || "").length > 160 ? "…" : ""}</td>
+        <td className="small muted audit-caret" aria-hidden="true">{open ? "▾" : "▸"}</td>
+      </tr>
+      {open && <tr className="audit-detail-row"><td colSpan={5}>
+        {!d ? <p className="small muted">Loading…</p> : d.error ? <p className="small">{d.error}</p> : <Detail d={d.data} onUndone={onUndone} />}
+      </td></tr>}
+    </>
+  );
+}
+
+export function Audit() {
+  const { api } = useData();
+  const who = useWho();
+  const [st, setSt] = useState<{ actor: string; type: string; q: string; rows: any[]; next: any; actors: any[]; types: any[] }>({ actor: "", type: "", q: "", rows: [], next: null, actors: [], types: [] });
+  const [loaded, setLoaded] = useState(false), [error, setError] = useState("");
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const alive = useRef(true);
+  const stRef = useRef(st);
+  stRef.current = st;
+
+  const load = useCallback(async (reset: boolean, filters?: { actor: string; type: string; q: string }) => {
+    const s = { ...stRef.current, ...(filters || {}) };
+    const qs = new URLSearchParams({ limit: "40" });
+    if (s.actor) qs.set("actor", s.actor);
+    if (s.type) qs.set("type", s.type);
+    if (s.q) qs.set("q", s.q);
+    if (!reset && s.next) qs.set("before", String(s.next));
+    try {
+      const r = await api("GET", `admin/audit?${qs}`);
+      if (!alive.current) return;
+      setSt((x) => ({ ...x, ...(filters || {}), actors: r.actors || x.actors, types: r.types || x.types, rows: reset ? r.batches : [...x.rows, ...r.batches], next: r.next }));
+      setError(""); setLoaded(true);
+    } catch (e) { if (alive.current) setError((e as Error).message); }
+  }, [api]);
+  useEffect(() => { alive.current = true; load(true); return () => { alive.current = false; }; }, [load]);
+
+  function filter(ev: FormEvent<HTMLFormElement>) {
+    ev.preventDefault();
+    const f = ev.currentTarget.elements as any;
+    setOpen(new Set());
+    load(true, { actor: f.actor.value, type: f.type.value, q: f.q.value.trim() });
+  }
+  const toggle = (k: string) => setOpen((o) => { const n = new Set(o); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+
+  if (error) return <div id="audit"><div className="empty">{error}</div></div>;
+  if (!loaded) return <div id="audit"><p className="muted">Loading…</p></div>;
+  return (
+    <div id="audit">
+      <form className="filters" id="au-f" onSubmit={filter}>
+        <select name="actor" aria-label="Who" defaultValue={st.actor}><option value="">Anyone</option>{st.actors.map((a) => <option key={a.v} value={a.v}>{who(a.v)} ({a.n})</option>)}</select>
+        <select name="type" aria-label="What" defaultValue={st.type}><option value="">Any record</option>{st.types.map((t) => <option key={t.v} value={t.v}>{typeName(t.v, 2)} ({t.n})</option>)}</select>
+        <input name="q" type="search" placeholder="Search reasons, ids, edit ids" defaultValue={st.q} style={{ flex: 1, minWidth: 180 }} /><button className="btn">Filter</button>
+      </form>
+      {st.rows.length ? (
+        <div className="table-wrap"><table className="data audit"><thead><tr><th>When (UTC)</th><th>Who</th><th>What</th><th>Why</th><th></th></tr></thead>
+          <tbody>{st.rows.map((b) => <Batch key={b.key} b={b} open={open.has(b.key)} onToggle={() => toggle(b.key)} onUndone={() => load(true)} />)}</tbody></table></div>
+      ) : <div className="empty">No changes match.</div>}
+      {st.next && <p><button className="btn" id="au-more" onClick={() => load(false)}>Load older changes</button></p>}
+    </div>
+  );
+}

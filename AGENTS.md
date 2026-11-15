@@ -65,7 +65,7 @@ Free to do without asking: read anything, run `tools/build.py`, `tools/serve.py`
 ## Working on code
 
 - Python tools: standard library only, Python 3.9+. Worker: plain ES modules.
-- Site: React + TypeScript in `web/src`, built by Vite into `dist/site` (`npm run build:web`), which the Worker serves. Pages not yet ported live in `web/public/legacy/` (plain JS) and are drawn through `<LegacyRoute>`. New UI goes in React; when you change a legacy page substantially, port it instead. `npm run typecheck` must pass.
+- Site: React + TypeScript in `web/src`, built by Vite into `dist/site` (`npm run build:web`), which the Worker serves. Pages are in `web/src/pages/`; shared pieces are `data.tsx` (loading and the API), `tree.ts` (pure helpers over the tree), `ui.tsx` and `ops.tsx` (edit descriptions, citations, diffs). `npm run typecheck` must pass.
 - Work on the site with `npm run dev:example` (the real Worker on the fictional family, port 8790) plus `npm run dev:web` (Vite with hot reload, proxying `/api` to it). `npm run test:e2e` drives every page in a browser against the built site.
 - Test against the fictional family: `python3 tools/build.py --data example --out build-example && python3 tools/serve.py --data example`. If the owner's data exists locally, also run `python3 tools/build.py` and check the counts and issue summary didn't change unexpectedly.
 - The site (`web/`, built to `dist/site`) is public static content. It must never contain family data. Data comes only from `/api/tree`.
