@@ -10,8 +10,10 @@ export function useUsage(record) {
   useAgentFinish(async ({ response }) => {
     const t = tokensOf(response.usage);
     const d = { input: Math.max(0, t.input - seen.input), output: Math.max(0, t.output - seen.output) };
+    console.log("[usage]", JSON.stringify({ total: t, delta: d, toolCalls: response.toolCalls.length }));
     if (!d.input && !d.output) return;
-    await record(d, settings(env).model);
+    try { await record(d, settings(env).model); }
+    catch (e) { console.error("[usage] recording failed", String(e && e.message || e)); throw e; }
     setSeen(t);
   });
 }

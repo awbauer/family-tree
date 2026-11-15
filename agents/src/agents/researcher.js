@@ -140,7 +140,8 @@ export function Researcher({ id }) {
       if (!r.ok) throw new Error(`Not saved. Fix these and call submit_results again:\n- ${r.errors.join("\n- ")}`);
       const done = await step.do("file-suggestions", () => submitResults(env, runId, r.value));
       await step.do("log", () => logRun(env, runId, `submitted: suggestions ${done.proposals.map((p) => `#${p}`).join(", ")}`));
-      return { output: `Saved as suggestion${done.proposals.length > 1 ? "s" : ""} ${done.proposals.map((p) => `#${p}`).join(", ")}. An editor will review it. You're done.`, terminate: true };
+      // No `terminate`: ending the turn normally lets the finish hook record this run's token use.
+      return { output: `Saved as suggestion${done.proposals.length > 1 ? "s" : ""} ${done.proposals.map((p) => `#${p}`).join(", ")}. An editor will review it. You're done: reply with one short sentence and stop.` };
     },
   });
 
