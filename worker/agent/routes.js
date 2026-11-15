@@ -1,6 +1,6 @@
 // HTTP routes for cloud research runs and AI-maintained content. Editors and the owner start runs; the agent works
-// in the starter's scope and only ever produces suggestions. The agents themselves live in a separate, private
-// Worker (agents/, built with Flue) that this Worker reaches through the AGENTS service binding; it has no public URL.
+// in the starter's scope and only ever produces suggestions. The agents themselves (agents/, built with Flue) are
+// bundled into this Worker and reached in-process (env.AGENTS, worker/main.js); they have no URL of their own.
 //
 //   POST /api/agent/runs               {tree, todo_id?, person?, instructions?}  start a run (editors)
 //   GET  /api/agent/runs?tree=         recent runs in this tree (editors)
@@ -27,7 +27,7 @@ import { listSites, sitesSummary } from "./sites.js";
 import { OpError } from "../ops.js";
 import { S } from "../../strings/index.ts";
 
-/** Where each kind of run's agent is mounted in the agents Worker. */
+/** Where each kind of run's agent is mounted in the agents' router. */
 const PATHS = { research: RESEARCHER_PATH, quality: Quality.QUALITY_PATH, story: Stories.STORY_PATH, library: Library.LIBRARY_PATH, relatives: Relatives.RELATIVES_PATH };
 
 /** The research sites list, compact, for the first message of agents that search the web. */
@@ -35,14 +35,13 @@ export const sitesText = async (env) => sitesSummary(await listSites(env, { enab
 
 export const enabled = agentsEnabled;
 
-/** Call the agents Worker over the service binding. The host is a placeholder; only the path matters. */
+/** Call the agents in-process (env.AGENTS, set up in worker/main.js). The host is a placeholder; only the path matters. */
 export async function agentsFetch(env, path, body, method = "POST") {
   const headers = { "Content-Type": "application/json" };
-  if (env.AGENTS_TOKEN) headers["X-Agents-Token"] = env.AGENTS_TOKEN;
   const res = await env.AGENTS.fetch(new Request(`https://agents.internal${path}`, { method, headers, body: body === undefined ? undefined : J(body) }));
   const text = await res.text();
   let data; try { data = JSON.parse(text); } catch { data = { text }; }
-  if (!res.ok) throw Object.assign(new Error(data.error || data.message || `agents Worker answered ${res.status}`), { status: res.status });
+  if (!res.ok) throw Object.assign(new Error(data.error || data.message || `the agents answered ${res.status}`), { status: res.status });
   return data;
 }
 
@@ -116,7 +115,7 @@ export async function startRun(c, d, { grantOrFail, scoped, loadTodo }) {
   try {
     await agentsFetch(env, `${RESEARCHER_PATH}/${id}`, { kind: "user", body: `${firstMessage({ instructions, person }, b, todo)}\n\n${await sitesText(env)}`, initialData: { runId: id } });
   } catch (e) {
-    await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
+    await endRun(env, id, `the agents didn't accept the run: ${e.message}`);
     fail(502, S.api.agentRuns.runNotStarted(e.message));
   }
   return json({ run: runOut(await env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) }, 201);
@@ -206,7 +205,7 @@ async function startQuality(c, d, g, { scoped }) {
   try {
     await agentsFetch(env, `${Quality.QUALITY_PATH}/${id}`, { kind: "user", body: Quality.firstMessage(b, options, items), initialData: { runId: id } });
   } catch (e) {
-    await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
+    await endRun(env, id, `the agents didn't accept the run: ${e.message}`);
     fail(502, S.api.agentRuns.reviewNotStarted(e.message));
   }
   return json({ run: runOut(await env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) }, 201);
@@ -254,7 +253,7 @@ async function startStory(c, d, g, { scoped }) {
   try {
     await agentsFetch(env, `${Stories.STORY_PATH}/${id}`, { kind: "user", body: Stories.firstMessage(b, o), initialData: { runId: id } });
   } catch (e) {
-    await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
+    await endRun(env, id, `the agents didn't accept the run: ${e.message}`);
     fail(502, S.api.agentRuns.runNotStarted(e.message));
   }
   return json({ run: runOut(await env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) }, 201);
@@ -279,7 +278,7 @@ async function startLibrary(c, d, g, { scoped }) {
   try {
     await agentsFetch(env, `${Library.LIBRARY_PATH}/${id}`, { kind: "user", body: Library.firstMessage(b, plan, instructions), initialData: { runId: id } });
   } catch (e) {
-    await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
+    await endRun(env, id, `the agents didn't accept the run: ${e.message}`);
     fail(502, S.api.agentRuns.reviewNotStarted(e.message));
   }
   return json({ run: runOut(await env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) }, 201);
@@ -307,7 +306,7 @@ async function startRelatives(c, d, g, { scoped }) {
   try {
     await agentsFetch(env, `${Relatives.RELATIVES_PATH}/${id}`, { kind: "user", body: Relatives.firstMessage(b, person, o, await sitesText(env)), initialData: { runId: id } });
   } catch (e) {
-    await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
+    await endRun(env, id, `the agents didn't accept the run: ${e.message}`);
     fail(502, S.api.agentRuns.runNotStarted(e.message));
   }
   return json({ run: runOut(await env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) }, 201);

@@ -4,8 +4,11 @@
   // generates wrangler.ci.jsonc from this file (tools/ci_config.mjs) with D1_DATABASE_ID from its build variables.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "family-tree",
-  "main": "worker/index.js",
-  "compatibility_date": "2025-09-01",
+  // One Worker for the site and the AI agents: worker/main.js hands requests to the site (worker/index.js) and bundles
+  // the agents, built by `npm run build:agents` (agents/, Flue on Durable Objects).
+  "main": "worker/main.js",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./dist/site", // built by `npm run build:web` from web/ (Vite + React)
     "binding": "ASSETS",
@@ -29,9 +32,29 @@
   // Secrets), not here: ACCESS_TEAM_DOMAIN, ACCESS_AUD, OWNER_EMAIL, and optionally CF_ACCOUNT_ID, ACCESS_GROUP_ID
   // plus the CF_API_TOKEN secret (automatic Access invites). keep_vars stops deploys from deleting them. Don't add a
   // "vars" block: any variable listed here would overwrite the dashboard value on every deploy.
-  // The AGENTS service binding to the private agents Worker (agents/) is added at build time by tools/ci_config.mjs
-  // once a Worker named family-tree-agents exists (or per the AGENTS_SERVICE build variable); see
-  // docs/agents/operations.md → Cloud research agents.
+  // Workers AI: the agents' models through AI Gateway, Cloudflare's Web Search API, and page-to-Markdown conversion.
+  "ai": { "binding": "AI" },
+  // One Durable Object class per agent (Flue generates the classes; their names must match agents/src/agents).
+  "durable_objects": {
+    "bindings": [
+      {"name": "FLUE_ASSISTANT_AGENT", "class_name": "FlueAssistantAgent"},
+      {"name": "FLUE_PROFILE_WRITER_AGENT", "class_name": "FlueProfileWriterAgent"},
+      {"name": "FLUE_STORY_REVIEWER_AGENT", "class_name": "FlueStoryReviewerAgent"},
+      {"name": "FLUE_STORY_LIBRARIAN_AGENT", "class_name": "FlueStoryLibrarianAgent"},
+      {"name": "FLUE_QUALITY_REVIEWER_AGENT", "class_name": "FlueQualityReviewerAgent"},
+      {"name": "FLUE_RESEARCHER_AGENT", "class_name": "FlueResearcherAgent"},
+      {"name": "FLUE_SHERLOCK_AGENT", "class_name": "FlueSherlockAgent"},
+      {"name": "FLUE_STORY_WRITER_AGENT", "class_name": "FlueStoryWriterAgent"}
+    ]
+  },
+  // Append new entries, never edit deployed ones. Sites that ran the agents as a separate Worker (family-tree-agents)
+  // move their stored agents here instead: tools/ci_config.mjs turns v1 into a transfer when that Worker exists.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["FlueResearcherAgent", "FlueProfileWriterAgent", "FlueStoryReviewerAgent", "FlueAssistantAgent", "FlueQualityReviewerAgent", "FlueStoryWriterAgent", "FlueStoryLibrarianAgent", "FlueSherlockAgent"] }
+  ],
+  // Weekly content job (AI profiles), Sundays 03:23 UTC (agents/src/cloudflare.js). Does nothing unless
+  // CONTENT_JOB_ENABLED=true.
+  "triggers": { "crons": ["23 3 * * SUN"] },
   // Workers Logs and Traces, everything kept: every invocation (request URL, status, timing), every console line, and
   // every trace span, unsampled. Readable only by members of the Cloudflare account (Workers → this Worker →
   // Observability). Request and response bodies are never logged; agent traces carry no prompt or tool content.

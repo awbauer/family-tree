@@ -1,5 +1,5 @@
 // The stories agent (issue #33): an agent run that reviews and revises an existing story, or drafts a new one, from
-// the tree's records. Shared by the site Worker (starts runs) and the agents Worker (agents/src/agents/stories.js).
+// the tree's records. Shared by the site Worker (starts runs) and the agents (agents/src/agents/stories.js).
 // Its only output is a suggestion in the review queue (a story revision or a new story); an editor approves it.
 // It has no web access. Living people come to it as a name only, so a story can mention them but say nothing about them.
 import { J, now, parse, write, audit } from "../db.js";

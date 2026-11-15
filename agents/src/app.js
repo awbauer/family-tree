@@ -1,5 +1,5 @@
-// The agents Worker's route map. Private: no public URL (workers_dev and preview URLs are off, no routes), so only
-// the site Worker reaches it, over its AGENTS service binding. Set AGENTS_TOKEN on both Workers for a second check.
+// The agents' route map. Not reachable from outside: worker/main.js sends every outside request to the site, and the
+// site calls these routes in-process through env.AGENTS after its own checks (Access, role, budgets).
 import { Hono } from "hono";
 import { env } from "cloudflare:workers";
 import { instrument, setProvider } from "@flue/runtime";
@@ -31,11 +31,6 @@ setProvider(cloudflareBindingProvider({ binding: env.AI, gateway: { id: S.gatewa
 instrument(createCloudflareTracing({ content: false }));
 
 const app = new Hono();
-
-app.use("*", async (c, next) => {
-  if (env.AGENTS_TOKEN && c.req.header("X-Agents-Token") !== env.AGENTS_TOKEN) return c.json({ error: "Forbidden" }, 403);
-  await next();
-});
 
 app.get("/health", (c) => c.json({ ok: true, agents: S.agents }));
 app.route(RESEARCHER_PATH, createAgentRouter(Researcher));

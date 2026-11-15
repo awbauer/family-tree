@@ -1,6 +1,6 @@
 // Cloud research agents and AI content, site side: who may start runs, what reaches the agent, how submissions are
-// checked and filed, and how AI profiles and story revisions flow. The agents Worker itself (Flue) is replaced by a
-// fake service binding; the shared logic it calls is exercised directly. Fictional example family only.
+// checked and filed, and how AI profiles and story revisions flow. The agents themselves (Flue) are replaced by a
+// fake env.AGENTS; the shared logic it calls is exercised directly. Fictional example family only.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -62,7 +62,7 @@ test("only editors start runs; living people are never researched", async () => 
   assert.equal((await call("POST", "/api/agent/runs", { as: EDITOR, body: { tree: "all" } })).status, 400, "needs a to-do, a person or instructions");
 });
 
-test("starting a run claims the to-do and hands the agent its task over the service binding", async () => {
+test("starting a run claims the to-do and hands the agent its task through env.AGENTS", async () => {
   const p = dead();
   const td = (await call("POST", "/api/todos", { as: EDITOR, body: { tree: "all", person: p.id, task: "Find the burial record", where: "Parish registers" } })).data.todo;
   const r = await call("POST", "/api/agent/runs", { as: EDITOR, body: { tree: "all", todo_id: td.id, instructions: "Prefer original registers." } });
@@ -213,7 +213,7 @@ test("stories: an out-of-date story becomes a suggested revision; approving it u
   assert.ok(st.revised);
 });
 
-test("profile refresh and content refresh go to the agents Worker", async () => {
+test("profile refresh and content refresh go to the agents", async () => {
   const p = dead();
   assert.equal((await call("POST", `/api/profiles/${p.id}/refresh?tree=all`, { as: MEMBER })).status, 403);
   const r = await call("POST", `/api/profiles/${p.id}/refresh?tree=all`, { as: EDITOR });

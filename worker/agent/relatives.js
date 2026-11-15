@@ -1,6 +1,6 @@
 // Sherlock, the relatives finder (#44): starting at one person who has died, it searches records for parents,
 // siblings, spouses and children who aren't in the tree yet, and suggests them. It never adds anyone itself.
-// Plain functions over a scoped bundle, shared by the site Worker (which starts runs) and the agents Worker
+// Plain functions over a scoped bundle, shared by the site Worker (which starts runs) and the agents
 // (agents/src/agents/sherlock.js wraps them as Flue tools); tested without the agent runtime.
 //
 // Each candidate becomes its own suggestion: a `new-person` finding (confidence, the records seen) carrying the edit

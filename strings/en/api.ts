@@ -5,11 +5,9 @@ import { plural } from "../format.ts";
 const oneOf = (field: string, allowed: readonly string[]): string => `${field} must be one of ${allowed.join(", ")}`;
 
 /** The SITE_CREDENTIALS_KEY setup steps (secrets.KEY_HELP). */
-const keyHelp = "Set SITE_CREDENTIALS_KEY (32 random bytes, base64) on both Workers, then try again:\n"
+const keyHelp = "Set SITE_CREDENTIALS_KEY (32 random bytes, base64) on the Worker, then try again:\n"
   + "  openssl rand -base64 32\n"
-  + "  npx wrangler secret put SITE_CREDENTIALS_KEY --name family-tree\n"
-  + "  npx wrangler secret put SITE_CREDENTIALS_KEY --name family-tree-agents\n"
-  + "Paste the same value into both.";
+  + "  npx wrangler secret put SITE_CREDENTIALS_KEY --name family-tree";
 
 export const api = {
   /** Setup and request-level errors (worker/index.js, worker/bundle.js). */
@@ -218,7 +216,7 @@ export const api = {
   /** Cloud research runs, profiles, quality reviews, stories, library and relatives (worker/agent/routes.js). */
   agentRuns: {
     editorsOnly: "Only editors can run research agents.",
-    notSetUp: "Research agents aren't set up yet: deploy the agents Worker and add the AGENTS service binding. See docs/agents/operations.md → Cloud research agents.",
+    notSetUp: "Research agents aren't set up yet: build them into the Worker (npm run build:agents) and deploy. See docs/agents/operations.md → Cloud research agents.",
     kindInvalid: "kind must be research, quality, story, library or relatives",
     todoClosed: "That to-do is closed.",
     todoBusy: "A research agent is already working on that to-do.",
@@ -249,7 +247,7 @@ export const api = {
   /** The page assistant's HTTP routes (worker/agent/chat-routes.js). */
   chat: {
     editorsOnly: "The assistant is for editors.",
-    notSetUp: "The assistant isn't set up yet: it runs in the agents Worker. See docs/agents/operations.md → Page assistant.",
+    notSetUp: "The assistant isn't set up yet: the agents aren't built into this Worker. See docs/agents/operations.md → Page assistant.",
     noSuchChat: "No such chat.",
     noSuchChange: "No such change.",
     saySomething: "Say something.",
@@ -263,7 +261,7 @@ export const api = {
     changedMeanwhile: "Someone changed these records meanwhile. Ask the assistant to look again.",
     /** Notices in the conversation when a reply was stopped or failed. */
     stopped: "Stopped.",
-    replyFailed: "The assistant couldn't reply to that. Try again; if it keeps happening, check the agents Worker's logs.",
+    replyFailed: "The assistant couldn't reply to that. Try again; if it keeps happening, check the Worker's logs.",
   },
 
   /** Research batch validation (worker/research.js validateBatch); `at` is where in the batch, e.g. findings[0]. */

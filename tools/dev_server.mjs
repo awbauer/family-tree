@@ -4,7 +4,7 @@
 //
 //   node tools/dev_server.mjs [--port 8790] [--site dist/site] [--as owner@example.test]
 //
-// Requests are made as --as (default: the example owner). The agents Worker isn't running: AI features answer that
+// Requests are made as --as (default: the example owner). The agents aren't running: AI features answer that
 // they aren't set up. Used by the end-to-end tests (e2e/) and by `npm run dev:example`.
 import http from "node:http";
 import { execFileSync } from "node:child_process";

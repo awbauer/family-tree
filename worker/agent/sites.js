@@ -103,7 +103,7 @@ export function sitesDetail(sites, { record_type, access, query } = {}) {
   };
 }
 
-// ---------------------------------------------------------------- credentials at fetch time (agents Worker)
+// ---------------------------------------------------------------- credentials at fetch time (the agents)
 
 /** Enabled sites that have a credential, decrypted. Sites whose credential doesn't decrypt are skipped (and reported). */
 export async function loadCredentials(env, { onError = () => {} } = {}) {

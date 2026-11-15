@@ -1,13 +1,10 @@
 {
   "name": "family-tree-agents",
   "private": true,
-  "description": "Private research and content agents for the family-tree site: Flue (Pi) on Cloudflare Durable Objects, Claude via AI Gateway. Reached only through the site Worker's AGENTS service binding.",
+  "description": "Research and content agents for the family-tree site (Flue on Cloudflare Durable Objects). Built into agents/dist/agents_bundle and bundled into the site's one Worker (worker/main.js); not deployed on its own.",
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
-    "deploy": "WRANGLER_CONFIG=wrangler.local.jsonc vite build && wrangler deploy",
-    "deploy:ci": "node ../tools/ci_config.mjs wrangler.jsonc wrangler.ci.jsonc && node ../tools/wait_migrations.mjs wrangler.ci.jsonc && WRANGLER_CONFIG=wrangler.ci.jsonc vite build && wrangler deploy",
+    "build": "WRANGLER_CONFIG=wrangler.jsonc vite build",
     "check": "WRANGLER_CONFIG=wrangler.jsonc vite build"
   },
   "dependencies": {

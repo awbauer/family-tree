@@ -1,4 +1,4 @@
-// Settings and budgets for AI work, shared by the site Worker (worker/) and the agents Worker (agents/).
+// Settings and budgets for AI work, shared by the site (worker/) and the agents (agents/), which run in one Worker.
 // Everything is a dashboard variable, never a "vars" block in wrangler.jsonc; defaults are deliberately conservative.
 // See docs/agents/operations.md → "Cloud research agents".
 import { now } from "../db.js";
@@ -31,7 +31,7 @@ export function settings(env) {
   };
 }
 
-/** The site Worker reaches the agents Worker through a service binding named AGENTS. */
+/** The site reaches the agents through env.AGENTS (worker/main.js); without it (tests, the static preview) AI is off. */
 export const agentsEnabled = (env) => !!(env.AGENTS && typeof env.AGENTS.fetch === "function");
 
 export class BudgetError extends Error {}

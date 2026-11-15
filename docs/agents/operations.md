@@ -163,7 +163,7 @@ To-dos live in D1 (`/api/todos`). Each has a priority, a status (`open → in_pr
 
 Editors can hand a to-do or a person to a research agent that runs in Cloudflare, not on anyone's laptop. It reads the tree, searches and reads the web, and files its results as a **suggestion**. Nothing reaches the tree until an editor approves it, exactly as with research from people. A weekly job also keeps **AI profiles** (short biographies of people who have died) and **stories** in step with the facts.
 
-**How it's built.** A second, private Worker, `family-tree-agents`, in `agents/`:
+**How it's built.** The agents live in `agents/` and run inside the site's own Worker: `npm run build:agents` builds them with Vite and Flue, and `worker/main.js` bundles them with the site.
 
 - **[Flue](https://flueframework.com/)** agents on its Cloudflare target. Each run is one Flue conversation: a Durable Object on Cloudflare's **Agents SDK**, with **Pi** running the loop (model turns, tool calls, retries, compaction). If the object is evicted or crashes mid-run, Flue resumes from its durable records. It never re-runs a model call or tool call whose result was already recorded.
 - **The models run on Workers AI by default.** Each agent has its own model (`AI_MODEL_<AGENT>`; defaults and reasons in [models.md](models.md)), called through the Workers AI binding and your AI Gateway. The defaults are billed to your Workers plan, with a daily free allocation, and need no AI Gateway credits or provider key.
@@ -172,7 +172,7 @@ Editors can hand a to-do or a person to a research agent that runs in Cloudflare
 - **Cloudflare's agent tools:** `web_search` (Cloudflare Web Search API) and `web_fetch` (pages and PDFs to Markdown) from the Agents SDK, shared by every agent that reads the web (`agents/src/web.js`), with `research_sites` for the owner's list of sites (see "Research sites" below).
   - Web search bills to AI Gateway credits, or to a search provider key you store on the gateway. Set its alias as `WEB_SEARCH_BYOK_ALIAS`.
   - Without either, the agent is told search is unavailable and works from record sites' own search pages through `web_fetch`, which needs neither.
-- **The site's own code for everything that matters.** Scoping (`worker/bundle.js`, `worker/scope.js`), submission checks (`worker/agent/tools.js`, `worker/research.js`, the edit-ops dry run) and filing suggestions (`worker/agent/runs.js`) are the same modules the site uses, imported into the agents Worker. The Flue files (`agents/src/`) only declare tools and wiring.
+- **The site's own code for everything that matters.** Scoping (`worker/bundle.js`, `worker/scope.js`), submission checks (`worker/agent/tools.js`, `worker/research.js`, the edit-ops dry run) and filing suggestions (`worker/agent/runs.js`) are the same modules the site uses, imported by the agents. The Flue files (`agents/src/`) only declare tools and wiring.
 
 **Who sees what.**
 
@@ -180,11 +180,11 @@ Editors can hand a to-do or a person to a research agent that runs in Cloudflare
 - Living people reach the model as an id and a name only, so it can walk through the family. No dates, places, notes or events.
 - Findings about living people are rejected.
 - Profiles are written only for people who have died. Their facts name a living relative only as "a living son".
-- The agents Worker has no public URL (`workers_dev` and preview URLs off, no routes). Only the site Worker reaches it, over a service binding. Set `AGENTS_TOKEN` as a secret on both Workers for a second check.
+- The agents have no URL of their own. Every request from outside goes to the site, which checks Access, the caller's role and the budgets, and only then calls the agents in-process (`env.AGENTS`, set up in `worker/main.js`).
 - **AI Gateway logs every request, prompts and responses included.** That means the facts sent to the model are stored in the gateway's logs, which only members of your Cloudflare account can read. Logs are kept per the gateway's retention setting; set `AI_GATEWAY_LOGS=false` to stop logging. Token use is also recorded in D1 (`agent_runs`, `ai_usage`), and Workers Traces get spans without content.
 - This does send family data (the people being researched, and their deceased relatives' facts) to Anthropic through Cloudflare. Leave the feature off if that isn't acceptable for your family.
 
-**Budgets** (dashboard variables on the agents Worker; the first two also on the site Worker, which enforces them when starting runs):
+**Budgets** (dashboard variables on the Worker):
 
 | Variable | Default | |
 |---|---|---|
@@ -209,15 +209,10 @@ Also set a **spend limit and rate limit on the AI Gateway itself** (dashboard �
 **One-time setup (owner):**
 
 1. **AI Gateway:** use `default` or create a gateway, and set a spend limit. Credits (or stored provider keys) are only needed for web search and for gateway models such as Claude.
-2. **Deploy the agents Worker.** Workers & Pages → Create → connect the same repo again as a second Worker named `family-tree-agents`:
-   - Root directory: `agents`
-   - Build command: *(empty)*
-   - Deploy command: `npm run deploy:ci`
-   - Build variable: `D1_DATABASE_ID`
-   - Install: Workers Builds runs `npm ci` in `agents/`, which has its own lockfile.
-3. **Variables on `family-tree-agents`:** the budgets above if you want other values, `AI_GATEWAY_ID` if not `default`, and later `CONTENT_JOB_ENABLED=true`. To let agents sign in to sites with an API key, also set the secret `SITE_CREDENTIALS_KEY` on both Workers (see "Research sites" below).
-4. **Connect the site to it:** nothing to set. On each build, `tools/ci_config.mjs` checks with the Workers Builds token whether a Worker named `family-tree-agents` exists, and adds the `AGENTS` service binding if it does. A binding to a missing Worker would fail the deploy, so it's skipped until then. To choose explicitly, set the build variable `AGENTS_SERVICE` to another Worker name, or to `off`.
-5. Redeploy the site (or push to `main`). Editors now see **Research with AI** on to-dos and person pages, and the **Agent runs** tab under Research.
+2. **Nothing to deploy separately.** The agents ship with the site: the Worker's build (`npm run deploy:ci`) also builds them (`npm run build:agents`, which installs `agents/`'s own dependencies, from its own lockfile, the first time).
+3. **Variables:** the budgets above if you want other values, `AI_GATEWAY_ID` if not `default`, and later `CONTENT_JOB_ENABLED=true`. To let agents sign in to sites with an API key, set the secret `SITE_CREDENTIALS_KEY` (see "Research sites" below).
+4. **Moving from a separate agents Worker.** Sites set up before the agents moved into the site's Worker ran them as a second Worker, `family-tree-agents`. On the first deploy, `tools/ci_config.mjs` finds it with the Workers Builds token and turns Durable Object migration `v1` into a transfer, so the agents' Durable Objects (chats, runs in progress) move into this Worker with their data. If it can't tell whether that Worker exists, the build stops: set the build variable `AGENTS_TRANSFER_FROM` to `family-tree-agents` or `off`. Then delete the `family-tree-agents` Worker (its own build fails until you do, without deploying anything), and set on `family-tree` any variable you'd only set there.
+5. Redeploy (or push to `main`). Editors now see **Research with AI** on to-dos and person pages, and the **Agent runs** tab under Research.
 
 **Using it.**
 
@@ -230,14 +225,12 @@ Also set a **spend limit and rate limit on the AI Gateway itself** (dashboard �
 **Developing.**
 
 ```bash
-cd agents
-npm install
-npm run check
+npm run build:agents
 npm run dev
 ```
 
-- `npm run check` builds against the template config. `npm run dev` runs the Worker locally in workerd, but its AI binding calls the real Cloudflare account, so model calls cost money even in development.
-- The site-side logic is tested in `tests/agents.test.mjs` against the example family, with a fake agents Worker.
+- `npm run build:agents` builds the agents into `agents/dist/agents_bundle` (installing `agents/`'s dependencies the first time). `npm run dev` runs the whole Worker locally in workerd from `wrangler.local.jsonc`, but its AI binding calls the real Cloudflare account, so model calls cost money even in development.
+- The site-side logic is tested in `tests/agents.test.mjs` against the example family, with a fake `env.AGENTS`.
 - Version pins, with their reasons in `agents/package.json`: Flue 2.3.0 needs Pi 1.4.x, and the Agents SDK web tools need `agents` ≥ 0.28, which Flue accepts as a project-level override. Remove the pins when Flue catches up.
 
 ## Page assistant (chat on every page)
@@ -250,7 +243,7 @@ Editors get an **Ask** button on every page. It opens a chat with an agent (`age
 - **Who:** editors and the owner, only for trees they edit. Losing editor access stops it.
 - **What it sees:** what you see, living relatives included, so it can help keep them current. It has no web access and never deletes people (duplicates are merged).
 - **Model and cost:** its own model and effort (`AI_MODEL_CHAT`, `AI_EFFORT_CHAT`; see [models.md](models.md)), counted against its own allowance, `AI_CHAT_DAILY_BUDGET_USD`. With AI Gateway logs on (`AI_GATEWAY_LOGS`), chat messages, page context included, are kept in the gateway's logs like research prompts.
-- **Setup:** none beyond the agents Worker. Migration `0006_chat.sql` adds `chats`, `chat_changes` and the attribution columns on `changes`; the agents Worker's `v2` Durable Object migration adds `FlueAssistantAgent`. Routes: `worker/agent/chat-routes.js`.
+- **Setup:** none beyond the agents. Migration `0006_chat.sql` adds `chats`, `chat_changes` and the attribution columns on `changes`; the agents' Durable Object class is `FlueAssistantAgent`. Routes: `worker/agent/chat-routes.js`.
 
 ## Data quality review (agent)
 
@@ -326,13 +319,12 @@ Admin → **Research sites** (`#/admin/sites`, owner only) is the list of geneal
 - **Kinds:** `header` (a header name and value: an API key or a bearer token), `query` (a URL parameter and value), or `basic` (username and password, sent as HTTP Basic auth).
 - **No form logins.** Agents never fill in sign-in forms or carry cookies. Ancestry, MyHeritage, Findmypast and similar sites forbid automated access, and trying would put the owner's account at risk; agents leave a to-do for those instead.
 - **Storage:** encrypted at rest in D1 (AES-GCM, WebCrypto) in their own table, `research_site_credentials`, which list queries never read. Values are write-only: no API or page shows them, only "credential set (kind, date, by)" with Replace and Remove.
-- **Use:** the agents Worker decrypts a credential only inside `web_fetch` (`agents/src/web.js`, shared by every agent that reads the web), and adds it when the requested URL's host is one of that site's domains, over https only. Each redirect hop is checked again: a redirect to a host outside the site's domains is followed without it. The model never sees the value; the run's record of pages read (`agent_runs.used`) marks pages read with a credential.
-- **The key:** `SITE_CREDENTIALS_KEY`, 32 random bytes in base64, set as a secret on **both** Workers with the same value. Without it, saving a credential fails with the commands below, and everything else works. Changing the key makes saved credentials unreadable: save them again.
+- **Use:** the agents decrypt a credential only inside `web_fetch` (`agents/src/web.js`, shared by every agent that reads the web), and adds it when the requested URL's host is one of that site's domains, over https only. Each redirect hop is checked again: a redirect to a host outside the site's domains is followed without it. The model never sees the value; the run's record of pages read (`agent_runs.used`) marks pages read with a credential.
+- **The key:** `SITE_CREDENTIALS_KEY`, 32 random bytes in base64, set as a secret on the Worker. Without it, saving a credential fails with the commands below, and everything else works. Changing the key makes saved credentials unreadable: save them again.
 
   ```bash
   openssl rand -base64 32
   npx wrangler secret put SITE_CREDENTIALS_KEY --name family-tree
-  npx wrangler secret put SITE_CREDENTIALS_KEY --name family-tree-agents
   ```
 
 ## Sherlock: find relatives (agent)

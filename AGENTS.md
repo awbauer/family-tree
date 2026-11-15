@@ -58,7 +58,7 @@ Free to do without asking: read anything, run `tools/build.py`, `tools/serve.py`
 | Change the tree data | You don't. Write a `correction` finding | [research-protocol.md](docs/agents/research-protocol.md) |
 | Build, preview, load D1, deploy, photos, config | | [operations.md](docs/agents/operations.md) |
 | Change the site, Worker or tools | Normal code work; test against `example/` | below |
-| Cloud research agents, AI profiles, the agents Worker (`agents/`) | Flue on Cloudflare; shared logic in `worker/agent/` | [operations.md → Cloud research agents](docs/agents/operations.md) |
+| Cloud research agents, AI profiles, the agents (`agents/`, bundled into the one Worker) | Flue on Cloudflare; shared logic in `worker/agent/` | [operations.md → Cloud research agents](docs/agents/operations.md) |
 
 **Never hand-edit `family-data/research.json` for findings, statuses, to-dos, stories, the log or media.** Write a batch and merge it with `tools/merge_research.py`, which validates IDs, sources and enums. Hand edits are fine only for `site`, `branches`, `context`, `place_rules`, `overrides`, `duplicates` and `methodology`, and `places.json`.
 

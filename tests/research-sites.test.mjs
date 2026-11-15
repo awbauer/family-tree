@@ -122,13 +122,13 @@ test("without SITE_CREDENTIALS_KEY, saving a credential fails with the setup com
   const c2 = client((await import("../worker/index.js")).default, off);
   const list = await c2("GET", "/api/research-sites", { as: OWNER });
   assert.equal(list.data.key_configured, false);
-  assert.match(list.data.key_help, /wrangler secret put SITE_CREDENTIALS_KEY --name family-tree\n/);
+  assert.match(list.data.key_help, /wrangler secret put SITE_CREDENTIALS_KEY --name family-tree$/);
   const id = (await c2("POST", "/api/research-sites", { as: OWNER, body: { ...SITE, name: "Example Keyless" } })).data.site.id;
   const r = await c2("PUT", `/api/research-sites/${id}/credential`, { as: OWNER, body: { kind: "query", name: "api_key", value: SECRET } });
   assert.equal(r.status, 503);
   assert.match(r.data.error, /SITE_CREDENTIALS_KEY isn't set/);
-  assert.match(r.data.error, /wrangler secret put SITE_CREDENTIALS_KEY --name family-tree\n/);
-  assert.match(r.data.error, /wrangler secret put SITE_CREDENTIALS_KEY --name family-tree-agents/);
+  assert.match(r.data.error, /wrangler secret put SITE_CREDENTIALS_KEY --name family-tree/);
+  assert.doesNotMatch(r.data.error, /family-tree-agents/, "one Worker, one secret");
   assert.equal((await c2("PUT", `/api/research-sites/${id}`, { as: OWNER, body: { enabled: false } })).status, 200);
   await assert.rejects(Secrets.encryptSecret(off, id, { a: 1 }), Secrets.KeyMissingError);
   await assert.rejects(Secrets.encryptSecret({ SITE_CREDENTIALS_KEY: "dG9vIHNob3J0" }, id, { a: 1 }), /32 bytes/);
@@ -189,7 +189,7 @@ test("web_fetch's credential: added only for the site's own https hosts, and dro
   assert.equal(seen[0].headers.authorization, `Basic ${Buffer.from(`example:${SECRET}`).toString("base64")}`);
 });
 
-test("credentials load decrypted for enabled sites only, for the agents Worker", async () => {
+test("credentials load decrypted for enabled sites only, for the agents", async () => {
   const id = (await call("POST", "/api/research-sites", { as: OWNER, body: { ...SITE, name: "Example Loader", domains: "loader.example.org" } })).data.site.id;
   await call("PUT", `/api/research-sites/${id}/credential`, { as: OWNER, body: { kind: "query", name: "api_key", value: SECRET } });
   let got = (await Sites.loadCredentials(env)).find((x) => x.id === id);
@@ -197,7 +197,7 @@ test("credentials load decrypted for enabled sites only, for the agents Worker",
   assert.deepEqual(got.domains, ["loader.example.org"]);
   await call("PUT", `/api/research-sites/${id}`, { as: OWNER, body: { enabled: false } });
   assert.equal((await Sites.loadCredentials(env)).find((x) => x.id === id), undefined);
-  // without the key on the agents Worker, nothing is applied (and nothing breaks)
+  // without the key, nothing is applied (and nothing breaks)
   await call("PUT", `/api/research-sites/${id}`, { as: OWNER, body: { enabled: true } });
   const errs = [];
   assert.deepEqual(await Sites.loadCredentials({ DB: env.DB }, { onError: (r) => errs.push(r.id) }), []);
