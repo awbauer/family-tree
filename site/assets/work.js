@@ -100,9 +100,13 @@
         const target = to || id;
         if (from === target) { out.innerHTML = "<p>That's you.</p>"; return; }
         const r = await c.api("GET", `graph/path?from=${encodeURIComponent(from)}&to=${encodeURIComponent(target)}`);
+        const X = window.FamilyPerson;
         out.innerHTML = r.found
-          ? `<p><b>${esc(r.label || "")}</b>${r.label ? " · " : ""}${esc(r.sentence || "")}</p><p>${[from, ...r.steps.map((s) => s.to)].map((x) => c.plink(x)).join(" → ")}</p>${(r.commonAncestors || []).length ? `<p class="muted">Common ancestors: ${r.commonAncestors.map((a) => c.plink(a.id || a)).join(", ")}</p>` : ""}`
+          ? `<p><b>${esc(r.label || "")}</b>${r.label ? " · " : ""}${esc(r.sentence || "")}</p>${X ? X.pathChain(c, r, from) : `<p>${[from, ...r.steps.map((s) => s.to)].map((x) => c.plink(x)).join(" → ")}</p>`}${(r.commonAncestors || []).length ? `<p class="muted">Common ancestors: ${r.commonAncestors.map((a) => c.plink(a.id || a)).join(", ")}</p>` : ""}
+            ${X && X.highlightPath ? `<button class="linklike" id="w-rel-show">show it in the family graph</button>` : ""}`
           : `<p class="muted">No connection found among the people you can see.</p>`;
+        const show = document.getElementById("w-rel-show");
+        if (show) show.onclick = () => { X.highlightPath(r); document.getElementById("w-graph").scrollIntoView({ behavior: "smooth", block: "start" }); };
       } catch (e) { out.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
     };
     rel();
@@ -299,6 +303,7 @@
     if (X) {
       const ctx = { queue, change, actions };
       c.LIVE = true;
+      X.graph(c, id);
       X.photos(c, id, ctx);
       X.facts(c, id, ctx);
       X.findings(c, id, ctx);
