@@ -13,6 +13,7 @@
  *   POST /api/proposals                  {tree, kind: "research", payload, rationale?, todo_id?}
  *   POST /api/proposals/:id/approve|reject|withdraw
  *   /api/agent/runs, /api/profiles/:id/refresh, /api/content/refresh   cloud research agents (worker/agent/routes.js)
+ *   /api/chat…                           the page assistant: chat, drafted changes, apply/undo (worker/agent/chat-routes.js)
  *   GET  /api/admin, PUT /api/admin/{trees,views,members}/:id, PUT|DELETE /api/admin/grants   (owner only)
  *   GET  /media/<key>                    photos/documents from R2, only if attached to someone you can see
  *   everything else                      static app from ./site (contains no family data)
@@ -24,6 +25,7 @@ import { identify, resolveAccess, grantFor, can } from "./auth.js";
 import { HttpError, fail, json } from "./http.js";
 import { scopeFor } from "./bundle.js";
 import * as Agent from "./agent/routes.js";
+import * as Chat from "./agent/chat-routes.js";
 import { validateBatch, researchStatements } from "./research.js";
 import { J, now, parse, loadState, todoOut, write, audit, meta } from "./db.js";
 import { OpError, referencedIds, applyOps, assignFids } from "./ops.js";
@@ -103,6 +105,12 @@ async function route(c) {
   if ((r = p.match(/^\/api\/agent\/runs\/([\w-]+)\/cancel$/)) && m === "POST") return Agent.cancel(c, r[1]);
   if ((r = p.match(/^\/api\/profiles\/([^/]+)\/refresh$/)) && m === "POST") return Agent.refreshProfileRoute(c, decodeURIComponent(r[1]), { grantOrFail, scoped });
   if (p === "/api/content/refresh" && m === "POST") return Agent.refreshContent(c);
+  if (p === "/api/chat" && m === "GET") return Chat.listChats(c, { grantOrFail });
+  if (p === "/api/chat" && m === "POST") return Chat.createChat(c, await body(c), { grantOrFail });
+  if ((r = p.match(/^\/api\/chat\/changes\/(\d+)\/(apply|dismiss|undo)$/)) && m === "POST") return Chat.decideChange(c, +r[1], r[2]);
+  if ((r = p.match(/^\/api\/chat\/(chat-[\w-]+)$/)) && m === "GET") return Chat.getChat(c, r[1]);
+  if ((r = p.match(/^\/api\/chat\/(chat-[\w-]+)\/messages$/)) && m === "POST") return Chat.sendMessage(c, r[1], await body(c), { scoped });
+  if ((r = p.match(/^\/api\/chat\/(chat-[\w-]+)\/abort$/)) && m === "POST") return Chat.abortChat(c, r[1]);
   if (p === "/api/admin" && m === "GET") return admin(c);
   if ((r = p.match(/^\/api\/admin\/(trees|views|members)\/([^/]+)$/)) && m === "PUT") return adminPut(c, r[1], decodeURIComponent(r[2]));
   if (p === "/api/admin/grants" && (m === "PUT" || m === "DELETE")) return adminGrant(c, m);

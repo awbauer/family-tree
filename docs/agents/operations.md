@@ -216,6 +216,16 @@ npm run dev
 - The site-side logic is tested in `tests/agents.test.mjs` against the example family, with a fake agents Worker.
 - Version pins, with their reasons in `agents/package.json`: Flue 2.3.0 needs Pi 1.4.x, and the Agents SDK web tools need `agents` ≥ 0.28, which Flue accepts as a project-level override. Remove the pins when Flue catches up.
 
+## Page assistant (chat on every page)
+
+Editors get an **Ask** button on every page. It opens a chat with an agent (`agents/src/agents/assistant.js`, Flue, one Durable Object per chat) that knows the page you're on: each message carries the page's address, its visible text and, on a person or tree page, that person's full record (names and events with their fact ids, sources, photos, families, open findings and to-dos). It reads more of the tree with tools, always as you see it.
+
+- **It drafts, you decide.** When you describe a change, the assistant checks it against the tree and files a draft (`chat_changes`). The chat shows it as a card with exactly what would change and **Apply** / **Dismiss** buttons. Nothing changes until you press Apply; then the site Worker applies it as you, like a hand edit (reason and sources in History, provenance, undo). **Undo** on the card reverts it. A newer draft replaces one still waiting.
+- **Who:** editors and the owner, only for trees they edit. A chat belongs to the editor who started it; nobody else can read it. Losing editor access stops it.
+- **What it sees:** what you see, living relatives included, so it can help keep them current. It has no web access and never deletes people (duplicates are merged).
+- **Model and cost:** the same model as research (`AI_MODEL`), at `AI_CHAT_EFFORT` (default `low`), counted against `AI_DAILY_TOKEN_BUDGET`. With AI Gateway logs on (`AI_GATEWAY_LOGS`), chat messages, page context included, are kept in the gateway's logs like research prompts.
+- **Setup:** none beyond the agents Worker. Migration `0006_chat.sql` adds the tables; the agents Worker's `v2` Durable Object migration adds `FlueAssistantAgent`. Routes: `worker/agent/chat-routes.js`.
+
 ## GEDCOM X storage, export and import
 
 The tree is stored as GEDCOM X (docs/design/standards.md):

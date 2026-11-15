@@ -13,6 +13,7 @@ export function settings(env) {
     model: env.AI_MODEL || "@cf/moonshotai/kimi-k2.6",
     effort: env.AI_EFFORT || "high",                      // research runs (Flue thinkingLevel)
     contentEffort: env.AI_CONTENT_EFFORT || "medium",     // profiles and story checks
+    chatEffort: env.AI_CHAT_EFFORT || "low",              // the page assistant: quick replies
     gateway: env.AI_GATEWAY_ID || "default",
     gatewayLogs: env.AI_GATEWAY_LOGS !== "false",         // gateway logs on (they include prompts, i.e. family data); "false" turns them off
     searchProvider: env.WEB_SEARCH_PROVIDER || "exa",     // Cloudflare Web Search API: needs AI Gateway credits…
