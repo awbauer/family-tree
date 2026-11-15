@@ -103,6 +103,12 @@ export async function checkSubmission(env, b, input) {
       if (f.person && b.people[f.person] && b.people[f.person].living) errors.push(`findings[${i}]: ${f.person} is living. Research is about people who have died.`);
     }
     if (!(clean.log || []).length) errors.push("batch.log: log every search you ran, including nil results");
+    // a status change needs evidence in the same submission
+    for (const pid of Object.keys(clean.people_status || {})) {
+      if (!(clean.findings || []).some((f) => f.person === pid && ["high", "medium"].includes(f.confidence))) {
+        errors.push(`people_status[${pid}]: a status change needs a high- or medium-confidence finding about ${pid} in this submission; leave it out otherwise`);
+      }
+    }
     value.batch = clean;
   }
 

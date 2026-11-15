@@ -15,6 +15,9 @@ import { personView, searchPeople, relationship, checkSubmission } from "../../.
 import { useUsage } from "./usage.js";
 
 const S = settings(env);
+// General search engines forbid scraping their result pages (and mostly block it anyway). Search goes through the
+// Web Search API; without it, the agent uses record sites' own search pages.
+const BLOCKED_HOSTS = ["google.com", "*.google.com", "*.google.co.uk", "bing.com", "*.bing.com", "duckduckgo.com", "*.duckduckgo.com", "search.yahoo.com", "yandex.com", "*.yandex.com", "*.baidu.com"];
 const FINISHED = ["succeeded", "failed", "cancelled"];
 const str = (d) => v.pipe(v.string(), v.description(d));
 const opt = (schema) => v.optional(schema);
@@ -109,7 +112,7 @@ export function Researcher({ id }) {
         // record sites' own search pages directly.
         if (!/payment|credit|402|byok/i.test(String(e && (e.code || e.message)))) throw e;
         await logRun(env, runId, "web_search unavailable (no AI Gateway credits); using sites' own search pages");
-        return "Web search is not available for this run (no AI Gateway credits). Don't call web_search again. Instead, use web_fetch on the search pages of free record sites with the query in the URL, for example https://www.findagrave.com/memorial/search?firstname=…&lastname=…&deathyear=…, https://www.freebmd.org.uk/, https://www.familysearch.org/search/ (may need a login), https://billiongraves.com/search/results?given_names=…&family_names=…, and national archive catalogues. Cite only pages you actually read.";
+        return "Web search is not available for this run (no AI Gateway credits). Don't call web_search again, and don't fetch general search engines (Google, Bing, DuckDuckGo): they're blocked. Instead, use web_fetch on the search pages of free record sites with the query in the URL, for example https://www.findagrave.com/memorial/search?firstname=…&lastname=…&deathyear=…, https://www.freebmd.org.uk/, https://www.familysearch.org/search/ (may need a login), https://billiongraves.com/search/results?given_names=…&family_names=…, and national archive catalogues. Cite only pages you actually read.";
       }
     },
   });
@@ -122,7 +125,7 @@ export function Researcher({ id }) {
       await tree();
       const n = await spend("fetches", S.maxFetches);
       if (n == null) return "The page budget for this run (or today's AI budget) is used up. Submit what you have with submit_results now.";
-      const page = await fetchWeb({ url: data.url }, { binding: env.AI, timeoutMs: 45_000, maxBytes: 4_000_000, signal });
+      const page = await fetchWeb({ url: data.url }, { binding: env.AI, timeoutMs: 45_000, maxBytes: 4_000_000, blockedHosts: BLOCKED_HOSTS, signal });
       if (!data.offset) await logRun(env, runId, `web_fetch: ${data.url}`);
       return renderWebFetchPage(windowWebFetchPage(page, { offset: data.offset || 0 }));
     },
@@ -137,7 +140,8 @@ export function Researcher({ id }) {
       if (!r.ok) throw new Error(`Not saved. Fix these and call submit_results again:\n- ${r.errors.join("\n- ")}`);
       const done = await step.do("file-suggestions", () => submitResults(env, runId, r.value));
       await step.do("log", () => logRun(env, runId, `submitted: suggestions ${done.proposals.map((p) => `#${p}`).join(", ")}`));
-      return { output: `Saved as suggestion${done.proposals.length > 1 ? "s" : ""} ${done.proposals.map((p) => `#${p}`).join(", ")}. An editor will review it. You're done.`, terminate: true };
+      // No `terminate`: ending the turn normally lets the finish hook record this run's token use.
+      return { output: `Saved as suggestion${done.proposals.length > 1 ? "s" : ""} ${done.proposals.map((p) => `#${p}`).join(", ")}. An editor will review it. You're done: reply with one short sentence and stop.` };
     },
   });
 

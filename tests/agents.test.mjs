@@ -122,6 +122,8 @@ test("submissions are checked before anything is filed", async () => {
   assert.match(await bad({ summary: "" }), /summary/);
   assert.match(await bad({ summary: "x", batch: { log: good.batch.log }, edits: { reason: "dup", sources: [{ title: "t", note: "n" }], ops: [{ op: "person.delete", id: p.id }] } }), /never delete people/);
   if (lv) assert.match(await bad({ summary: "x", batch: { findings: [{ ...good.batch.findings[0], person: lv.id }], log: good.batch.log } }), /living/);
+  assert.match(await bad({ summary: "x", batch: { log: good.batch.log, people_status: { [p.id]: { status: "partly-verified", note: "n" } } } }), /status change needs/);
+  assert.equal((await Tools.checkSubmission(env, b, { ...good, batch: { ...good.batch, people_status: { [p.id]: { status: "partly-verified", note: "n" } } } })).ok, true);
 });
 
 test("a valid submission becomes suggestions for review; filing is idempotent", async () => {

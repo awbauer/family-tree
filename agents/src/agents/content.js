@@ -34,7 +34,7 @@ export function ProfileWriter() {
     durable: true,
     async run({ data, step }) {
       await step.do("save", () => saveProfile(env, job.person, { text: data.text, hash: job.hash, model: S.model }));
-      return { output: "Saved.", terminate: true };
+      return { output: "Saved. You're done." }; // no terminate: the finish hook records token use
     },
   });
   useMustCall("save_profile", "Call save_profile with the profile text.");
@@ -60,7 +60,7 @@ export function StoryReviewer() {
     durable: true,
     async run({ data, step }) {
       const r = await step.do("save", () => saveStoryVerdict(env, job.slug, { hash: job.hash, ...data }));
-      return { output: r.proposal ? `Filed as suggestion #${r.proposal}.` : "Recorded.", terminate: true };
+      return { output: r.proposal ? `Filed as suggestion #${r.proposal}. You're done.` : "Recorded. You're done." };
     },
   });
   useMustCall("record_verdict", "Call record_verdict with your decision.");
