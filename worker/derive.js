@@ -294,7 +294,7 @@ export function checkIssues(people, families, research = {}) {
       }
       if (pd && (pd.malformed || pd.nonstandard) && get(e, "date")) {
         issue(pid, "info", "date-format",
-          `Non-standard ${e.type.toLowerCase()} date “${e.date}” — rewrite as e.g. “12 Sep 1991”.`);
+          `Non-standard ${e.type.toLowerCase()} date “${e.date}” — rewrite as e.g. “17 Mar 1923”.`);
       }
     }
   }

@@ -25,7 +25,9 @@ IDs: people `I…`, families `F…`, sources `S…`, media `O…` (new ones get 
 | `family.add_child` / `family.remove_child` | `family`, `person` | Keeps `famc` in sync |
 | `family.delete` | `family` | Unlinks everyone |
 | `family.merge` | `keep`, `drop` | Spouses must match or be empty |
-| `source.upsert` | `id?`, `data: {title, author?, publication?, url?, repository?}` | |
+| `source.upsert` | `id?`, `data: {title, type?, author?, publication?, url?, repository?, apid?, note?, text?}` | Creates the source, or updates the fields given (an empty value removes one). `type`: `original` record, `derivative` (index or transcript), compiled `tree`, `book`, `website`. `text` is a transcription. A title is required |
+| `source.merge` | `keep`, `drop` | Re-points every use of `drop` to `keep`: citations on people, names, person and family events, fact-review evidence, and photos' `source`. Fills `keep`'s empty fields from `drop`, then removes `drop`. One batch, so one undo restores both |
+| `source.delete` | `id` | Only when nothing cites it; merge a cited duplicate instead |
 | `media.attach` | `person`, `file`, `caption?`, `type?`, `date?`, `place?`, `note?`, `source?`, `portrait?` | `file` is an R2 key already uploaded. `portrait: true` makes it the main photo |
 | `media.update` | `person`, `file`, `set: {caption?, type?, date?, place?, note?, source?}` | An empty value removes the field |
 | `media.set_primary` | `person`, `file` | The person's main photo (their icon); exactly one per person. Exported as GEDCOM `_PRIM Y` |

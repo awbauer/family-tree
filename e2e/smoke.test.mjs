@@ -87,6 +87,21 @@ test("research tabs", async () => {
   await visit("#/research/todo", ["To-do"]);
   await visit("#/research/queue", ["Suggestions"]);
 });
+test("sources list and a source page", async () => {
+  await visit("#/research", ["Research"]);
+  await page.locator('a[href="#/sources"]').first().click();
+  await page.waitForSelector("#src-table");
+  await visit("#/sources", ["Sources", "Family recollection", "Civil Registration Death Index"]);
+  assert.equal(await page.locator('#src-table tr[data-source="S3"] td').nth(3).innerText(), "3", "citation count");
+  await page.fill("#src-search", "recollection");
+  await page.waitForFunction(() => document.querySelectorAll("#src-table tbody tr").length === 1, null, { timeout: 5000 });
+  await page.fill("#src-search", "");
+  await page.locator('[data-sort="cites"]').click();
+  await page.waitForFunction(() => document.querySelector("#src-table tbody tr")?.getAttribute("data-source") === "S3", null, { timeout: 5000 });
+  await visit("#/source/S3", ["Family recollection", "Citations", "Merge into…"]);
+  assert.ok(await page.locator('#src-citations a[href*="?fact="]').count() > 0, "citations link to the fact");
+  await visit("#/source/S999", ["Source not found"]);
+});
 test("admin and audit history (owner)", async () => {
   await visit("#/admin", ["People and access", "Views"]);
   await visit("#/admin/audit", ["Audit history"]);

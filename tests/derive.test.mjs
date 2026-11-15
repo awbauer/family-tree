@@ -111,9 +111,9 @@ test("relationLabels and checkIssues match what derive() uses", () => {
 
 // Expected values produced by tools/build.py parse_date / fmt_date.
 const DATES = {
-  "12 Sep 1991": [{ approx: false, malformed: false, qualifier: "", year: 1991, month: 9, day: 12, sort: 19910912 }, "12 Sep 1991"],
-  "Sep 1991": [{ year: 1991, month: 9, day: null, sort: 19910915 }, "Sep 1991"],
-  "1991": [{ year: 1991, month: null, day: null, sort: 19910615 }, "1991"],
+  "17 Mar 1923": [{ approx: false, malformed: false, qualifier: "", year: 1923, month: 3, day: 17, sort: 19230317 }, "17 Mar 1923"],
+  "Mar 1923": [{ year: 1923, month: 3, day: null, sort: 19230315 }, "Mar 1923"],
+  "1923": [{ year: 1923, month: null, day: null, sort: 19230615 }, "1923"],
   "abt 1900": [{ approx: true, qualifier: "abt", year: 1900, sort: 19000615 }, "c. 1900"],
   "Abt. 1900": [{ approx: true, qualifier: "abt", sort: 19000615 }, "c. 1900"],
   // quirk: \b after "c." needs a following word character, so "c. 1900" is not approximate
@@ -133,8 +133,8 @@ const DATES = {
   "13 máj 1920": [{ nonstandard: true, month: 5, day: 13, sort: 19200513 }, "13 May 1920"],
   "3 okt 1901": [{ nonstandard: true, month: 10, day: 3 }, "3 Oct 1901"],
   "1920. szept. 3.": [{ nonstandard: true, malformed: true, year: null, sort: null }, "1920. szept. 3."],
-  "<i>12 Sep 1991</i>": [{ text: "12 Sep 1991", malformed: true, year: 1991, sort: 19910912 }, "12 Sep 1991"],
-  "  12 Sep 1991  ": [{ text: "12 Sep 1991", malformed: false, sort: 19910912 }, "12 Sep 1991"],
+  "<i>17 Mar 1923</i>": [{ text: "17 Mar 1923", malformed: true, year: 1923, sort: 19230317 }, "17 Mar 1923"],
+  "  17 Mar 1923  ": [{ text: "17 Mar 1923", malformed: false, sort: 19230317 }, "17 Mar 1923"],
   "unknown": [{ malformed: true, year: null, sort: null }, "unknown"],
   "999": [{ malformed: true, year: null }, "999"],
   "0999": [{ malformed: true, year: null }, "0999"],

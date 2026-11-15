@@ -2,7 +2,7 @@
 // change, fix it in the tree (citing the finding's sources), keep the tree as is, reopen, or discuss.
 import { useEffect, useRef } from "react";
 import { useData } from "../../data";
-import { CitationFields, findingCitations, readCitation } from "../../ops";
+import { CitationFields, fillCitation, findingCitations, readCitation } from "../../ops";
 import { ago } from "../../tree";
 import { Finding, useWho } from "../../ui";
 import { EVENT_TYPE_FOR_FIELD, reloadPage, usePerson } from "./context";
@@ -95,17 +95,14 @@ export function FindingWithActions({ f }: { f: any }) {
 
 /** A side-by-side "tree says / record says" editor for the fact a finding concerns, citing the finding's sources. */
 function FixForm({ f, target, cites, reason }: { f: any; target: any; cites: any[]; reason: string }) {
-  const { editor } = useData();
+  const { D, editor } = useData();
   const { id, queue, setFix } = usePerson();
   const ref = useRef<HTMLFormElement>(null);
   const type = (target && target.type) || EVENT_TYPE_FOR_FIELD[String(f.field || "").toLowerCase()] || "Event";
   const isName = String(f.field || "").toLowerCase() === "name";
   useEffect(() => {
     const form = ref.current!;
-    if (cites[0]) for (const [k, v] of Object.entries(cites[0])) {
-      const el = form.elements.namedItem(`fx_${k}`) as HTMLInputElement | null;
-      if (el && v) el.value = String(v);
-    }
+    if (cites[0]) fillCitation(D, form, "fx", cites[0]);
     form.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []); // prefill once, when the form opens
   return (

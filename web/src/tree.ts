@@ -29,6 +29,43 @@ export const linkedIn = (D: Tree, s: Story) => new Set([...String(s.body || "").
 /** Stories that mention this person in their text without being about them. */
 export const mentionsFor = (D: Tree, id: string) => (D.research.stories || []).filter((s) => !(s.people || []).includes(id) && linkedIn(D, s).has(id));
 
+/** One fact (or person, or photo) that cites a catalogued source, with the citations of it there. */
+export interface SourceUse { person: string; family?: string; fid?: string; fact: string; citations: any[]; file?: string }
+/**
+ * Every use of every catalogued source, by source id: facts on people (events and names), the person as a whole,
+ * family events (listed under each spouse), review evidence and photos. One entry per fact, so a fact that cites a
+ * source twice counts once.
+ */
+export function sourceUses(D: Tree): Record<string, SourceUse[]> {
+  const out: Record<string, SourceUse[]> = {};
+  const add = (sid: string, u: Omit<SourceUse, "citations">, c: any) => {
+    const list = (out[sid] = out[sid] || []);
+    let x = list.find((y) => y.person === u.person && y.family === u.family && y.fid === u.fid && y.file === u.file);
+    if (!x) list.push((x = { ...u, citations: [] }));
+    if (c && !x.citations.some((y) => JSON.stringify(y) === JSON.stringify(c))) x.citations.push(c);
+  };
+  const fact = (f: any, u: Omit<SourceUse, "citations">) => {
+    for (const c of f.citations || []) if (c && c.source) add(c.source, u, c);
+    for (const c of (f.review && f.review.evidence) || []) if (c && c.source) add(c.source, u, c);
+  };
+  const label = (e: any) => [eventLabel(e), e.date].filter(Boolean).join(" ");
+  for (const p of Object.values(D.people) as any[]) {
+    for (const c of p.citations || []) if (c && c.source) add(c.source, { person: p.id, fact: "the person" }, c);
+    for (const n of p.names || []) fact(n, { person: p.id, fid: n.fid, fact: `name ${`${n.given || ""} ${n.surname || ""}`.trim()}` });
+    for (const e of p.events || []) fact(e, { person: p.id, fid: e.fid, fact: label(e) });
+  }
+  for (const f of Object.values(D.families) as any[]) {
+    const sp = [f.husband, f.wife].filter((x: string | null | undefined) => x && D.people[x]);
+    for (const e of f.events || []) for (const s of sp) fact(e, { person: s, family: f.id, fid: e.fid, fact: label(e) });
+  }
+  for (const [pid, list] of Object.entries(((D.research as any).media || {}) as Record<string, any[]>)) {
+    for (const m of list || []) if (m && m.source && D.people[pid]) add(m.source, { person: pid, file: m.file, fact: `photo: ${m.caption || m.file.split("/").pop()}` }, null);
+  }
+  return out;
+}
+/** How many facts, people and photos a source's uses are (a family fact listed under both spouses counts once). */
+export const citeCount = (uses: SourceUse[] = []) => new Set(uses.map((u) => (u.family ? `${u.family}/${u.fid}` : `${u.person}/${u.fid || ""}/${u.file || ""}`))).size;
+
 export function apidLink(apid?: string) {
   const m = /^\d+,(\d+)::(\d+)$/.exec(apid || "");
   if (!m || m[2] === "0") return "";

@@ -1,11 +1,11 @@
 // Life events (own, own marriages, close family's births/deaths/marriages, historical context) with footnoted
 // citations, and, when the API is live, each fact's verification badge, review form and provenance.
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { store, useData } from "../../data";
 import { familyEvents } from "../../familyEvents";
 import { PersonLink, norm } from "../../lib";
-import { CitationFields, Cite, readCitation } from "../../ops";
+import { CitationFields, Cite, fillCitation, readCitation, SourceLink } from "../../ops";
 import { ago, apidLink, eventLabel, spousesOf } from "../../tree";
 import { Linkify, useBranchStyle, useWho } from "../../ui";
 import type { Tree } from "../../types";
@@ -71,6 +71,11 @@ export function LifeEvents() {
   const all = buildTimeline(D, id).rows;
   const hasKin = all.some((r) => r.kind === "kin");
   const rows = showKin ? all : all.filter((r) => r.kind !== "kin");
+  // #/person/I5?fact=e3 (e.g. from a source's page) points at one fact
+  const target = useSearchParams()[0].get("fact");
+  useEffect(() => {
+    if (target) document.querySelector(`.t-body[data-fid="${CSS.escape(target)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [target]);
   return (
     <section className="card">
       <div className="life-head">
@@ -90,7 +95,7 @@ export function LifeEvents() {
             return (
               <li key={i} className={kind === "kin" ? "kin" : e.misfiled ? "misfiled" : ""}>
                 <div className="t-date">{e.dateDisplay || "undated"}</div><span className="t-dot"></span>
-                <div className="t-body" data-fid={own ? e.fid : undefined}>
+                <div className={`t-body${own && e.fid === target ? " fact-target" : ""}`} data-fid={own ? e.fid : undefined}>
                   {what}{e.place && <> <span className="t-place">· {e.place}</span></>}
                   {it.cites.length > 0 && <sup className="cite">{it.cites.map((n: number, j: number) => <span key={j}>{j > 0 && ","}<FnLink n={n} /></span>)}</sup>}
                   {e.note ? <div className="t-note">{e.note}</div> : e.address ? <div className="t-note">{e.address}</div> : null}
@@ -190,6 +195,7 @@ function Provenance({ fid }: { fid: string }) {
 
 /** Review one fact: a conclusion, the evidence (sources already cited, or a new one), and a note. Queues fact.review. */
 export function VerifyForm({ e, preset }: { e: any; preset: any }) {
+  const { D } = useData();
   const { editor } = useData();
   const { id, queue, setVerify } = usePerson();
   const who = useWho();
@@ -198,12 +204,9 @@ export function VerifyForm({ e, preset }: { e: any; preset: any }) {
   const r = e.review || {};
   useEffect(() => {
     const form = ref.current!;
-    if (preset.citation) for (const [k, v] of Object.entries(preset.citation)) {
-      const el = form.elements.namedItem(`n_${k}`) as HTMLInputElement | null;
-      if (el && v) el.value = String(v);
-    }
+    if (preset.citation) fillCitation(D, form, "n", preset.citation);
     form.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [preset]);
+  }, [preset, D]);
   return (
     <form ref={ref} className="card sub verify-form" onSubmit={(ev) => {
       ev.preventDefault();
@@ -256,7 +259,7 @@ export function Sources() {
           const ev = [c.source_type && ({ original: "original record", derivative: "derivative (index, transcript)", authored: "authored work" } as any)[c.source_type], c.information && `${c.information} information`, c.evidence && `${c.evidence} evidence`, c.quality != null && `quality ${c.quality} of 3`, c.accessed && `viewed ${c.accessed}`].filter(Boolean);
           return (
             <li id={`fn-${i + 1}`} key={i}>
-              {c.url && !s.title ? <a href={c.url} target="_blank" rel="noopener">{title}</a> : title}{s.author ? `, ${s.author}` : ""}
+              {s.title ? <SourceLink id={c.source}>{title}</SourceLink> : c.url ? <a href={c.url} target="_blank" rel="noopener">{title}</a> : title}{s.author ? `, ${s.author}` : ""}
               {url && <> · <a href={url} target="_blank" rel="noopener">view record on Ancestry</a></>}
               {c.url && s.title && <> · <a href={c.url} target="_blank" rel="noopener">view record</a></>}
               {c.page && <span className="pg">{c.page}</span>}{c.text && <span className="pg">“{c.text}”</span>}{c.note && <span className="pg">{c.note}</span>}

@@ -29,7 +29,7 @@ import * as Agent from "./agent/routes.js";
 import * as Chat from "./agent/chat-routes.js";
 import { validateBatch, researchStatements } from "./research.js";
 import { J, now, parse, loadState, todoOut, write, audit, meta } from "./db.js";
-import { OpError, referencedIds, applyOps, assignFids } from "./ops.js";
+import { OpError, referencedIds, sourceIds, applyOps, assignFids } from "./ops.js";
 import { loadEditable, applyAndCommit, revertBatch, isConflict, newBatchId } from "./store.js";
 import * as Graph from "./graph.js";
 import * as Prov from "./prov.js";
@@ -416,10 +416,19 @@ async function checkEdit(c, g, payload, { dryRun }) {
     if (p.private) fail(403, `${pid} is shown to you as a name only; you can't change their details.`);
   }
   for (const fid of families) if (!b.families[fid]) fail(403, `Family ${fid} isn't in a tree you can see.`);
-  if (dryRun) {
+  const srcs = sourceIds(payload.ops);
+  if (dryRun || srcs.size) {
     const { state } = await loadEditable(c.env);
-    try { applyOps(state, payload.ops, { actor: self(c) }); }
+    // a catalogued source can be changed only when it's in the caller's view, and merging one may only re-point
+    // citations on people and families the caller can see
+    for (const sid of srcs) if (state.sources[sid] && !(b.sources || {})[sid]) fail(403, `Source ${sid} isn't in a tree you can see.`);
+    let res;
+    try { res = applyOps(state, payload.ops, { actor: self(c) }); }
     catch (e) { if (e instanceof OpError) fail(422, e.message); throw e; }
+    if (srcs.size) for (const x of res.touched.filter((t) => t.before != null)) {
+      if ((x.type === "person" || x.type === "media_map") && (!b.people[x.id] || b.people[x.id].private)) fail(403, "This source is also cited by people outside the tree you can see; ask the owner.");
+      if (x.type === "family" && !b.families[x.id]) fail(403, "This source is also cited on families outside the tree you can see; ask the owner.");
+    }
   }
 }
 

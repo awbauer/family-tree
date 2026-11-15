@@ -205,7 +205,7 @@ def main(ged_path, data_dir, out_dir, raw_out=None):
                       "Ancestry exports these 'family events' as if they were the person's own.")
             if e["pdate"] and (e["pdate"].get("malformed") or e["pdate"].get("nonstandard")) and e.get("date"):
                 issue(pid, "info", "date-format",
-                      f"Non-standard {e['type'].lower()} date “{e['date']}” — rewrite as e.g. “12 Sep 1991”.")
+                      f"Non-standard {e['type'].lower()} date “{e['date']}” — rewrite as e.g. “17 Mar 1923”.")
         for f_id in p["fams"]:
             pass
     for fid, f in F.items():
