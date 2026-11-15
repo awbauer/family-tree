@@ -30,6 +30,7 @@
   // plus the CF_API_TOKEN secret (automatic Access invites). keep_vars stops deploys from deleting them. Don't add a
   // "vars" block: any variable listed here would overwrite the dashboard value on every deploy.
   // The AGENTS service binding to the private agents Worker (agents/) is added at build time by tools/ci_config.mjs
-  // when the AGENTS_SERVICE build variable is set; see docs/agents/operations.md → Cloud research agents.
+  // once a Worker named family-tree-agents exists (or per the AGENTS_SERVICE build variable); see
+  // docs/agents/operations.md → Cloud research agents.
   "keep_vars": true
 }

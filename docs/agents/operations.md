@@ -188,8 +188,8 @@ Also set a **spend limit and rate limit on the AI Gateway itself** (dashboard â†
    - Build variable: `D1_DATABASE_ID`
    - Install: Workers Builds runs `npm ci` in `agents/`, which has its own lockfile.
 3. **Variables on `family-tree-agents`:** the budgets above if you want other values, `AI_GATEWAY_ID` if not `default`, and later `CONTENT_JOB_ENABLED=true`.
-4. **Connect the site to it.** On the `family-tree` Worker's build settings, add the build variable `AGENTS_SERVICE` = `family-tree-agents`. `tools/ci_config.mjs` then adds the `AGENTS` service binding on the next deploy. It's opt-in because a binding to a Worker that doesn't exist yet fails the deploy.
-5. Redeploy the site. Editors now see **Research with AI** on to-dos and person pages, and the **Agent runs** tab under Research.
+4. **Connect the site to it:** nothing to set. On each build, `tools/ci_config.mjs` checks with the Workers Builds token whether a Worker named `family-tree-agents` exists, and adds the `AGENTS` service binding if it does. A binding to a missing Worker would fail the deploy, so it's skipped until then. To choose explicitly, set the build variable `AGENTS_SERVICE` to another Worker name, or to `off`.
+5. Redeploy the site (or push to `main`). Editors now see **Research with AI** on to-dos and person pages, and the **Agent runs** tab under Research.
 
 **Using it.**
 

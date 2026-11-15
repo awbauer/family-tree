@@ -42,13 +42,38 @@ if (cfg.vars && Object.keys(cfg.vars).length) console.warn(`ci_config: dropping 
 delete cfg.vars;
 for (const env of Object.values(cfg.env || {})) delete env.vars;
 cfg.keep_vars = true;
-// Optional service binding to the private agents Worker (agents/). Only added when the AGENTS_SERVICE build variable
-// names it, so the site keeps deploying before the agents Worker exists (a binding to a missing Worker fails deploys).
-const agents = (process.env.AGENTS_SERVICE || "").trim();
-if (agents) {
-  if (!/^[a-z0-9-]+$/.test(agents)) { console.error("ci_config: AGENTS_SERVICE must be a Worker name"); process.exit(1); }
-  cfg.services = [...(cfg.services || []).filter((s) => s.binding !== "AGENTS"), { binding: "AGENTS", service: agents }];
+// Service binding to the private agents Worker (agents/). A binding to a Worker that doesn't exist fails the deploy,
+// so it's added only when that Worker exists:
+//   AGENTS_SERVICE=<name>   always bind to <name>
+//   AGENTS_SERVICE=off      never bind
+//   (unset)                 bind to "family-tree-agents" if the Workers Builds token can see it in the account
+const AGENTS_DEFAULT = "family-tree-agents";
+const agentsVar = (process.env.AGENTS_SERVICE || "").trim();
+if (agentsVar && agentsVar !== "off" && !/^[a-z0-9-]+$/.test(agentsVar)) { console.error("ci_config: AGENTS_SERVICE must be a Worker name or off"); process.exit(1); }
+async function agentsWorkerExists(name) {
+  // Workers Builds gives the build an API token (wrangler deploys with it); the account id may need looking up.
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+  if (!token) return false;
+  const base = process.env.CLOUDFLARE_API_BASE_URL || "https://api.cloudflare.com/client/v4";
+  const get = (path) => fetch(`${base}${path}`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) });
+  try {
+    let account = process.env.CLOUDFLARE_ACCOUNT_ID;
+    if (!account) {
+      const list = await (await get("/accounts")).json();
+      if (!list.success || (list.result || []).length !== 1) return false;
+      account = list.result[0].id;
+    }
+    return (await get(`/accounts/${account}/workers/scripts/${name}/settings`)).ok;
+  } catch { return false; }
 }
+let agents = null;
+if (agentsVar === "off") agents = null;
+else if (agentsVar) agents = agentsVar;
+else if (cfg.name !== AGENTS_DEFAULT && (await agentsWorkerExists(AGENTS_DEFAULT))) agents = AGENTS_DEFAULT;
+if (agents && cfg.name !== agents) {
+  cfg.services = [...(cfg.services || []).filter((s) => s.binding !== "AGENTS"), { binding: "AGENTS", service: agents }];
+  console.log(`ci_config: binding AGENTS → ${agents}`);
+} else if (!agentsVar && cfg.name !== AGENTS_DEFAULT) console.log(`ci_config: no ${AGENTS_DEFAULT} Worker found; AI research stays off`);
 cfg.$schema = "node_modules/wrangler/config-schema.json";
 writeFileSync(out, JSON.stringify(cfg, null, 2) + "\n");
 console.log(`ci_config: wrote ${out.replace(ROOT + "/", "")} (D1 bound by id, no vars, keep_vars on)`);
