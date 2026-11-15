@@ -245,6 +245,20 @@ Research → Agent runs → **Data quality review** starts an agent (`agents/src
 - **Attribution:** changes are logged as `agent:data-quality` on behalf of the editor who started the run, or who applied the dry run. This shows in to-do history (`on_behalf_of`), on finding resolutions and in the change log (`on_behalf_of`, `via` = the run id).
 - **Budget:** one run against `AGENT_MAX_RUNS_PER_DAY`, tokens against `AI_DAILY_TOKEN_BUDGET`, model effort `AI_CONTENT_EFFORT`. Migration `0007_agent_kinds.sql`; Durable Object migration `v3` (`FlueQualityReviewerAgent`).
 
+## Stories agent
+
+Editors can have an agent (`agents/src/agents/stories.js`, Flue, one Durable Object per run) **review** a story or **draft** a new one. Either way the result is a suggestion in Research → Suggestions; nothing is published until an editor approves it.
+
+- **Review:** **Review with AI** on a story page, with optional instructions. The agent checks every claim against the records of the people the story links and either reports the story as up to date (nothing filed) or proposes a revision that changes as little as needed. The queue shows the list of changes (each with its reason and the facts behind it) and a paragraph diff against the current text. Approving keeps the story's citations.
+- **Draft:** **Draft a story with AI** on the Stories page. Pick one or more people who have died, an optional angle, and a length (short ~300, medium ~700, long ~1,200 words). The agent writes from the records only, plus the site's context entries. The queue shows the story, its sources, and notes mapping each paragraph to the facts behind it. The notes aren't published.
+- **Checks on every submission:**
+  - every `[[id|name]]` link is a person in the tree;
+  - a draft links each of its subjects and is roughly the requested length;
+  - every source is one the tree already cites for those people, or a context entry;
+  - living people are never a subject, and come to the agent as a name only.
+- **No web access**, so nothing in a story can come from outside the tree.
+- **Budget:** one run against `AGENT_MAX_RUNS_PER_DAY`, effort `AI_CONTENT_EFFORT`. Durable Object migration `v4` (`FlueStoryWriterAgent`). The weekly content job's story check (`StoryReviewer`) is separate and unchanged.
+
 ## GEDCOM X storage, export and import
 
 The tree is stored as GEDCOM X (docs/design/standards.md):
