@@ -5,7 +5,7 @@ import { Link, useSearchParams } from "react-router";
 import { store, useData } from "../../data";
 import { familyEvents } from "../../familyEvents";
 import { PersonLink, norm } from "../../lib";
-import { CitationFields, Cite, fillCitation, readCitation, SourceLink } from "../../ops";
+import { CitationFields, Cite, citeLabel, fillCitation, readCitation, SourceLink } from "../../ops";
 import { ago, apidLink, eventLabel, spousesOf } from "../../tree";
 import { Linkify, useBranchStyle, useWho } from "../../ui";
 import type { Tree } from "../../types";
@@ -258,8 +258,8 @@ export function Sources() {
         <ol className="sources-list">{notes.map((c, i) => {
           const s = SRC[c.source] || {};
           const url = apidLink(c.apid);
-          const title = s.title || c.title || c.source || c.url || T.sources.source;
-          const ev = [c.source_type && T.sources.types[c.source_type], c.information && T.sources.information(c.information), c.evidence && T.sources.evidence(c.evidence), c.quality != null && T.sources.quality(c.quality), c.accessed && T.sources.viewed(c.accessed)].filter(Boolean);
+          const title = c.personal ? citeLabel(D, c) : s.title || c.title || c.source || c.url || T.sources.source;
+          const ev = [c.source_type && T.sources.types[c.source_type], c.information && T.sources.information(c.information), c.evidence && T.sources.evidence(c.evidence), c.quality != null && T.sources.quality(c.quality), !c.personal && c.accessed && T.sources.viewed(c.accessed)].filter(Boolean);
           return (
             <li id={`fn-${i + 1}`} key={i}>
               {s.title ? <SourceLink id={c.source}>{title}</SourceLink> : c.url ? <a href={c.url} target="_blank" rel="noopener">{title}</a> : title}{s.author ? `, ${s.author}` : ""}

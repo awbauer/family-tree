@@ -276,7 +276,11 @@ const isMisfiled = (e) => ["Death", "Birth", "Marriage"].includes(e.type) && RX_
  * so derived (pdate-stripped) records work. IDs that are missing from `people`/`families` are
  * skipped, so this can be re-run on a scoped subset: messages then only name people in that subset.
  */
-export function checkIssues(people, families, research = {}) {
+// Events that happen during a life (a residence, an occupation …), as opposed to birth, death and burial.
+const LIFE_EVENTS = new Set(["Residence", "Occupation", "Arrival", "Departure", "Emigration", "Immigration", "Naturalization", "Military", "Census", "Education", "Graduation", "Retirement"]);
+const RX_YEAR = /(?<![0-9])(1[6-9][0-9][0-9])(?![0-9])/g;
+
+export function checkIssues(people, families, research = {}, sources = {}) {
   const P = people, F = families;
   const issues = [];
   const issue = (pid, severity, kind, message) => issues.push({ person: pid, severity, kind, message });
@@ -332,6 +336,19 @@ export function checkIssues(people, families, research = {}) {
         "Attached to more than one set of parents: " + names.join(" | ") + ". Only one can be right " +
         "(unless one is an adoptive/step family — mark it so).");
     }
+    if (p.sex === "F") {
+      const own = p.names.map((n) => (n.surname || "").trim()).filter((x) => x);
+      const lower = [...new Set(own.map((x) => x.toLowerCase()))];
+      if (lower.length === 1) {
+        const husbands = p.fams.filter((fs) => has(F, fs) && F[fs].wife === pid && F[fs].husband && inP(F[fs].husband)).map((fs) => F[fs].husband);
+        const fathers = p.famc.filter((fc) => has(F, fc) && F[fc].husband && inP(F[fc].husband)).map((fc) => F[fc].husband);
+        const sur = (x) => ((P[x].names[0] || {}).surname || "").trim().toLowerCase();
+        if (husbands.some((h) => sur(h) === lower[0]) && !fathers.some((h) => sur(h) === lower[0])) {
+          issue(pid, "info", "married-surname",
+            `Recorded only under her husband's surname (${own[0]}). Add her maiden name, or leave the surname blank if it isn't known.`);
+        }
+      }
+    }
   }
 
   // families
@@ -375,6 +392,18 @@ export function checkIssues(people, families, research = {}) {
         }
       }
     }
+    // one parent here, but that parent is half of a couple in another family: the children are probably the couple's
+    if (!f.husband !== !f.wife && f.children.length) {
+      const par = f.husband || f.wife;
+      if (inP(par)) {
+        const other = P[par].fams.find((x) => x !== fid && has(F, x) && F[x].husband && F[x].wife);
+        if (other) {
+          issue(par, "info", "one-parent-family",
+            `Family ${fid} records only ${P[par].name} as a parent, but ${P[par].name} also has a spouse in family ${other}. ` +
+            "If these children belong to that couple, merge the two families.");
+        }
+      }
+    }
   }
   for (const [pid, p] of Object.entries(P)) {
     if (p.birth && p.death && p.birth.sort && p.death.sort && p.death.sort < p.birth.sort) {
@@ -382,6 +411,32 @@ export function checkIssues(people, families, research = {}) {
     }
     if (p.birth && p.death && p.birth.year && p.death.year && p.death.year - p.birth.year > 105) {
       issue(pid, "warn", "age", `Would have lived ${p.death.year - p.birth.year} years.`);
+    }
+    for (const e of p.events) {
+      const y = pdate(e)?.year ?? null;
+      if (y === null || !LIFE_EVENTS.has(e.type)) continue;
+      if (p.birth && p.birth.year && y < p.birth.year) {
+        issue(pid, "warn", "event-outside-life", `${e.type} dated ${e.date} is before the birth (${p.birth.year}); it may belong to someone else.`);
+      } else if (p.death && p.death.year && y > p.death.year) {
+        issue(pid, "warn", "event-outside-life", `${e.type} dated ${e.date} is after the death (${p.death.year}); it may belong to someone else.`);
+      }
+    }
+    for (const t of ["Birth", "Death"]) {
+      const n = p.events.filter((e) => e.type === t).length;
+      if (n > 1) issue(pid, "info", "duplicate-event", `${n} ${t.toLowerCase()} events recorded. Keep one and move the citations onto it, or note why they differ.`);
+    }
+    for (const e of p.events) {
+      const y = pdate(e)?.year ?? null;
+      if (y === null) continue;
+      for (const c of e.citations || []) {
+        const title = (c.source && has(sources, c.source) && sources[c.source].title) || c.title || "";
+        if (!/census/i.test(title)) continue;
+        const years = [...new Set([...title.matchAll(RX_YEAR)].map((m) => parseInt(m[1], 10)))];
+        if (years.length === 1 && y > years[0]) {
+          issue(pid, "warn", "cited-after-record", `${e.type} dated ${e.date} cites the ${years[0]} census (“${title}”), taken before it.`);
+          break;
+        }
+      }
     }
   }
 
@@ -438,13 +493,15 @@ export function checkIssues(people, families, research = {}) {
 
 // ---------- relationships ----------
 
-function familyGraph(people, families) {
+// `virtual`: a family with no parent recorded gets a stand-in parent ("~F12"), so its children are still siblings.
+function familyGraph(people, families, { virtual = false } = {}) {
   const parentsOf = (pid) => {
     const out = [];
     for (const fc of people[pid]?.famc || []) {
       const f = families[fc];
       if (!f) continue;
       for (const x of [f.husband, f.wife]) if (x && has(people, x)) out.push(x);
+      if (virtual && !f.husband && !f.wife) out.push(`~${fc}`);
     }
     return out;
   };
@@ -485,7 +542,7 @@ const gendered = (sex, m, f, n) => (sex === "M" ? m : sex === "F" ? f : n);
  */
 export function relationLabels(people, families, homeId) {
   const P = people;
-  const { ancestors, neighbours } = familyGraph(people, families);
+  const { ancestors, neighbours } = familyGraph(people, families, { virtual: true });
   const homeAnc = ancestors(homeId);
 
   const bloodRelation = (pid) => {
@@ -639,8 +696,37 @@ export function derive(input, { today } = {}) {
     const ovLiving = get(get(overrides, pid, {}), "living");
     if (ovLiving !== null) p.living = ovLiving;
   }
+  // No dates of their own: estimate a birth year from close relatives (parent + 25, spouse or sibling the same,
+  // child − 25; the youngest estimate wins) and treat them as living when it falls within the last 100 years.
+  const est = {};
+  for (const [pid, p] of Object.entries(P)) if (p.birth && p.birth.year) est[pid] = p.birth.year;
+  for (let pass = 0; pass < 3; pass++) {
+    const next = { ...est };
+    for (const [pid, p] of Object.entries(P)) {
+      if (has(est, pid)) continue;
+      const c = [];
+      for (const fc of p.famc) {
+        const f = get(F, fc);
+        if (!f) continue;
+        for (const x of [f.husband, f.wife]) if (x && has(est, x)) c.push(est[x] + 25);
+        for (const x of f.children) if (x !== pid && has(est, x)) c.push(est[x]);
+      }
+      for (const fs of p.fams) {
+        const f = get(F, fs);
+        if (!f) continue;
+        for (const x of [f.husband, f.wife]) if (x && x !== pid && has(est, x)) c.push(est[x]);
+        for (const x of f.children) if (has(est, x)) c.push(est[x] - 25);
+      }
+      if (c.length) next[pid] = Math.max(...c);
+    }
+    Object.assign(est, next);
+  }
+  for (const [pid, p] of Object.entries(P)) {
+    if (!p.livingUnknown || get(get(overrides, pid, {}), "living") !== null) continue;
+    if (has(est, pid) && est[pid] > thisYear - 100) p.living = true;
+  }
 
-  const issues = checkIssues(P, F, research);
+  const issues = checkIssues(P, F, research, S);
 
   // places
   const gaz = get(places, "places", []);

@@ -28,6 +28,10 @@ import edits  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# Events that happen during a life (a residence, an occupation …), as opposed to birth, death and burial.
+LIFE_EVENTS = {"Residence", "Occupation", "Arrival", "Departure", "Emigration", "Immigration", "Naturalization", "Military", "Census", "Education", "Graduation", "Retirement"}
+RX_YEAR = re.compile(r"(?<![0-9])(1[6-9][0-9][0-9])(?![0-9])")
+
 MONTHS = {
     "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3, "apr": 4, "april": 4,
     "may": 5, "mai": 5, "máj": 5, "jun": 6, "june": 6, "jún": 6, "jul": 7, "july": 7, "júl": 7,
@@ -259,6 +263,43 @@ def main(ged_path, data_dir, out_dir, raw_out=None):
             issue(pid, "error", "multiple-parents",
                   "Attached to more than one set of parents: " + " | ".join(names) + ". Only one can be right "
                   "(unless one is an adoptive/step family — mark it so).")
+        if p["sex"] == "F":
+            own = [(n.get("surname") or "").strip() for n in p["names"] if (n.get("surname") or "").strip()]
+            lower = {x.lower() for x in own}
+            if len(lower) == 1:
+                low = next(iter(lower))
+                sur = lambda x: ((P[x]["names"][0] if P[x]["names"] else {}).get("surname") or "").strip().lower()
+                husbands = [F[fs]["husband"] for fs in p["fams"] if F[fs]["wife"] == pid and F[fs]["husband"]]
+                fathers = [F[fc]["husband"] for fc in p["famc"] if F[fc]["husband"]]
+                if any(sur(h) == low for h in husbands) and not any(sur(h) == low for h in fathers):
+                    issue(pid, "info", "married-surname",
+                          f"Recorded only under her husband's surname ({own[0]}). Add her maiden name, or leave the surname blank if it isn't known.")
+
+    # No dates of their own: estimate a birth year from close relatives (parent + 25, spouse or sibling the same,
+    # child - 25; the youngest estimate wins) and treat them as living when it falls within the last 100 years.
+    est = {pid: p["birth"]["year"] for pid, p in P.items() if p["birth"] and p["birth"]["year"]}
+    for _ in range(3):
+        nxt = dict(est)
+        for pid, p in P.items():
+            if pid in est:
+                continue
+            c = []
+            for fc in p["famc"]:
+                f = F[fc]
+                c += [est[x] + 25 for x in (f["husband"], f["wife"]) if x and x in est]
+                c += [est[x] for x in f["children"] if x != pid and x in est]
+            for fs in p["fams"]:
+                f = F[fs]
+                c += [est[x] for x in (f["husband"], f["wife"]) if x and x != pid and x in est]
+                c += [est[x] - 25 for x in f["children"] if x in est]
+            if c:
+                nxt[pid] = max(c)
+        est.update(nxt)
+    for pid, p in P.items():
+        if not p.get("livingUnknown") or overrides.get(pid, {}).get("living") is not None:
+            continue
+        if pid in est and est[pid] > this_year - 100:
+            p["living"] = True
 
     # ---------- family checks ----------
     for fid, f in F.items():
@@ -294,6 +335,14 @@ def main(ged_path, data_dir, out_dir, raw_out=None):
                         if age < 14:
                             issue(sp, "error", "marriage-age",
                                   f"Would be {age} at marriage ({e.get('date')}) in family {fid}.")
+        # one parent here, but that parent is half of a couple in another family: the children are probably the couple's
+        if bool(h) != bool(w) and f["children"]:
+            par = h or w
+            other = next((x for x in P[par]["fams"] if x != fid and F[x]["husband"] and F[x]["wife"]), None)
+            if other:
+                issue(par, "info", "one-parent-family",
+                      f"Family {fid} records only {P[par]['name']} as a parent, but {P[par]['name']} also has a spouse in family {other}. "
+                      "If these children belong to that couple, merge the two families.")
         # siblings implausibly close
         kids = sorted([c for c in f["children"] if P[c]["birth"] and P[c]["birth"]["sort"]
                        and not (P[c]["events"] and all((e.get("pdate") or {}).get("approx") for e in P[c]["events"] if e["type"] == "Birth"))],
@@ -303,6 +352,30 @@ def main(ged_path, data_dir, out_dir, raw_out=None):
             issue(pid, "error", "death-before-birth", "Death date is before birth date.")
         if p["birth"] and p["death"] and p["birth"]["year"] and p["death"]["year"] and p["death"]["year"] - p["birth"]["year"] > 105:
             issue(pid, "warn", "age", f"Would have lived {p['death']['year'] - p['birth']['year']} years.")
+        for e in p["events"]:
+            y = (e.get("pdate") or {}).get("year")
+            if y is None or e["type"] not in LIFE_EVENTS:
+                continue
+            if p["birth"] and p["birth"]["year"] and y < p["birth"]["year"]:
+                issue(pid, "warn", "event-outside-life", f"{e['type']} dated {e.get('date')} is before the birth ({p['birth']['year']}); it may belong to someone else.")
+            elif p["death"] and p["death"]["year"] and y > p["death"]["year"]:
+                issue(pid, "warn", "event-outside-life", f"{e['type']} dated {e.get('date')} is after the death ({p['death']['year']}); it may belong to someone else.")
+        for t in ("Birth", "Death"):
+            n = sum(1 for e in p["events"] if e["type"] == t)
+            if n > 1:
+                issue(pid, "info", "duplicate-event", f"{n} {t.lower()} events recorded. Keep one and move the citations onto it, or note why they differ.")
+        for e in p["events"]:
+            y = (e.get("pdate") or {}).get("year")
+            if y is None:
+                continue
+            for c in e.get("citations") or []:
+                title = (S[c["source"]].get("title") if c.get("source") and c["source"] in S else None) or c.get("title") or ""
+                if not re.search("census", title, re.I):
+                    continue
+                years = sorted({int(m) for m in RX_YEAR.findall(title)})
+                if len(years) == 1 and y > years[0]:
+                    issue(pid, "warn", "cited-after-record", f"{e['type']} dated {e.get('date')} cites the {years[0]} census (“{title}”), taken before it.")
+                    break
 
     # possible duplicates: same death date (full) or same given+surname+birth year
     by_death = defaultdict(list)
@@ -363,10 +436,15 @@ def main(ged_path, data_dir, out_dir, raw_out=None):
     home = research.get("home_person") or next(iter(P))
 
     def parents_of(pid):
+        # a family with no parent recorded gets a stand-in parent ("~F12"), so its children are still siblings
+        if pid not in P:
+            return []
         out = []
         for fc in P[pid]["famc"]:
             f = F[fc]
             out += [x for x in (f["husband"], f["wife"]) if x]
+            if not f["husband"] and not f["wife"]:
+                out.append("~" + fc)
         return out
 
     def ancestors(pid):

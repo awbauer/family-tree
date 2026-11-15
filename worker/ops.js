@@ -64,7 +64,9 @@ function maxFid(list, p) {
  * state: {people, families, sources, media_map, aliases} (raw; not mutated).
  * Returns {state: newState, touched: [{type, id, before, after}], created: {tempId: realId}}.
  */
-export function applyOps(state, ops, { actor = "unknown", now = new Date().toISOString(), newId } = {}) {
+// `knower` is who personal knowledge is credited to: the person the change is made for (an agent applying a change on
+// someone's behalf passes them), never the agent itself.
+export function applyOps(state, ops, { actor = "unknown", knower = actor, now = new Date().toISOString(), newId } = {}) {
   if (!Array.isArray(ops) || !ops.length) throw new OpError(M.opsRequired);
   if (ops.length > 500) throw new OpError(M.tooMany);
   const S = { people: { ...state.people }, families: { ...state.families }, sources: { ...state.sources }, media_map: { ...(state.media_map || {}) }, aliases: { ...(state.aliases || {}) } };
@@ -105,6 +107,15 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
     return out;
   };
   const cleanCitation = (c, i) => {
+    // personal knowledge: something the person entering it knows themselves. Credited to them (not to whoever the client
+    // says), dated, and counted as evidence like any other source. Agents can't claim it.
+    if (c && (c.personal === true || c.personal === "true")) {
+      if (/^(agent|service):/.test(String(knower))) throw new OpError(M.personalNotForAgents, i);
+      const out = { personal: true, title: M.personalTitle, by: knower, accessed: now.slice(0, 10) };
+      for (const k of ["note", "text"]) if (c[k]) out[k] = String(c[k]).slice(0, 4000);
+      for (const [k, allowed] of Object.entries(CITATION_ENUMS)) if (c[k] != null && c[k] !== "") { if (!allowed.includes(String(c[k]))) throw new OpError(M.citationEnum(k, allowed), i); out[k] = String(c[k]); }
+      return out;
+    }
     if (!c || (!c.source && !c.url && !c.note && !c.title)) throw new OpError(M.citationEmpty, i);
     if (c.source && !S.sources[c.source]) throw new OpError(M.noSource(c.source), i);
     if (c.url && !/^https?:\/\//i.test(String(c.url))) throw new OpError(M.citationUrl, i);

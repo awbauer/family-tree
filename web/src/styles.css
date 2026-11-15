@@ -495,6 +495,8 @@ table.audit .audit-row:focus-visible { outline: 2px solid var(--accent); outline
 .source-person h3 { margin: 14px 0 4px; font-size: 1rem; }
 .source-person ul { margin: 0; padding-left: 20px; }
 .source-form textarea { font: inherit; font-size: .9rem; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); margin: 6px 0; box-sizing: border-box; }
+.cite-personal { flex-basis: 100%; display: flex; gap: 6px; align-items: center; }
+.cite-fields .cite-personal input { flex: none; width: auto; padding: 0; }
 
 /* Admin → Hidden stories */
 .hidden-story { margin-bottom: 16px; }

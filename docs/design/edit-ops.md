@@ -44,6 +44,7 @@ Structured after GEDCOM's source citation and the evidence analysis of *Evidence
 | `source` | a source record id (`S…`), when the source is catalogued | `SOUR @S…@` |
 | `title`, `url` | for a source that isn't catalogued: what and where it is (`url` must be http(s)) | `SOUR <title>`, `_LINK` |
 | `page` | where within the source: volume, page, entry, image | `PAGE` |
+| `personal: true` | the person entering it knows this themselves: no document needed. The server sets `title` ("Personal knowledge"), `by` (who: the signed-in person, or the person an agent acts for; agents can't claim it) and `accessed` (the date); `note`, `text` and the analysis fields may be added. It counts as evidence for `fact.review` | `SOUR Personal knowledge` |
 | `text` | a transcription of what the record says | `DATA.TEXT` |
 | `accessed` | when it was viewed | `DATA.DATE` |
 | `note`, `repository`, `apid` | free note; where the original is held; Ancestry record id | `NOTE`, `_APID` |
