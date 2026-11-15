@@ -63,6 +63,12 @@ export const api = {
     citationEmpty: "citation needs a source id, title, url or note",
     personalTitle: "Personal knowledge",
     personalNotForAgents: "only a person can cite their own knowledge, not an agent",
+    settledBy: {
+      sex: "the sex fix it asks for",
+      merge: "the merge it asks for",
+      familyDelete: "the family deletion it asks for",
+    },
+    settledNote: (why: string) => `Resolved automatically: this edit made ${why}.`,
     noSource: (id: unknown) => `no source ${JSON.stringify(id)}`,
     citationUrl: "citation url must start with http(s)://",
     citationEnum: (field: string, allowed: readonly string[]) => oneOf(`citation ${field}`, allowed),

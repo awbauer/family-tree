@@ -96,14 +96,14 @@ test("relationLabels and checkIssues match what derive() uses", () => {
   }
   assert.equal(labels[b.home].relation, "Self");
   // re-running on the derived bundle gives the same issues
-  assert.deepEqual(checkIssues(b.people, b.families, input.research), b.issues);
+  assert.deepEqual(checkIssues(b.people, b.families, input.research, b.sources), b.issues);
   // labels relative to someone else
   const other = Object.keys(b.people).find((id) => id !== b.home && b.people[id].direct);
   assert.equal(relationLabels(b.people, b.families, other)[other].relation, "Self");
   // a scoped subset never names people outside it
   const keep = Object.fromEntries(Object.entries(b.people).filter(([, p]) => p.branch === "home"));
   const hidden = Object.values(b.people).filter((p) => !(p.id in keep)).map((p) => p.name);
-  for (const i of checkIssues(keep, b.families, input.research)) {
+  for (const i of checkIssues(keep, b.families, input.research, b.sources)) {
     assert.ok(i.person === null || i.person in keep);
     for (const n of hidden) if (!Object.values(keep).some((p) => p.name === n)) assert.ok(!i.message.includes(n), i.message);
   }

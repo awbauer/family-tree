@@ -5,6 +5,9 @@
 import { applyOps } from "./ops.js";
 import { J, now, parse, bumpVersion } from "./db.js";
 import { readTree, writeRecord, restoreRecord, mode as storageMode } from "./storage.js";
+import { S as Strings } from "../strings/index.ts";
+
+const M = Strings.api.ops;
 
 export async function loadEditable(env) {
   const tree = await readTree(env);
@@ -77,8 +80,49 @@ export async function applyAndCommit(env, ops, meta) {
   const batchId = meta.batchId || newBatchId();
   const st = commitStatements(env, { ...meta, touched: res.touched, versions, state: res.state, batchId, mode });
   if (meta.extra) st.push(...meta.extra);
+  const settled = await settledFindings(env, ops, { ...meta, batchId });
+  st.push(...settled.statements);
   await env.DB.batch(st);
-  return { batchId, touched: res.touched.map((x) => ({ type: x.type, id: x.id, op: x.before == null ? "created" : x.after == null ? "deleted" : "updated" })), created: res.created };
+  return { batchId, touched: res.touched.map((x) => ({ type: x.type, id: x.id, op: x.before == null ? "created" : x.after == null ? "deleted" : "updated" })), created: res.created, settled: settled.ids };
+}
+
+const wordRx = (id) => new RegExp(`(?<![\\w-])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`);
+const FAMILY_ID = /(?<![\w-])(?:[A-Za-z]+-)?F\d+(?![\w-])/g;
+
+/**
+ * Open findings this batch does exactly what they ask, closed in the same batch (so undoing the edit reopens them).
+ * Deliberately narrow: a sex fix ("Set sex to M") on the finding's own person; a merge of two people the finding
+ * names; deleting families when every family the finding names is deleted here and it says to delete or remove them.
+ */
+export async function settledFindings(env, ops, { actor, actorKind, batchId, onBehalfOf = null, via = null }) {
+  const sexFix = new Map(), merges = [], deleted = new Set();
+  for (const o of ops || []) {
+    if (o.op === "person.update" && o.set && o.set.sex) sexFix.set(o.id, o.set.sex);
+    if (o.op === "person.merge" && o.keep && o.drop) merges.push([o.keep, o.drop]);
+    if (o.op === "family.delete" && o.family) deleted.add(o.family);
+  }
+  if (!sexFix.size && !merges.length && !deleted.size) return { statements: [], ids: [] };
+  const rows = (await env.DB.prepare("SELECT id, data FROM findings").all()).results;
+  const t = now(), statements = [], ids = [];
+  for (const r of rows) {
+    const d = parse(r.data, {});
+    if (d.resolution && d.resolution.status && d.resolution.status !== "open") continue;
+    const text = `${d.claim || ""} ${d.finding || ""}`;
+    let why = null;
+    const m = /set sex to (M|F)\b/i.exec(text);
+    if (d.field === "sex" && sexFix.has(d.person) && m && m[1].toUpperCase() === sexFix.get(d.person)) why = M.settledBy.sex;
+    if (!why && merges.some(([k, x]) => wordRx(k).test(text) && wordRx(x).test(text))) why = M.settledBy.merge;
+    const fams = text.match(FAMILY_ID) || [];
+    if (!why && deleted.size && fams.length && fams.every((f) => deleted.has(f)) && /\b(delete|remove)\b/i.test(text)) why = M.settledBy.familyDelete;
+    if (!why) continue;
+    const resolution = { status: "resolved", by: actor, at: t, note: M.settledNote(why), batch: batchId };
+    const open = "COALESCE(json_extract(data, '$.resolution.status'), 'open') = 'open'";
+    statements.push(env.DB.prepare(`INSERT INTO changes (at, actor, actor_kind, entity_type, entity_id, op, before, after, reason, batch_id, on_behalf_of, via) SELECT ?, ?, ?, 'finding', ?, 'resolve', json_extract(data, '$.resolution'), ?, ?, ?, ?, ? FROM findings WHERE id = ? AND ${open}`)
+      .bind(t, actor, actorKind || "person", String(r.id), J(resolution), resolution.note, batchId, onBehalfOf, via, r.id));
+    statements.push(env.DB.prepare(`UPDATE findings SET data = json_set(data, '$.resolution', json(?)), version = version + 1 WHERE id = ? AND ${open}`).bind(J(resolution), r.id));
+    ids.push(r.id);
+  }
+  return { statements, ids };
 }
 
 export const isConflict = (e) => /NOT NULL constraint failed: _guard/i.test(String(e && (e.message || e)));
@@ -95,10 +139,13 @@ export async function revertBatch(env, batchId, { actor, actorKind, reason }) {
       // media_map / aliases: restore the per-person entries this batch changed
       const cur = await env.DB.prepare("SELECT value, version FROM config WHERE key = ?").bind(r.entity_id).first();
       const val = cur ? parse(cur.value, {}) : {};
-      for (const [k, b] of Object.entries(before || {})) {
-        if (JSON.stringify(val[k] ?? null) !== JSON.stringify((after || {})[k] ?? null)) throw Object.assign(new Error("changed since"), { conflict: true });
-        if (r.entity_id === "aliases") Object.assign(val, b || {}); else if (b == null) delete val[k]; else val[k] = b;
-        if (r.entity_id === "aliases") for (const a of Object.keys(after || {})) if (!(a in (b || {}))) delete val[a];
+      // aliases rows hold the whole map before and after under "*"; restore only the entries this batch changed
+      const whole = r.entity_id === "aliases" && before && "*" in before;
+      const bm = whole ? before["*"] || {} : before || {}, am = whole ? (after || {})["*"] || {} : after || {};
+      const keys = whole ? [...new Set([...Object.keys(bm), ...Object.keys(am)])].filter((k) => JSON.stringify(bm[k] ?? null) !== JSON.stringify(am[k] ?? null)) : Object.keys(bm);
+      for (const k of keys) {
+        if (JSON.stringify(val[k] ?? null) !== JSON.stringify(am[k] ?? null)) throw Object.assign(new Error("changed since"), { conflict: true });
+        if (bm[k] == null) delete val[k]; else val[k] = bm[k];
       }
       st.push(guard(env, "NOT EXISTS (SELECT 1 FROM config WHERE key = ? AND version = ?)", r.entity_id, cur ? cur.version : -1));
       st.push(env.DB.prepare("UPDATE config SET value = ?, version = version + 1, updated_at = ?, updated_by = ? WHERE key = ?").bind(J(val), t, actor, r.entity_id));

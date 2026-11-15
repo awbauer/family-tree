@@ -160,7 +160,7 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
   let issues;
   if (!v.research) issues = [];
   else if (helpers.checkIssues) {
-    try { issues = helpers.checkIssues(people, families, research); } catch { issues = null; }
+    try { issues = helpers.checkIssues(people, families, research, full.sources || {}); } catch { issues = null; }
   }
   if (!issues) issues = (full.issues || []).filter((i) => !i.person || ids.has(i.person));
   for (const p of Object.values(people)) if (p.issues) p.issues = issues.filter((i) => i.person === p.id);
