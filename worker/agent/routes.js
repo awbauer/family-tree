@@ -25,6 +25,7 @@ import * as Library from "./library.js";
 import * as Relatives from "./relatives.js";
 import { listSites, sitesSummary } from "./sites.js";
 import { OpError } from "../ops.js";
+import { S } from "../../strings/index.ts";
 
 /** Where each kind of run's agent is mounted in the agents Worker. */
 const PATHS = { research: RESEARCHER_PATH, quality: Quality.QUALITY_PATH, story: Stories.STORY_PATH, library: Library.LIBRARY_PATH, relatives: Relatives.RELATIVES_PATH };
@@ -46,10 +47,10 @@ export async function agentsFetch(env, path, body, method = "POST") {
 }
 
 function editorOnly(c, g) {
-  if (!can.review(g) || c.access.kind === "agent") fail(403, "Only editors can run research agents.");
+  if (!can.review(g) || c.access.kind === "agent") fail(403, S.api.agentRuns.editorsOnly);
 }
 function needAgents(c) {
-  if (!agentsEnabled(c.env)) fail(503, "Research agents aren't set up yet: deploy the agents Worker and add the AGENTS service binding. See docs/agents/operations.md → Cloud research agents.");
+  if (!agentsEnabled(c.env)) fail(503, S.api.agentRuns.notSetUp);
 }
 
 // a library run's children carry the first message sent to them; the page doesn't need it
@@ -75,23 +76,23 @@ export async function startRun(c, d, { grantOrFail, scoped, loadTodo }) {
   if (d.kind === "story") return startStory(c, d, g, { scoped });
   if (d.kind === "library") return startLibrary(c, d, g, { scoped });
   if (d.kind === "relatives") return startRelatives(c, d, g, { scoped });
-  if (d.kind && d.kind !== "research") fail(400, "kind must be research, quality, story, library or relatives");
+  if (d.kind && d.kind !== "research") fail(400, S.api.agentRuns.kindInvalid);
   const env = c.env, s = settings(env), b = await scoped(c, g);
   let todo = null;
   if (d.todo_id) {
     todo = (await loadTodo(c, d.todo_id)).row;
-    if (["done", "wont_do"].includes(todo.status)) fail(409, "That to-do is closed.");
-    if (todo.assignee === AGENT) fail(409, "A research agent is already working on that to-do.");
-    if (todo.assignee && todo.assignee !== c.access.principal) fail(409, `That to-do is assigned to ${todo.assignee}. Unassign it first.`);
+    if (["done", "wont_do"].includes(todo.status)) fail(409, S.api.agentRuns.todoClosed);
+    if (todo.assignee === AGENT) fail(409, S.api.agentRuns.todoBusy);
+    if (todo.assignee && todo.assignee !== c.access.principal) fail(409, S.api.agentRuns.todoAssigned(todo.assignee));
   }
   const person = d.person || (todo && todo.person_id) || null;
   if (person) {
     const p = b.people[person];
-    if (!p) fail(404, "That person isn't in this tree.");
-    if (p.living || p.private) fail(400, "Research runs are for people who have died. Living people aren't researched.");
+    if (!p) fail(404, S.api.agentRuns.personNotInTree);
+    if (p.living || p.private) fail(400, S.api.agentRuns.livingNotResearched);
   }
   const instructions = String(d.instructions || "").trim().slice(0, 2000) || null;
-  if (!todo && !person && (!instructions || instructions.length < 10)) fail(400, "Give a to-do, a person, or instructions saying what to research.");
+  if (!todo && !person && (!instructions || instructions.length < 10)) fail(400, S.api.agentRuns.needTarget);
   try { await checkDaily(env, s, { runs: true }); } catch (e) { if (e instanceof BudgetError) fail(429, e.message); throw e; }
 
   const id = `run-${now().slice(0, 10).replace(/-/g, "")}-${crypto.randomUUID().slice(0, 8)}`;
@@ -108,7 +109,7 @@ export async function startRun(c, d, { grantOrFail, scoped, loadTodo }) {
   const res = await write(env, st);
   if (todo && res[2].meta && res[2].meta.changes === 0) {
     await endRun(env, id, "the to-do changed while starting", "cancelled");
-    fail(409, "Someone changed that to-do meanwhile. Reload and try again.");
+    fail(409, S.api.agentRuns.todoChanged);
   }
   // Hand the run to its own Flue agent conversation (one Durable Object per run, id = run id). Admission is durable:
   // once this returns, the agent owes the run an outcome even across restarts.
@@ -116,7 +117,7 @@ export async function startRun(c, d, { grantOrFail, scoped, loadTodo }) {
     await agentsFetch(env, `${RESEARCHER_PATH}/${id}`, { kind: "user", body: `${firstMessage({ instructions, person }, b, todo)}\n\n${await sitesText(env)}`, initialData: { runId: id } });
   } catch (e) {
     await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
-    fail(502, `Couldn't start the run: ${e.message}`);
+    fail(502, S.api.agentRuns.runNotStarted(e.message));
   }
   return json({ run: runOut(await env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) }, 201);
 }
@@ -147,7 +148,7 @@ export async function listRuns(c, { grantOrFail }) {
 async function runFor(c, id) {
   const r = await c.env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first();
   const g = r && grantFor(c.access, r.tree_id);
-  if (!r || !g) fail(404, "No such run.");
+  if (!r || !g) fail(404, S.api.agentRuns.noSuchRun);
   editorOnly(c, g);
   return r;
 }
@@ -159,7 +160,7 @@ export async function getRun(c, id) {
 
 export async function cancel(c, id) {
   const r = await runFor(c, id);
-  if (!["queued", "running"].includes(r.status)) fail(409, "That run has already finished.");
+  if (!["queued", "running"].includes(r.status)) fail(409, S.api.agentRuns.finished);
   if (agentsEnabled(c.env)) await agentsFetch(c.env, `${PATHS[r.kind] || RESEARCHER_PATH}/${id}/abort`, {}).catch(() => null);
   await endRun(c.env, id, `cancelled by ${c.access.principal}`, "cancelled");
   return json({ ok: true });
@@ -171,15 +172,15 @@ export async function refreshProfileRoute(c, id, { grantOrFail, scoped }) {
   needAgents(c);
   const b = await scoped(c, g);
   const p = b.people[id];
-  if (!p) fail(404, "Not found.");
-  if (p.living || p.private) fail(400, "Profiles are only written for people who have died.");
+  if (!p) fail(404, S.api.http.notFoundDot);
+  if (p.living || p.private) fail(400, S.api.agentRuns.profileLiving);
   try { await checkDaily(c.env); } catch (e) { if (e instanceof BudgetError) fail(429, e.message); throw e; }
   const r = await agentsFetch(c.env, "/internal/profiles", { person: id, force: true });
   return json({ ok: true, queued: r }, 202);
 }
 
 export async function refreshContent(c) {
-  if (!c.access.isOwner) fail(403, "Owner only.");
+  if (!c.access.isOwner) fail(403, S.api.auth.ownerOnly);
   needAgents(c);
   return json(await agentsFetch(c.env, "/internal/content/refresh", { by: c.access.principal }), 202);
 }
@@ -189,11 +190,11 @@ async function startQuality(c, d, g, { scoped }) {
   const env = c.env, s = settings(env), b = await scoped(c, g);
   const scope = Quality.SCOPES.includes(d.scope) ? d.scope : "both";
   const person = d.person ? String(d.person) : null;
-  if (person && !b.people[person]) fail(404, "That person isn't in this tree.");
+  if (person && !b.people[person]) fail(404, S.api.agentRuns.personNotInTree);
   const limit = Math.max(1, Math.min(Quality.MAX_ITEMS, parseInt(d.limit, 10) || 10));
   const dryRun = d.dry_run !== false; // dry run unless asked otherwise
   const items = Quality.planItems(b, { scope, person, limit, starter: c.access.principal });
-  if (!items.length) fail(400, "There are no open items to review with those options.");
+  if (!items.length) fail(400, S.api.agentRuns.nothingToReview);
   try { await checkDaily(env, s, { runs: true }); } catch (e) { if (e instanceof BudgetError) fail(429, e.message); throw e; }
   const id = `run-${now().slice(0, 10).replace(/-/g, "")}-${crypto.randomUUID().slice(0, 8)}`;
   const options = { scope, person, limit, dry_run: dryRun, items };
@@ -206,15 +207,15 @@ async function startQuality(c, d, g, { scoped }) {
     await agentsFetch(env, `${Quality.QUALITY_PATH}/${id}`, { kind: "user", body: Quality.firstMessage(b, options, items), initialData: { runId: id } });
   } catch (e) {
     await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
-    fail(502, `Couldn't start the review: ${e.message}`);
+    fail(502, S.api.agentRuns.reviewNotStarted(e.message));
   }
   return json({ run: runOut(await env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) }, 201);
 }
 
 export async function applyRun(c, id) {
   const r = await runFor(c, id);
-  if (r.kind !== "quality") fail(400, "Only a data quality review can be applied.");
-  if (r.status !== "succeeded") fail(409, "Wait for the review to finish.");
+  if (r.kind !== "quality") fail(400, S.api.agentRuns.qualityOnly);
+  if (r.status !== "succeeded") fail(409, S.api.agentRuns.reviewNotFinished);
   try {
     const report = await Quality.applyReport(c.env, r, c.access.principal);
     return json({ ok: true, report, run: runOut(await c.env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) });
@@ -224,20 +225,20 @@ export async function applyRun(c, id) {
 // ---------------------------------------------------------------- stories (#33)
 async function startStory(c, d, g, { scoped }) {
   const env = c.env, s = settings(env), b = await scoped(c, g);
-  const mode = d.mode === "review" ? "review" : d.mode === "draft" ? "draft" : fail(400, "mode must be review or draft");
+  const mode = d.mode === "review" ? "review" : d.mode === "draft" ? "draft" : fail(400, S.api.agentRuns.storyMode);
   const instructions = String(d.instructions || "").trim().slice(0, 2000) || null;
   const o = { mode, instructions };
   if (mode === "review") {
     const st = (b.research.stories || []).find((x) => x.slug === d.slug);
-    if (!st) fail(404, "No such story.");
+    if (!st) fail(404, S.api.agentRuns.noSuchStory);
     o.slug = st.slug;
   } else {
     const people = [...new Set((Array.isArray(d.people) ? d.people : []).map(String))].slice(0, 12);
-    if (!people.length) fail(400, "Choose who the story is about.");
+    if (!people.length) fail(400, S.api.agentRuns.storyPeople);
     for (const pid of people) {
       const p = b.people[pid];
-      if (!p) fail(404, `${pid} isn't in this tree.`);
-      if (p.living || p.private) fail(400, `${p.name} is living. Stories are about people who have died; living relatives can be mentioned by name.`);
+      if (!p) fail(404, S.api.agentRuns.notInTree(pid));
+      if (p.living || p.private) fail(400, S.api.agentRuns.storyLiving(p.name));
     }
     o.people = people;
     o.length = Stories.LENGTHS[d.length] ? d.length : "medium";
@@ -254,7 +255,7 @@ async function startStory(c, d, g, { scoped }) {
     await agentsFetch(env, `${Stories.STORY_PATH}/${id}`, { kind: "user", body: Stories.firstMessage(b, o), initialData: { runId: id } });
   } catch (e) {
     await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
-    fail(502, `Couldn't start the run: ${e.message}`);
+    fail(502, S.api.agentRuns.runNotStarted(e.message));
   }
   return json({ run: runOut(await env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) }, 201);
 }
@@ -263,10 +264,10 @@ async function startStory(c, d, g, { scoped }) {
 async function startLibrary(c, d, g, { scoped }) {
   const env = c.env, s = settings(env), b = await scoped(c, g);
   const raw = d.n === undefined || d.n === null || d.n === "" ? Library.DEFAULT_N : parseInt(d.n, 10);
-  if (!Number.isFinite(raw) || raw < 0 || raw > Library.MAX_N) fail(400, `n must be 0 to ${Library.MAX_N}`);
+  if (!Number.isFinite(raw) || raw < 0 || raw > Library.MAX_N) fail(400, S.api.agentRuns.libraryN(Library.MAX_N));
   const instructions = String(d.instructions || "").trim().slice(0, 2000) || null;
   const plan = Library.planLibrary(b, { pending: await Library.pendingRevisions(env, g.tree_id), n: raw });
-  if (!plan.stories.length && !(raw && plan.candidates.length)) fail(400, "There are no stories to review and no candidates for new ones.");
+  if (!plan.stories.length && !(raw && plan.candidates.length)) fail(400, S.api.agentRuns.libraryEmpty);
   try { await checkDaily(env, s, { runs: true }); } catch (e) { if (e instanceof BudgetError) fail(429, e.message); throw e; }
   const id = `run-${now().slice(0, 10).replace(/-/g, "")}-${crypto.randomUUID().slice(0, 8)}`;
   const label = `Review the story library: ${plan.stories.length} stor${plan.stories.length === 1 ? "y" : "ies"}, up to ${raw} new`;
@@ -279,7 +280,7 @@ async function startLibrary(c, d, g, { scoped }) {
     await agentsFetch(env, `${Library.LIBRARY_PATH}/${id}`, { kind: "user", body: Library.firstMessage(b, plan, instructions), initialData: { runId: id } });
   } catch (e) {
     await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
-    fail(502, `Couldn't start the review: ${e.message}`);
+    fail(502, S.api.agentRuns.reviewNotStarted(e.message));
   }
   return json({ run: runOut(await env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) }, 201);
 }
@@ -288,10 +289,10 @@ async function startLibrary(c, d, g, { scoped }) {
 async function startRelatives(c, d, g, { scoped }) {
   const env = c.env, s = settings(env), b = await scoped(c, g);
   const person = d.person ? String(d.person) : null;
-  if (!person) fail(400, "Say whose relatives to look for (person).");
+  if (!person) fail(400, S.api.agentRuns.relativesPerson);
   const p = b.people[person];
-  if (!p) fail(404, "That person isn't in this tree.");
-  if (p.living || p.private) fail(400, "Relatives are only looked for from people who have died. Living people aren't researched.");
+  if (!p) fail(404, S.api.agentRuns.personNotInTree);
+  if (p.living || p.private) fail(400, S.api.agentRuns.relativesLiving);
   let o;
   try { o = Relatives.cleanOptions(d); } catch (e) { if (e instanceof OpError) fail(400, e.message); throw e; }
   try { await checkDaily(env, s, { runs: true }); } catch (e) { if (e instanceof BudgetError) fail(429, e.message); throw e; }
@@ -307,7 +308,7 @@ async function startRelatives(c, d, g, { scoped }) {
     await agentsFetch(env, `${Relatives.RELATIVES_PATH}/${id}`, { kind: "user", body: Relatives.firstMessage(b, person, o, await sitesText(env)), initialData: { runId: id } });
   } catch (e) {
     await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
-    fail(502, `Couldn't start the run: ${e.message}`);
+    fail(502, S.api.agentRuns.runNotStarted(e.message));
   }
   return json({ run: runOut(await env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) }, 201);
 }

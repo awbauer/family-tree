@@ -1,6 +1,9 @@
 // Loading the tree, and what every page needs to know about the viewer: who they are, which tree, what they may do.
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Account, Branch, Person, Tree } from "./types";
+import { S } from "../../strings/index.ts";
+
+const L = S.common.load;
 
 export class ApiError extends Error { status = 0; data: unknown = null; }
 
@@ -39,13 +42,13 @@ async function loadTree(): Promise<Tree> {
   let tree: string | null = null, account: Account | null = null;
   if (me.ok) {
     account = me.body;
-    if (!account!.trees.length) throw new Error("No family trees have been shared with you yet. Ask the owner to invite you.");
+    if (!account!.trees.length) throw new Error(L.noTrees);
     const saved = store.get("tree");
     tree = (account!.trees.find((t) => t.id === saved) || account!.trees[0]).id;
-  } else if (me.status === 403) throw new Error(me.body.error || "Not signed in.");
+  } else if (me.status === 403) throw new Error(me.body.error || L.notSignedIn);
   const preview = account && account.isOwner ? store.get("previewView", sessionStorage) : null;
   const r = await getJson(`api/tree${tree ? `?tree=${encodeURIComponent(tree)}` : ""}${preview ? `&preview_view=${encodeURIComponent(preview)}` : ""}`);
-  if (!r.ok) throw new Error(r.body.error || `The server answered ${r.status}.`);
+  if (!r.ok) throw new Error(r.body.error || L.serverAnswered(r.status));
   r.body.account = account;
   if (preview) r.body.previewView = preview;
   return r.body as Tree;
@@ -62,8 +65,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const editor = role === "owner" || role === "editor";
     const branches: Record<string, Branch> = {};
     for (const b of D.research.branches || []) branches[b.key] = b;
-    branches.home = { key: "home", label: "Home", color: "var(--b-home)" };
-    branches.other = { key: "other", label: "Other", color: "var(--b-other)" };
+    branches.home = { key: "home", label: S.common.branches.home, color: "var(--b-home)" };
+    branches.other = { key: "other", label: S.common.branches.other, color: "var(--b-other)" };
     async function api(method: string, path: string, body?: object) {
       const sep = path.includes("?") ? "&" : "?";
       const r = await fetch(`api/${path}${tree ? `${sep}tree=${encodeURIComponent(tree)}` : ""}`, {
@@ -72,16 +75,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
         body: body ? JSON.stringify({ tree, ...body }) : undefined,
       });
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) { const e = new ApiError(data.error || `The server answered ${r.status}.`); e.status = r.status; e.data = data; throw e; }
+      if (!r.ok) { const e = new ApiError(data.error || L.serverAnswered(r.status)); e.status = r.status; e.data = data; throw e; }
       return data;
     }
     return { D, account, tree, editor, live: !!me, ai: !!(account && account.ai) && editor, branches, people: Object.values(D.people), api };
   }, [state.D]);
 
   if (state.error) return (
-    <div className="wrap page"><h1>Can’t load the tree</h1><p>{state.error}</p>
-      <p className="muted small">Locally: run <code>npm run dev:example</code> and <code>npm run dev:web</code>, or <code>python3 tools/build.py</code> then <code>python3 tools/serve.py</code>. On Cloudflare: check the D1 binding, that the seed was loaded, and that you came in through Cloudflare Access.</p></div>
+    <div className="wrap page"><h1>{L.failed.title}</h1><p>{state.error}</p>
+      <p className="muted small">{L.failed.locally}<code>{L.failed.cmds.devExample}</code>{L.failed.and}<code>{L.failed.cmds.devWeb}</code>{L.failed.or}<code>{L.failed.cmds.build}</code>{L.failed.then}<code>{L.failed.cmds.serve}</code>{L.failed.cloudflare}</p></div>
   );
-  if (!value) return <div className="wrap page"><p className="muted">Loading the family tree…</p></div>;
+  if (!value) return <div className="wrap page"><p className="muted">{L.loading}</p></div>;
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

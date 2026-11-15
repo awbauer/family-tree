@@ -3,6 +3,7 @@
 import { Link, useParams } from "react-router";
 import { useData } from "../../data";
 import { useTitle } from "../../lib";
+import { S } from "../../../../strings/index.ts";
 import { NotFound } from "../NotFound";
 import { Access } from "./Access";
 import { Audit } from "./Audit";
@@ -11,20 +12,21 @@ import { Sites } from "./Sites";
 type Tab = "access" | "sites" | "audit";
 
 function AdminPage({ tab }: { tab: Tab }) {
-  useTitle(tab === "audit" ? "Audit history" : tab === "sites" ? "Research sites" : "Admin");
-  const tabs: [Tab, string, string][] = [["access", "Access", "/admin"], ["sites", "Research sites", "/admin/sites"], ["audit", "Audit history", "/admin/audit"]];
+  const T = S.admin.page;
+  useTitle(tab === "audit" ? T.tabs.audit : tab === "sites" ? T.tabs.sites : T.title);
+  const tabs: [Tab, string, string][] = [["access", T.tabs.access, "/admin"], ["sites", T.tabs.sites, "/admin/sites"], ["audit", T.tabs.audit, "/admin/audit"]];
   return (
     <div className="wrap page">
-      <h1>Admin</h1>
+      <h1>{T.heading}</h1>
       <nav className="tabs">{tabs.map(([k, l, h]) => <Link key={k} to={h} className={k === tab ? "on" : ""} aria-current={k === tab ? "page" : undefined}>{l}</Link>)}</nav>
       {tab === "audit" ? <>
-        <p className="muted">Every change to every tree and to the sharing settings, newest first: who made it (and on whose behalf), what changed and why. Select a row for the full detail.</p>
+        <p className="muted">{T.intro.audit}</p>
         <Audit />
       </> : tab === "sites" ? <>
-        <p className="muted">The genealogy sites every research agent works from. Agents prefer these, follow your notes on each, and for subscription or institution sites they can't sign in to, log the search as inconclusive and leave you a to-do. Switch a site off to stop pointing agents to it.</p>
+        <p className="muted">{T.intro.sites}</p>
         <Sites />
       </> : <>
-        <p className="muted">Who can see which tree, and how much of it. Signing in happens through Cloudflare Access; a person also needs a grant here, or they see nothing.</p>
+        <p className="muted">{T.intro.access}</p>
         <Access />
       </>}
     </div>

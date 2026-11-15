@@ -5,6 +5,7 @@ import { years } from "../../lib";
 import { STATUS_LABEL } from "../../tree";
 import { useBranchStyle } from "../../ui";
 import type { Branch, Event, Person, Tree } from "../../types";
+import { S } from "../../../../strings/index.ts";
 
 // Fields /api/tree carries that types.ts doesn't declare (yet).
 export type BEvent = Event & { placeKey?: string; misfiled?: boolean };
@@ -26,7 +27,7 @@ export function PCard({ p }: { p: BPerson }) {
   const bstyle = useBranchStyle();
   return (
     <Link className="p-card" to={`/person/${p.id}`} style={bstyle(p.branch)}>
-      <div><div className="nm">{p.name}</div><div className="sub">{years(p) || "dates unknown"}{p.relation ? ` · ${p.relation}` : ""}</div></div>
+      <div><div className="nm">{p.name}</div><div className="sub">{years(p) || S.browse.datesUnknown}{p.relation ? ` · ${p.relation}` : ""}</div></div>
       <span className={`badge st-${p.status}`} title={STATUS_LABEL[p.status || ""]} />
     </Link>
   );

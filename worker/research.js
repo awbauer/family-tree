@@ -2,6 +2,7 @@
 // are applied when an editor approves them. Validation mirrors tools/merge_research.py so local and web paths agree.
 
 import { J, now, audit, parse } from "./db.js";
+import { S } from "../strings/index.ts";
 
 export const RANK = { unverified: 0, "partly-verified": 1, verified: 2, disputed: 3 };
 const KINDS = new Set(["confirmed", "correction", "conflict", "data-error", "new-fact", "new-person"]);
@@ -43,65 +44,65 @@ export function dropMissing(b, visible) {
 
 /** Returns a list of error strings ([] = valid). `visible(id)` says whether a person is in the author's scope. */
 export function validateBatch(b, visible) {
-  const errs = [];
+  const errs = [], M = S.api.batch;
   const person = (pid, where, required = true) => {
-    if (!pid) { if (required) errs.push(`${where}: missing person`); }
-    else if (!visible(pid)) errs.push(`${where}: person ${JSON.stringify(pid)} is not in this tree`);
+    if (!pid) { if (required) errs.push(M.missingPerson(where)); }
+    else if (!visible(pid)) errs.push(M.personNotInTree(where, pid));
   };
   const sources = (srcs, where) => {
-    if (!srcs || !srcs.length) errs.push(`${where}: no sources. Every claim needs a citation`);
+    if (!srcs || !srcs.length) errs.push(M.noSources(where));
     (srcs || []).forEach((s, j) => {
-      if (!String(s.title || "").trim()) errs.push(`${where}.sources[${j}]: missing title`);
-      if (!String(s.url || "").trim() && !String(s.note || "").trim()) errs.push(`${where}.sources[${j}]: needs a url or a note saying where the record is`);
+      if (!String(s.title || "").trim()) errs.push(M.sourceTitle(where, j));
+      if (!String(s.url || "").trim() && !String(s.note || "").trim()) errs.push(M.sourceWhere(where, j));
     });
   };
-  if (!b || typeof b !== "object") return ["batch must be a JSON object"];
+  if (!b || typeof b !== "object") return [M.notObject];
   (b.findings || []).forEach((f, i) => {
     const w = `findings[${i}]`;
     person(f.person, w, f.kind !== "new-person");
-    if (!KINDS.has(f.kind)) errs.push(`${w}: kind must be one of ${[...KINDS].join(", ")}`);
-    if (!LEVELS.has(f.confidence)) errs.push(`${w}: confidence must be high, medium or low`);
-    if (!String(f.finding || "").trim()) errs.push(`${w}: empty finding`);
-    if (f.fact != null && !/^[en]\d+$/.test(String(f.fact))) errs.push(`${w}: fact must be a fact id like e3 (an event) or n1 (a name)`);
+    if (!KINDS.has(f.kind)) errs.push(M.findingKind(w, [...KINDS]));
+    if (!LEVELS.has(f.confidence)) errs.push(M.confidence(w));
+    if (!String(f.finding || "").trim()) errs.push(M.emptyFinding(w));
+    if (f.fact != null && !/^[en]\d+$/.test(String(f.fact))) errs.push(M.factId(w));
     if (f.proposed_ops != null) {
-      if (!Array.isArray(f.proposed_ops) || !f.proposed_ops.length || f.proposed_ops.some((o) => !o || typeof o.op !== "string")) errs.push(`${w}: proposed_ops must be a list of edit ops`);
-      else if (f.proposed_ops.some((o) => o.op === "person.delete")) errs.push(`${w}: proposed_ops may not delete people`);
+      if (!Array.isArray(f.proposed_ops) || !f.proposed_ops.length || f.proposed_ops.some((o) => !o || typeof o.op !== "string")) errs.push(M.proposedOps(w));
+      else if (f.proposed_ops.some((o) => o.op === "person.delete")) errs.push(M.proposedDelete(w));
     }
-    if (f.resolution) errs.push(`${w}: resolution is set by editors, not in research`);
+    if (f.resolution) errs.push(M.resolutionSet(w));
     sources(f.sources, w);
   });
   for (const [pid, st] of Object.entries(b.people_status || {})) {
     person(pid, `people_status[${pid}]`);
-    if (!(st && st.status in RANK)) errs.push(`people_status[${pid}]: status must be one of ${Object.keys(RANK).join(", ")}`);
+    if (!(st && st.status in RANK)) errs.push(M.peopleStatus(`people_status[${pid}]`, Object.keys(RANK)));
   }
   (b.stories || []).forEach((s, i) => {
     (s.people || []).forEach((p) => person(p, `stories[${i}]`));
     for (const m of String(s.body || "").matchAll(/\[\[([^|\]]+)/g)) person(m[1], `stories[${i}].body link`);
-    if (!String(s.title || "").trim()) errs.push(`stories[${i}]: missing title`);
+    if (!String(s.title || "").trim()) errs.push(M.missingTitle(`stories[${i}]`));
     sources(s.sources, `stories[${i}]`);
   });
   // revisions of existing stories (the content job proposes these when a story's facts change; web-only for now)
   (b.story_updates || []).forEach((s, i) => {
     const w = `story_updates[${i}]`;
-    if (!String(s.slug || "").trim()) errs.push(`${w}: missing slug`);
-    if (!String(s.body || "").trim()) errs.push(`${w}: empty body`);
+    if (!String(s.slug || "").trim()) errs.push(M.missingSlug(w));
+    if (!String(s.body || "").trim()) errs.push(M.emptyBody(w));
     (s.people || []).forEach((p) => person(p, w));
     for (const m of String(s.body || "").matchAll(/\[\[([^|\]]+)/g)) person(m[1], `${w}.body link`);
     // a revision carries the story's existing citations forward; it must keep some, but they were already accepted
-    if (!(s.sources || []).length) errs.push(`${w}: no sources. Keep the story's citations`);
+    if (!(s.sources || []).length) errs.push(M.keepCitations(w));
   });
   (b.todo || []).forEach((t, i) => {
     person(t.person, `todo[${i}]`, false);
-    if (!LEVELS.has(t.priority)) errs.push(`todo[${i}]: priority must be high, medium or low`);
-    if (!String(t.task || "").trim()) errs.push(`todo[${i}]: missing task`);
+    if (!LEVELS.has(t.priority)) errs.push(M.todoPriority(`todo[${i}]`));
+    if (!String(t.task || "").trim()) errs.push(M.missingTask(`todo[${i}]`));
   });
-  (b.todo_done || []).forEach((t, i) => { if (!t.id && !t.task) errs.push(`todo_done[${i}]: give the to-do id (or its task text)`); });
+  (b.todo_done || []).forEach((t, i) => { if (!t.id && !t.task) errs.push(M.todoDoneId(`todo_done[${i}]`)); });
   (b.log || []).forEach((l, i) => {
     person(l.person, `log[${i}]`, false);
-    if (!RESULTS.has(l.result)) errs.push(`log[${i}]: result must be found, nil or inconclusive`);
-    if (!String(l.searched || "").trim()) errs.push(`log[${i}]: say what was searched (collection, site, archive)`);
+    if (!RESULTS.has(l.result)) errs.push(M.logResult(`log[${i}]`));
+    if (!String(l.searched || "").trim()) errs.push(M.logSearched(`log[${i}]`));
   });
-  if (b.media) errs.push("media: photos are attached by the owner, not through research batches (yet)");
+  if (b.media) errs.push(M.noMedia);
   return errs;
 }
 

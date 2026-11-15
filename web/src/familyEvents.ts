@@ -1,7 +1,11 @@
 // Close-family events for a person's life events timeline: births, deaths and marriages of their parents, siblings
-// (full and half), spouses and children that happened during the person's lifetime. Pure: no React, no runtime
-// imports, so tests/family-events.test.mjs can load this file directly with Node's type stripping.
+// (full and half), spouses and children that happened during the person's lifetime. Pure: no React, and its only
+// runtime import is the strings catalog (plain erasable TypeScript), so tests/family-events.test.mjs can load this file
+// directly with Node's type stripping.
 import type { Tree } from "./types";
+import { S } from "../../strings/index.ts";
+
+const T = S.person.familyEvents;
 
 export interface FamilyEvent {
   /** "Sister born", "Husband died", "Son married", "Parents married". */
@@ -17,13 +21,7 @@ export interface FamilyEvent {
 
 type Role = "parent" | "sibling" | "half-sibling" | "spouse" | "child";
 
-const WORDS: Record<Role, [string, string, string]> = {
-  parent: ["Father", "Mother", "Parent"],
-  sibling: ["Brother", "Sister", "Sibling"],
-  "half-sibling": ["Half-brother", "Half-sister", "Half-sibling"],
-  spouse: ["Husband", "Wife", "Spouse"],
-  child: ["Son", "Daughter", "Child"],
-};
+const WORDS: Record<Role, readonly [string, string, string]> = T.words;
 /** The relation word, by the relative's recorded sex. */
 export const relationWord = (role: Role, sex?: string) => WORDS[role][sex === "M" ? 0 : sex === "F" ? 1 : 2];
 
@@ -73,8 +71,8 @@ export function familyEvents(D: Tree, id: string, now = new Date()): FamilyEvent
   for (const [x, r] of role) {
     const rp = P[x], word = relationWord(r, rp.sex);
     const b = sortOf(rp.birth), d = sortOf(rp.death);
-    if (inWindow(b)) push(`${word} born`, x, rp.birth, b);
-    if (inWindow(d)) push(`${word} died`, x, rp.death, d);
+    if (inWindow(b)) push(T.born(word), x, rp.birth, b);
+    if (inWindow(d)) push(T.died(word), x, rp.death, d);
   }
 
   // marriages: each family once; the person's own marriages are already their own events
@@ -89,8 +87,8 @@ export function familyEvents(D: Tree, id: string, now = new Date()): FamilyEvent
     for (const e of f.events || []) {
       if (e.type !== "Marriage" || !inWindow(sortOf(e))) continue;
       const bothParents = r === "parent" && partner && role.get(partner) === "parent";
-      if (bothParents) push("Parents married", null, e, e.sort as number);
-      else push(`${relationWord(r, P[x].sex)} married`, x, e, e.sort as number, visible(partner) ? partner : null);
+      if (bothParents) push(T.parentsMarried, null, e, e.sort as number);
+      else push(T.married(relationWord(r, P[x].sex)), x, e, e.sort as number, visible(partner) ? partner : null);
     }
   }
   return out.sort((a, b) => a.sort - b.sort);

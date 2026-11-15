@@ -3,6 +3,7 @@ import { Fragment, type ReactNode } from "react";
 import { Link } from "react-router";
 import { branchColor, isUnknown, years } from "../../lib";
 import { useBrowse } from "./shared";
+import { S } from "../../../../strings/index.ts";
 
 const R0 = 58, W = [0, 62, 62, 62, 70, 74];
 
@@ -33,7 +34,7 @@ export function FanChart({ rootId, gens }: { rootId: string; gens: number }) {
       const d = `M${x0},${y0} L${x1},${y1} A${r1},${r1} 0 0 1 ${x2},${y2} L${x3},${y3} A${r0},${r0} 0 0 0 ${x0},${y0} Z`;
       const p = id ? P[id] : undefined;
       const known = !!p && !isUnknown(p);
-      const fill = known ? `color-mix(in srgb, ${branchColor(p!.branch, branches)} ${92 - g * 12}%, var(--card))` : "var(--paper-2)";
+      const fill = known ? `color-mix(in srgb, ${branchColor(p!.branch, branches)} ${92 - g * 12}%, var(--card))` : "var(--paper-2)"; // strings-ok (CSS)
       const am = (a0 + a1) / 2, rm = (r0 + r1) / 2;
       let label: ReactNode = null;
       if (known) {
@@ -54,7 +55,7 @@ export function FanChart({ rootId, gens }: { rootId: string; gens: number }) {
             {txt.length > max ? txt.slice(0, max - 1) + "…" : txt}</text>;
         }
       }
-      const title = known ? `${p!.name} (${years(p)})` : "Unknown — research opportunity";
+      const title = known ? `${p!.name} (${years(p)})` : S.browse.fan.unknown;
       const shape = <><path d={d} style={{ fill }} stroke="var(--card)" strokeWidth="1.5"><title>{title}</title></path>{label}</>;
       const key = `${g}-${i}`;
       out.push(known ? <Link key={key} to={`/person/${id}`}>{shape}</Link> : <Fragment key={key}>{shape}</Fragment>);
@@ -63,7 +64,7 @@ export function FanChart({ rootId, gens }: { rootId: string; gens: number }) {
   const root = P[rootId];
   if (!root) return null;
   return (
-    <svg viewBox={`0 0 ${size * 2} ${size + 4}`} role="img" aria-label={`Fan chart of ${root.name}'s ancestors`} fontFamily="Inter, system-ui, sans-serif">
+    <svg viewBox={`0 0 ${size * 2} ${size + 4}`} role="img" aria-label={S.browse.fan.label(root.name)} fontFamily="Inter, system-ui, sans-serif">
       {out}
       <Link to={`/person/${rootId}`}>
         <circle cx={size} cy={size} r={R0} style={{ fill: "var(--accent)" }} />

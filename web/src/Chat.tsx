@@ -6,10 +6,12 @@ import { Link, useLocation } from "react-router";
 import { ApiError, store, useData } from "./data";
 import { Diff, OpText } from "./ops";
 import type { Tree } from "./types";
+import { S } from "../../strings/index.ts";
 
 const POLL_MS = 1000;
-const TOOL: Record<string, string> = { get_person: "Read", search_people: "Searched for", relationship_path: "Traced", person_history: "Read the history of", propose_change: "Drafted a change" };
-const HEAD: Record<string, string> = { pending: "Proposed change", applied: "Applied", dismissed: "Dismissed", superseded: "Replaced by a newer draft", failed: "Couldn't apply", undone: "Undone" };
+const T = S.common.chat;
+const TOOL: Record<string, string> = T.tools;
+const HEAD: Record<string, string> = T.heads;
 
 interface Change { id: number; status: string; summary: string; reason: string; sources?: { title?: string; url?: string }[]; ops: any[]; error?: string }
 interface Msg { role: "user" | "assistant" | "notice"; text?: string; parts?: any[] }
@@ -89,11 +91,11 @@ function ChatPanel({ D, api, tree }: { D: Tree; api: ReturnType<typeof useData>[
       const cur = stateRef.current;
       // never let a reply that went missing wipe what the editor just sent
       const lost = !r.busy && cur.messages.length > r.messages.length && !r.messages.some((m) => m.role !== "user");
-      next = { messages: lost ? [...cur.messages.filter((m) => m.role === "user"), { role: "notice", text: "The assistant didn't reply. Try again in a moment." }] : r.messages, changes: r.changes, busy: r.busy };
+      next = { messages: lost ? [...cur.messages.filter((m) => m.role === "user"), { role: "notice", text: T.noReply }] : r.messages, changes: r.changes, busy: r.busy };
     } catch (e) {
       const err = e as ApiError;
       if (err.status === 404 || err.status === 403) { chatId.current = null; store.set(key, null); next = EMPTY; }
-      else next = { ...stateRef.current, messages: [...stateRef.current.messages, { role: "notice", text: `Couldn't reach the assistant: ${err.message}` }] };
+      else next = { ...stateRef.current, messages: [...stateRef.current.messages, { role: "notice", text: T.unreachable(err.message) }] };
     }
     setState(next);
     if (next.busy && openRef.current) timer.current = window.setTimeout(load, POLL_MS);
@@ -131,7 +133,7 @@ function ChatPanel({ D, api, tree }: { D: Tree; api: ReturnType<typeof useData>[
       asked.current.add(ch.id);
       api<{ touched: any[] }>("POST", "edit/preview", { ops: ch.ops }).then(
         (r) => setPreviews((p) => ({ ...p, [ch.id]: <Diff changes={r.touched} /> })),
-        (e) => setPreviews((p) => ({ ...p, [ch.id]: <><span className="sev-error">This can't be applied as it stands: {e.message}</span><ol>{ch.ops.map((o, i) => <li key={i}><OpText o={o} /></li>)}</ol></> })),
+        (e) => setPreviews((p) => ({ ...p, [ch.id]: <><span className="sev-error">{T.cantApply(e.message)}</span><ol>{ch.ops.map((o, i) => <li key={i}><OpText o={o} /></li>)}</ol></> })),
       );
     }
   }, [state.changes, api]);
@@ -176,12 +178,12 @@ function ChatPanel({ D, api, tree }: { D: Tree; api: ReturnType<typeof useData>[
       <div key={`c${ch.id}`} className={`chat-change st-${st}`} data-change={ch.id}>
         <div className="small chat-change-head"><b>{HEAD[st] || st}</b> <span className="muted">#{ch.id}</span></div>
         <div className="chat-change-sum"><LinkIds text={ch.summary || ""} D={D} /></div>
-        <div className="small muted">Why: <LinkIds text={ch.reason || ""} D={D} />
-          {(ch.sources || []).length > 0 && <><br />Source: {(ch.sources || []).map((s, i) => <Fragment key={i}>{i > 0 && " · "}{s.url ? <a href={s.url} target="_blank" rel="noopener">{s.title || s.url}</a> : s.title}</Fragment>)}</>}</div>
-        {st === "pending" && <div className="chat-diff small">{previews[ch.id] ?? <span className="muted">Working out what would change…</span>}</div>}
+        <div className="small muted">{T.why}<LinkIds text={ch.reason || ""} D={D} />
+          {(ch.sources || []).length > 0 && <><br />{T.source}{(ch.sources || []).map((s, i) => <Fragment key={i}>{i > 0 && " · "}{s.url ? <a href={s.url} target="_blank" rel="noopener">{s.title || s.url}</a> : s.title}</Fragment>)}</>}</div>
+        {st === "pending" && <div className="chat-diff small">{previews[ch.id] ?? <span className="muted">{T.working}</span>}</div>}
         {ch.error && <div className="small sev-error">{ch.error}</div>}
-        {st === "pending" && <div className="btn-row"><button className="btn primary" disabled={off} onClick={() => decide(ch.id, "apply")}>Apply</button><button className="btn" disabled={off} onClick={() => decide(ch.id, "dismiss")}>Dismiss</button></div>}
-        {st === "applied" && <div className="btn-row"><button className="btn" disabled={off} onClick={() => decide(ch.id, "undo")}>Undo</button></div>}
+        {st === "pending" && <div className="btn-row"><button className="btn primary" disabled={off} onClick={() => decide(ch.id, "apply")}>{T.apply}</button><button className="btn" disabled={off} onClick={() => decide(ch.id, "dismiss")}>{T.dismiss}</button></div>}
+        {st === "applied" && <div className="btn-row"><button className="btn" disabled={off} onClick={() => decide(ch.id, "undo")}>{T.undo}</button></div>}
       </div>
     );
   }
@@ -202,35 +204,35 @@ function ChatPanel({ D, api, tree }: { D: Tree; api: ReturnType<typeof useData>[
   // drafts whose message has scrolled out of the window still need an answer
   for (const ch of state.changes) if (!shown.has(ch.id) && ch.status === "pending") items.push(changeCard(ch));
 
-  if (!open) return <button type="button" className="chat-fab" aria-label="Ask the assistant" onClick={() => setOpen(true)}><span aria-hidden="true">✦</span> Ask</button>;
+  if (!open) return <button type="button" className="chat-fab" aria-label={T.askLabel} onClick={() => setOpen(true)}><span aria-hidden="true">✦</span> {T.ask}</button>;
   return (
-    <section className="chat-panel" aria-label="Assistant" ref={panel}>
+    <section className="chat-panel" aria-label={T.title} ref={panel}>
       <header className="chat-head">
-        <b>Assistant</b>
-        <span className="small muted chat-where">{here ? `· on ${here.name}` : ""}</span>
-        <button type="button" className="icon-btn chat-new" title="Start a new conversation" onClick={() => { chatId.current = null; store.set(key, null); load(); ta.current?.focus(); }}>New</button>
-        <button type="button" className="icon-btn chat-close" aria-label="Close" onClick={() => setOpen(false)}>✕</button>
+        <b>{T.title}</b>
+        <span className="small muted chat-where">{here ? T.on(here.name) : ""}</span>
+        <button type="button" className="icon-btn chat-new" title={T.newTitle} onClick={() => { chatId.current = null; store.set(key, null); load(); ta.current?.focus(); }}>{T.new}</button>
+        <button type="button" className="icon-btn chat-close" aria-label={T.close} onClick={() => setOpen(false)}>✕</button>
       </header>
       <div className="chat-log" aria-live="polite" ref={log} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60; }}>
         {items}
-        {state.busy && <div className="chat-typing small muted" aria-label="The assistant is replying"><span></span><span></span><span></span></div>}
+        {state.busy && <div className="chat-typing small muted" aria-label={T.replying}><span></span><span></span><span></span></div>}
         {!items.length && !state.busy && (
-          <div className="chat-empty small muted"><p>Ask about the page you're on, or describe something that needs updating. For example:</p>
-            <ul><li>“What do we know about this person's parents?”</li><li>“She was a schoolteacher from about 1920; add that.”</li><li>“Make the second photo the main one.”</li></ul>
-            <p>The assistant drafts changes; you check each one and press Apply.</p></div>
+          <div className="chat-empty small muted"><p>{T.empty.intro}</p>
+            <ul>{T.empty.examples.map((x) => <li key={x}>{x}</li>)}</ul>
+            <p>{T.empty.outro}</p></div>
         )}
       </div>
       <form className="chat-form" onSubmit={(ev) => { ev.preventDefault(); const text = draft.trim(); if (text && !state.busy && !sending.current) send(text); }}>
-        <textarea ref={ta} name="text" rows={2} placeholder="Ask about this page, or describe a change…" aria-label="Message" value={draft}
+        <textarea ref={ta} name="text" rows={2} placeholder={T.placeholder} aria-label={T.message} value={draft}
           onChange={(e) => { setDraft(e.target.value); store.set(`${key}:draft`, e.target.value || null, sessionStorage); }}
           onKeyDown={(ev) => {
             if (ev.key === "Enter" && !ev.shiftKey && !ev.nativeEvent.isComposing) { ev.preventDefault(); ev.currentTarget.form?.requestSubmit(); }
             if (ev.key === "Escape") setOpen(false);
           }} />
         <div className="chat-actions">
-          <span className="small muted">Changes wait for your OK.</span>
-          {state.busy ? <button type="button" className="btn chat-stop" onClick={() => chatId.current && api("POST", `chat/${chatId.current}/abort`, {}).then(load, load)}>Stop</button>
-            : <button className="btn primary chat-send">Send</button>}
+          <span className="small muted">{T.waits}</span>
+          {state.busy ? <button type="button" className="btn chat-stop" onClick={() => chatId.current && api("POST", `chat/${chatId.current}/abort`, {}).then(load, load)}>{T.stop}</button>
+            : <button className="btn primary chat-send">{T.send}</button>}
         </div>
       </form>
     </section>

@@ -4,6 +4,9 @@ import { useLocation, useSearchParams } from "react-router";
 import { isUnknown, norm, useTitle } from "../lib";
 import { STATUS_LABEL } from "../tree";
 import { PCard, useBrowse, type BPerson } from "./browse/shared";
+import { S } from "../../../strings/index.ts";
+
+const T = S.browse.people;
 
 interface Filters { q: string; b: string; s: string; d: boolean }
 const fromParams = (ps: URLSearchParams): Filters => ({ q: ps.get("q") || "", b: ps.get("branch") || "", s: ps.get("status") || "", d: !!ps.get("direct") });
@@ -18,7 +21,7 @@ function toSearch(f: Filters) {
 }
 
 export function People() {
-  useTitle("People");
+  useTitle(T.title);
   const { people, branches } = useBrowse();
   const [params, setParams] = useSearchParams();
   const loc = useLocation();
@@ -53,25 +56,25 @@ export function People() {
 
   return (
     <div className="wrap page">
-      <h1>People</h1>
+      <h1>{T.title}</h1>
       <div className="filters">
-        <input id="pf-q" type="search" placeholder="Filter by name or place…" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} />
+        <input id="pf-q" type="search" placeholder={T.filter} value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} />
         <select id="pf-b" value={f.b} onChange={(e) => setF({ ...f, b: e.target.value })}>
-          <option value="">All branches</option>{branchOpts.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+          <option value="">{S.browse.filters.allBranches}</option>{branchOpts.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
         </select>
         <select id="pf-s" value={f.s} onChange={(e) => setF({ ...f, s: e.target.value })}>
-          <option value="">Any status</option>{Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          <option value="">{T.anyStatus}</option>{Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
-        <label className="small"><input id="pf-d" type="checkbox" checked={f.d} onChange={(e) => setF({ ...f, d: e.target.checked })} /> Direct ancestors only</label>
-        <span id="pf-n" className="muted small">{list.length} people</span>
+        <label className="small"><input id="pf-d" type="checkbox" checked={f.d} onChange={(e) => setF({ ...f, d: e.target.checked })} /> {S.browse.filters.directOnly}</label>
+        <span id="pf-n" className="muted small">{T.count(list.length)}</span>
       </div>
       <div id="pf-out">
         {groups.length ? groups.map((g, i) => (
           <Fragment key={`${i}-${g.surname}`}>
-            <div className="letter-head">{g.surname || "No surname"}</div>
+            <div className="letter-head">{g.surname || T.noSurname}</div>
             <div className="people-grid">{g.people.map((p) => <PCard key={p.id} p={p} />)}</div>
           </Fragment>
-        )) : <div className="empty">No one matches.</div>}
+        )) : <div className="empty">{T.none}</div>}
       </div>
     </div>
   );
