@@ -5,7 +5,15 @@
 
 export const DEFAULT_VIEW = { living: "full", research: true, notes: true, media: true, sources: true };
 
-function treeMembers(bundle, def) {
+/** The person a merged-away id became (following chains), or the id itself. */
+export function followAlias(aliases, id) {
+  const seen = new Set();
+  while (aliases && aliases[id] && !seen.has(id)) { seen.add(id); id = aliases[id]; }
+  return id;
+}
+
+/** The people a tree's definition takes in (before any view narrows it). */
+export function treeMembers(bundle, def) {
   const P = bundle.people;
   const branches = def.branches || ["*"];
   const all = branches.includes("*");
@@ -128,7 +136,8 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
   } else {
     Object.assign(research, { findings: [], todo: [], todo_done: [], research_log: [], people_status: {}, duplicates: [] });
   }
-  research.stories = (R0.stories || []).filter((s) => (s.people || []).every((x) => ids.has(x)));
+  // a story shows when everyone it's about is in scope; people merged since it was written count as who they became
+  research.stories = (R0.stories || []).filter((s) => (s.people || []).every((x) => ids.has(followAlias(full.aliases, x))));
   research.media = v.media ? Object.fromEntries(Object.entries(R0.media || {}).filter(([k]) => ids.has(k))) : {};
 
   // ---- 6. sources and GEDCOM media: only what visible people cite, plus sources nobody cites (so they can be
