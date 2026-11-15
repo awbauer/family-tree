@@ -81,7 +81,7 @@ function StaticTodos() {
   const todos: any[] = (D.research as any).todo || [];
   if (!todos.length) return <div className="empty">No tasks yet.</div>;
   return (
-    <div className="table-wrap"><table className="data"><thead><tr><th>Priority</th><th>Person</th><th>Task</th><th>Where to look</th></tr></thead><tbody>
+    <div className="table-wrap"><table className="data stack"><thead><tr><th>Priority</th><th>Person</th><th>Task</th><th>Where to look</th></tr></thead><tbody>
       {todos.slice().sort((a, b) => PRIORITY[a.priority] - PRIORITY[b.priority]).map((t, i) => (
         <tr key={t.id ?? i}><td className={`prio-${t.priority}`}>{t.priority}</td><td>{t.person && D.people[t.person] ? <PersonLink id={t.person} /> : "—"}</td><td>{t.task}</td><td className="small"><Linkify text={t.where || ""} /></td></tr>
       ))}

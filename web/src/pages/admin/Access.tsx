@@ -109,7 +109,7 @@ export function Access() {
   return (
     <div id="adm">
       <section className="card"><h2>People and access</h2>
-        <div className="table-wrap"><table className="data"><thead><tr><th>Who</th><th>Tree</th><th>Role</th><th>View</th><th></th></tr></thead><tbody>
+        <div className="table-wrap"><table className="data stack"><thead><tr><th>Who</th><th>Tree</th><th>Role</th><th>View</th><th></th></tr></thead><tbody>
           {principals.flatMap((pr) => {
             const gs = a.grants.filter((g: any) => g.principal === pr), m = members[pr] || {};
             const label = <>{m.display_name || pr}{m.is_owner && <> <span className="badge st-verified">owner</span></>}{m.kind === "agent" ? " 🤖" : ""}{m.person_id && D.people[m.person_id] && <><br /><span className="small muted">is <PersonLink id={m.person_id} /></span></>}</>;

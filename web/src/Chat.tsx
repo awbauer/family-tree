@@ -76,6 +76,7 @@ function ChatPanel({ D, api, tree }: { D: Tree; api: ReturnType<typeof useData>[
   const log = useRef<HTMLDivElement>(null);
   const ta = useRef<HTMLTextAreaElement>(null);
   const stick = useRef(true);
+  const panel = useRef<HTMLElement>(null);
 
   const note = (text: string) => setState((s) => ({ ...s, messages: [...s.messages, { role: "notice", text }] }));
 
@@ -103,6 +104,25 @@ function ChatPanel({ D, api, tree }: { D: Tree; api: ReturnType<typeof useData>[
     if (open) { ta.current?.focus(); load(); } else clearTimeout(timer.current);
     return () => clearTimeout(timer.current);
   }, [open, load]);
+
+  // on phones the panel is a full-screen sheet: keep it to the part of the screen the on-screen keyboard leaves
+  // visible, and stop the page behind it from scrolling
+  useEffect(() => {
+    if (!open) return;
+    const root = document.documentElement, vv = window.visualViewport;
+    root.classList.add("chat-open");
+    const fit = () => {
+      const el = panel.current;
+      if (!el || !vv) return;
+      el.style.setProperty("--chat-top", `${vv.offsetTop}px`);
+      el.style.setProperty("--chat-h", `${vv.height}px`);
+      if (stick.current && log.current) log.current.scrollTop = log.current.scrollHeight;
+    };
+    fit();
+    vv?.addEventListener("resize", fit);
+    vv?.addEventListener("scroll", fit);
+    return () => { root.classList.remove("chat-open"); vv?.removeEventListener("resize", fit); vv?.removeEventListener("scroll", fit); };
+  }, [open]);
 
   // work out what each pending draft would change
   useEffect(() => {
@@ -184,7 +204,7 @@ function ChatPanel({ D, api, tree }: { D: Tree; api: ReturnType<typeof useData>[
 
   if (!open) return <button type="button" className="chat-fab" aria-label="Ask the assistant" onClick={() => setOpen(true)}><span aria-hidden="true">✦</span> Ask</button>;
   return (
-    <section className="chat-panel" aria-label="Assistant">
+    <section className="chat-panel" aria-label="Assistant" ref={panel}>
       <header className="chat-head">
         <b>Assistant</b>
         <span className="small muted chat-where">{here ? `· on ${here.name}` : ""}</span>
