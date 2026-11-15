@@ -114,6 +114,11 @@ function startFamilyApp(D) {
   const findingsFor = (id) => (R.findings || []).filter((f) => f.person === id);
   const todosFor = (id) => (R.todo || []).filter((t) => t.person === id);
   const storiesFor = (id) => (R.stories || []).filter((s) => (s.people || []).includes(id));
+  // people a story links in its text ([[I12|…]]), with merged-away ids followed to the person they became
+  const ALIAS = D.aliases || {};
+  const linkedIn = (s) => new Set([...String(s.body || "").matchAll(/\[\[(I[\w-]+)/g)].map((m) => ALIAS[m[1]] || m[1]));
+  /** Stories that mention this person in their text without being about them. */
+  const mentionsFor = (id) => (R.stories || []).filter((s) => !(s.people || []).includes(id) && linkedIn(s).has(id));
   function apidLink(apid) {
     const m = /^\d+,(\d+)::(\d+)$/.exec(apid || "");
     if (!m || m[2] === "0") return "";
@@ -376,6 +381,7 @@ function startFamilyApp(D) {
     const findings = findingsFor(id).slice().sort((a, b) => (a.resolution ? 1 : 0) - (b.resolution ? 1 : 0));
     const todos = todosFor(id);
     const stories = storiesFor(id);
+    const mentions = mentionsFor(id);
     const media = (R.media || {})[id] || [];
     const portrait = media.find((m) => m.portrait) || media[0];
     const alt = p.names.slice(1).map((n) => `${n.given} ${n.surname}`.trim()).filter((n) => n && n !== p.name);
@@ -476,7 +482,8 @@ function startFamilyApp(D) {
           ${miniPedigree(id)}
         </aside>
         <div>
-          ${stories.length ? `<div class="grid g2" style="margin-bottom:20px">${stories.map(storyCard).join("")}</div>` : ""}
+          ${stories.length ? `<div class="grid g2" style="margin-bottom:${mentions.length ? 10 : 20}px">${stories.map(storyCard).join("")}</div>` : ""}
+          ${mentions.length ? `<p class="small story-mentions" style="margin:0 0 20px"><span class="muted">${stories.length ? "Also mentioned in" : "Mentioned in"}</span> ${mentions.map((s) => `<a href="#/story/${esc(s.slug)}">${esc(s.title)}</a>${s.era ? ` <span class="muted">(${esc(s.era)})</span>` : ""}`).join(" · ")}</p>` : ""}
           ${p.profile || (AI && !p.living) ? `<section class="card profile" style="margin-bottom:20px"><h2>Profile</h2>
             ${p.profile ? `<p class="prose">${esc(p.profile.text)}</p><p class="small muted">Written by AI from the recorded facts on ${esc(p.profile.generated_at.slice(0, 10))}, and rewritten when they change. It can be wrong: the events and sources below are the record.</p>` : `<p class="small muted">No profile yet. Profiles are written by AI from the recorded facts.</p>`}
             ${AI && !p.living ? `<button class="btn" id="profile-refresh">${p.profile ? "Rewrite now" : "Write one now"}</button>` : ""}</section>` : ""}
