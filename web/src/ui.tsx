@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { useData } from "./data";
 import { PersonLink, branchColor } from "./lib";
 import { FINDING_KINDS, STATUS_LABEL, whoText } from "./tree";
+import { S } from "../../strings/index.ts";
 
 export function StatusBadge({ status, note }: { status?: string; note?: string }) {
   if (!status) return null;
@@ -55,12 +56,12 @@ export function Finding({ f, here, children }: { f: any; here?: string; children
     <div className={`finding${res ? " f-closed" : ""}`} data-finding={f.id != null ? f.id : undefined}>
       <div className="f-head">
         <span className={`f-kind k-${f.kind}`}>{FINDING_KINDS[f.kind] || f.kind}</span>
-        {res && elsewhere && <span className={`badge st-${res.status === "resolved" ? "verified" : "unverified"}`}>{res.status === "resolved" ? "resolved" : "kept as is"}</span>}
+        {res && elsewhere && <span className={`badge st-${res.status === "resolved" ? "verified" : "unverified"}`}>{res.status === "resolved" ? S.common.finding.resolved : S.common.finding.keptAsIs}</span>}
         {f.field && <span className="chip">{f.field}</span>}
-        <span className={`conf-${f.confidence}`}>● {f.confidence} confidence</span>
+        <span className={`conf-${f.confidence}`}>{S.common.finding.confidence(f.confidence)}</span>
         {f.person && D.people[f.person] && elsewhere ? <> · <PersonLink id={f.person} /></> : f.personName && !f.person ? <> · {f.personName}</> : null}
       </div>
-      {f.claim && <div className="f-claim">Tree says: {f.claim}</div>}
+      {f.claim && <div className="f-claim">{S.common.finding.treeSays(f.claim)}</div>}
       <div>{f.finding}</div>
       {(f.sources || []).length > 0 && (
         <div className="f-src">{f.sources.map((s: any, i: number) => (

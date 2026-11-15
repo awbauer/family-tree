@@ -5,6 +5,9 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { branchColor, useTitle, years } from "../lib";
 import { byBirth, homeFirst, spousesOf } from "../tree";
 import { useBrowse, type BTree } from "./browse/shared";
+import { S } from "../../../strings/index.ts";
+
+const T = S.browse.tree;
 
 const BW = 210, BH = 54, HG = 70, VG = 14;
 const ST_COLOR: Record<string, string> = { verified: "var(--ok)", "partly-verified": "var(--info)", disputed: "var(--err)", unverified: "var(--line)" };
@@ -24,8 +27,8 @@ function layout(D: BTree, root: string, mode: "anc" | "desc", gens: number) {
       if (fid && F[fid] && g < gens - 1) { fa = F[fid].husband || null; mo = F[fid].wife || null; hasFam = true; }
       const kids: Node[] = [];
       if (hasFam) {
-        kids.push(fa ? place(fa, g + 1) : place(null, g + 1, "Unknown father"));
-        kids.push(mo ? place(mo, g + 1) : place(null, g + 1, "Unknown mother"));
+        kids.push(fa ? place(fa, g + 1) : place(null, g + 1, T.unknownFather));
+        kids.push(mo ? place(mo, g + 1) : place(null, g + 1, T.unknownMother));
       }
       if (kids.length) n.y = (kids[0].y + kids[1].y) / 2;
       else { n.y = next * (BH + VG); next++; }
@@ -65,7 +68,7 @@ export function TreeChart() {
   const mode = params.get("mode") === "desc" ? "desc" : "anc";
   const gens = Math.max(2, Math.min(8, +(params.get("g") || 0) || (mode === "anc" ? 5 : 4)));
   const p = P[root];
-  useTitle("Tree · " + p.name);
+  useTitle(T.title(p.name));
   const { nodes, links, bbox } = useMemo(() => layout(D, root, mode, gens), [D, root, mode, gens]);
 
   const canvasRef = useRef<HTMLDivElement>(null), gRef = useRef<SVGGElement>(null), zoomRef = useRef<HTMLDivElement>(null);
@@ -77,7 +80,7 @@ export function TreeChart() {
   useEffect(() => {
     const canvas = canvasRef.current!, g = gRef.current!, zoomEl = zoomRef.current!;
     let t = { x: 0, y: 0, k: 1 };
-    const apply = () => g.setAttribute("transform", `translate(${t.x},${t.y}) scale(${t.k})`);
+    const apply = () => g.setAttribute("transform", `translate(${t.x},${t.y}) scale(${t.k})`); // strings-ok (an SVG transform)
     const fit = () => {
       const r = canvas.getBoundingClientRect();
       const k = Math.min(1.15, (r.width - 40) / bbox.w, (r.height - 90) / bbox.h);
@@ -146,14 +149,14 @@ export function TreeChart() {
     <div className="tree-page">
       <div className="tree-bar">
         <span className="who">{p.name} <span className="muted small">{years(p)}</span></span>
-        <div className="seg" role="group" aria-label="Tree type">
-          <button data-mode="anc" className={mode === "anc" ? "on" : ""} onClick={() => navigate(qs("anc", 5))}>Ancestors</button>
-          <button data-mode="desc" className={mode === "desc" ? "on" : ""} onClick={() => navigate(qs("desc", 4))}>Descendants</button>
+        <div className="seg" role="group" aria-label={T.type}>
+          <button data-mode="anc" className={mode === "anc" ? "on" : ""} onClick={() => navigate(qs("anc", 5))}>{T.ancestors}</button>
+          <button data-mode="desc" className={mode === "desc" ? "on" : ""} onClick={() => navigate(qs("desc", 4))}>{T.descendants}</button>
         </div>
-        <div className="seg" role="group" aria-label="Generations">
+        <div className="seg" role="group" aria-label={T.generations}>
           {[3, 4, 5, 6, 7].map((g) => <button key={g} data-g={g} className={g === gens ? "on" : ""} onClick={() => navigate(qs(mode, g))}>{g}</button>)}
         </div>
-        <Link className="btn" to={`/person/${root}`}>Profile →</Link>
+        <Link className="btn" to={`/person/${root}`}>{T.profile}</Link>
         {root !== HOME && <Link className="btn" to={`/tree/${HOME}${mode === "desc" ? "?mode=desc" : ""}`}>↺ {homeFirst(D)}</Link>}
       </div>
       <div className="tree-canvas" id="tc" ref={canvasRef}>
@@ -179,7 +182,7 @@ export function TreeChart() {
                 <rect width="5" height={h - 12} x="0" y="6" rx="2" style={{ fill: branchColor(q.branch, branches) }} />
                 <circle cx={BW - 12} cy="12" r="4" style={{ fill: ST_COLOR[q.status || ""] }} />
                 <text className="nm" x="14" y="22">{clip(q.name, 26)}</text>
-                <text className="yr" x="14" y="39">{(years(q) || "dates unknown") + place}</text>
+                <text className="yr" x="14" y="39">{(years(q) || S.browse.datesUnknown) + place}</text>
                 {sp.slice(0, 2).map((s, j) => <text key={j} className="yr" x="14" y={54 + j * 16}>{clip("⚭ " + P[s].name, 30)}</text>)}
                 {sp.length > 2 && <text className="yr" x={BW - 30} y="70">+{sp.length - 2}</text>}
               </g>
@@ -187,12 +190,12 @@ export function TreeChart() {
           })}
         </g></svg>
         <div className="tree-zoom" ref={zoomRef}>
-          <button data-z="in" aria-label="Zoom in" onClick={(e) => { e.stopPropagation(); ctl.current?.zoom(1.25); }}>+</button>
-          <button data-z="out" aria-label="Zoom out" onClick={(e) => { e.stopPropagation(); ctl.current?.zoom(0.8); }}>−</button>
-          <button data-z="fit" aria-label="Fit" onClick={(e) => { e.stopPropagation(); ctl.current?.fit(); }}>⤢</button>
+          <button data-z="in" aria-label={T.zoomIn} onClick={(e) => { e.stopPropagation(); ctl.current?.zoom(1.25); }}>+</button>
+          <button data-z="out" aria-label={T.zoomOut} onClick={(e) => { e.stopPropagation(); ctl.current?.zoom(0.8); }}>−</button>
+          <button data-z="fit" aria-label={T.fit} onClick={(e) => { e.stopPropagation(); ctl.current?.fit(); }}>⤢</button>
         </div>
         <div className="tree-legend">{(D.research.branches || []).map((b) => <span key={b.key}><i style={{ background: branchColor(b.key, branches) }} />{b.label}</span>)}
-          <span className="muted hint-mouse">Click a person to re-centre · drag to pan · scroll to zoom</span><span className="muted hint-touch">Tap a person to re-centre · drag to pan · pinch to zoom</span></div>
+          <span className="muted hint-mouse">{T.hintMouse}</span><span className="muted hint-touch">{T.hintTouch}</span></div>
       </div>
     </div>
   );

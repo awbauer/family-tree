@@ -4,8 +4,12 @@ import { Link, NavLink, useLocation, useNavigate } from "react-router";
 import { store, useData } from "./data";
 import { Chat } from "./Chat";
 import { isUnknown, norm, useSite, years } from "./lib";
+import { S } from "../../strings/index.ts";
 
-const NAV: [string, string][] = [["/tree", "Tree"], ["/people", "People"], ["/stories", "Stories"], ["/map", "Map"], ["/timeline", "Timeline"], ["/research", "Research"]];
+const T = S.common.shell;
+
+const N = S.common.nav;
+const NAV: [string, string][] = [["/tree", N.tree], ["/people", N.people], ["/stories", N.stories], ["/map", N.map], ["/timeline", N.timeline], ["/research", N.research]];
 
 /** Per-branch colours from the tree's config, as CSS variables (light and dark). */
 function BranchColors() {
@@ -13,7 +17,7 @@ function BranchColors() {
   const css = useMemo(() => {
     const bs = D.research.branches || [];
     const light = bs.map((b) => `--b-${b.key}:${b.color || "#888"};`).join("");
-    const dark = bs.map((b) => `--b-${b.key}:${b.colorDark || `color-mix(in srgb, ${b.color || "#888"} 62%, white)`};`).join("");
+    const dark = bs.map((b) => `--b-${b.key}:${b.colorDark || `color-mix(in srgb, ${b.color || "#888"} 62%, white)`};`).join(""); // strings-ok (CSS)
     return `:root{${light}}@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){${dark}}}:root[data-theme="dark"]{${dark}}`;
   }, [D]);
   return <style>{css}</style>;
@@ -39,7 +43,7 @@ function Search() {
   const go = (id: string) => { setQ(""); setOpen(false); setSel(-1); navigate(`/person/${id}`); };
   return (
     <div className="search" ref={box}>
-      <input id="search" type="search" placeholder="Search people…" autoComplete="off" aria-label="Search people" value={q}
+      <input id="search" type="search" placeholder={T.search.placeholder} autoComplete="off" aria-label={T.search.label} value={q}
         onChange={(e) => { setQ(e.target.value); setOpen(true); setSel(-1); }}
         onKeyDown={(e) => {
           if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setSel((s) => Math.max(0, Math.min(hits.length - 1, s + (e.key === "ArrowDown" ? 1 : -1)))); }
@@ -50,16 +54,16 @@ function Search() {
         {hits.length ? hits.map((p, i) => (
           <li key={p.id}><Link to={`/person/${p.id}`} className={i === sel ? "sel" : ""} onClick={() => { setQ(""); setOpen(false); }}>
             {p.name}<span className="sr-meta">{years(p)} · {p.relation || (branches[p.branch || ""] || {}).label || ""}</span></Link></li>
-        )) : <li className="muted small" style={{ padding: 8 }}>No matches</li>}
+        )) : <li className="muted small" style={{ padding: 8 }}>{T.search.noMatches}</li>}
       </ul>
     </div>
   );
 }
 
 function ThemeToggle() {
-  return <button id="theme" className="icon-btn" aria-label="Toggle dark mode" title="Toggle dark mode" onClick={() => {
+  return <button id="theme" className="icon-btn" aria-label={T.theme} title={T.theme} onClick={() => {
     const root = document.documentElement;
-    const cur = root.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const cur = root.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); // strings-ok (a media query)
     const next = cur === "dark" ? "light" : "dark";
     root.dataset.theme = next;
     store.set("theme", next);
@@ -70,7 +74,7 @@ function ThemeToggle() {
 function TreeSwitch() {
   const { account, tree } = useData();
   if (!account || account.trees.length < 2) return null;
-  return <select className="tree-switch" aria-label="Family tree" value={tree || ""} onChange={(e) => { store.set("tree", e.target.value); location.reload(); }}>
+  return <select className="tree-switch" aria-label={T.treeSwitch} value={tree || ""} onChange={(e) => { store.set("tree", e.target.value); location.reload(); }}>
     {account.trees.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
   </select>;
 }
@@ -78,8 +82,8 @@ function TreeSwitch() {
 function PreviewBar() {
   const { D } = useData();
   if (!D.previewView) return null;
-  return <div className="preview-bar">Previewing what someone with the view <b>{D.previewView}</b> sees.{" "}
-    <button className="btn" onClick={() => { store.set("previewView", null, sessionStorage); location.reload(); }}>Exit preview</button></div>;
+  return <div className="preview-bar">{T.preview.before}<b>{D.previewView}</b>{T.preview.after}{" "}
+    <button className="btn" onClick={() => { store.set("previewView", null, sessionStorage); location.reload(); }}>{T.preview.exit}</button></div>;
 }
 
 export function Shell({ children }: { children: ReactNode }) {
@@ -94,17 +98,17 @@ export function Shell({ children }: { children: ReactNode }) {
     <>
       <BranchColors />
       <PreviewBar />
-      <a className="skip" href="#app" onClick={(e) => { e.preventDefault(); main.current?.focus(); }}>Skip to content</a>
+      <a className="skip" href="#app" onClick={(e) => { e.preventDefault(); main.current?.focus(); }}>{T.skip}</a>
       <header className="site-header">
         <div className="wrap header-inner">
           <Link className="brand" to="/">
             <span className="brand-mark" aria-hidden="true">{site.mark || site.familyName.replace(/^The /, "")[0] || "F"}</span>
-            <span className="brand-text">{family} <em>Family History</em></span>
+            <span className="brand-text">{family} <em>{T.brand}</em></span>
           </Link>
-          <button className="nav-toggle" aria-label="Menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>☰</button>
-          <nav className={`site-nav${menu ? " open" : ""}`} aria-label="Main">
+          <button className="nav-toggle" aria-label={T.menu} aria-expanded={menu} onClick={() => setMenu((m) => !m)}>☰</button>
+          <nav className={`site-nav${menu ? " open" : ""}`} aria-label={T.mainNav}>
             {NAV.map(([to, label]) => <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "active" : "")}>{label}</NavLink>)}
-            {account && account.isOwner && <NavLink to="/admin" className={({ isActive }) => (isActive ? "active" : "")}>Admin</NavLink>}
+            {account && account.isOwner && <NavLink to="/admin" className={({ isActive }) => (isActive ? "active" : "")}>{N.admin}</NavLink>}
             <TreeSwitch />
           </nav>
           <Search />
@@ -115,8 +119,8 @@ export function Shell({ children }: { children: ReactNode }) {
       <Chat />
       <footer className="site-footer">
         <div className="wrap">
-          <span id="footer-meta">{people.length} people · data built {D.generated}</span>
-          <Link to="/about">How this site works</Link>
+          <span id="footer-meta">{T.footer.meta(people.length, D.generated)}</span>
+          <Link to="/about">{T.footer.about}</Link>
         </div>
       </footer>
     </>

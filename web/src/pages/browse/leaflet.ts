@@ -1,4 +1,5 @@
 // Leaflet, loaded from cdnjs the first time the map is opened. Kept on window.L, so it is only ever loaded once.
+import { S } from "../../../../strings/index.ts";
 declare global { interface Window { L?: any } }
 
 let loading: Promise<any> | null = null;
@@ -12,7 +13,7 @@ export function loadLeaflet(): Promise<any> {
     const s = document.createElement("script");
     s.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
     s.onload = () => res(window.L);
-    s.onerror = () => { loading = null; css.remove(); s.remove(); rej(new Error("Leaflet didn't load")); };
+    s.onerror = () => { loading = null; css.remove(); s.remove(); rej(new Error(S.browse.map.leafletFailed)); };
     document.head.appendChild(s);
   });
   return loading;

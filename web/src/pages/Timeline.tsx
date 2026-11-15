@@ -5,12 +5,15 @@ import { branchColor, PersonLink, useTitle } from "../lib";
 import { eventLabel, spousesOf } from "../tree";
 import { useBranchStyle } from "../ui";
 import { useBrowse, type ContextRow } from "./browse/shared";
+import { S } from "../../../strings/index.ts";
+
+const T = S.browse.timeline;
 
 const TYPES = new Set(["Birth", "Death", "Arrival", "Marriage", "Military", "NaturalizationPetition"]);
 interface Row { sort: number; date?: string; body: ReactNode; br?: string; ctx?: boolean }
 
 export function Timeline() {
-  useTitle("Timeline");
+  useTitle(T.title);
   const { D, people, branches } = useBrowse();
   const bstyle = useBranchStyle();
   const [params] = useSearchParams();
@@ -30,7 +33,7 @@ export function Timeline() {
         if (seenFam.has(fam.id)) continue;
         seenFam.add(fam.id);
         for (const e of fam.events || []) if (e.sort && e.type === "Marriage")
-          rows.push({ sort: e.sort, date: e.dateDisplay, body: <><PersonLink id={p.id} /> married {spouse ? <PersonLink id={spouse} /> : "?"}{e.place ? `, ${e.place}` : ""}</>, br: p.branch });
+          rows.push({ sort: e.sort, date: e.dateDisplay, body: <><PersonLink id={p.id} />{T.married}{spouse ? <PersonLink id={spouse} /> : "?"}{e.place ? `, ${e.place}` : ""}</>, br: p.branch });
       }
     }
     for (const c of ((D.research as any).context || []) as ContextRow[])
@@ -40,15 +43,15 @@ export function Timeline() {
 
   let dec: number | null = null;
   return (
-    <div className="wrap page"><h1>Timeline</h1>
+    <div className="wrap page"><h1>{T.title}</h1>
       <div className="filters"><div className="seg">
-        <button data-s="direct" className={scope === "direct" ? "on" : ""} onClick={() => navigate("/timeline?scope=direct")}>Direct ancestors</button>
-        <button data-s="all" className={scope === "all" ? "on" : ""} onClick={() => navigate("/timeline?scope=all")}>Everyone</button>
+        <button data-s="direct" className={scope === "direct" ? "on" : ""} onClick={() => navigate("/timeline?scope=direct")}>{T.direct}</button>
+        <button data-s="all" className={scope === "all" ? "on" : ""} onClick={() => navigate("/timeline?scope=all")}>{T.everyone}</button>
       </div>
-        <span className="small muted">Shaded rows are historical context.</span></div>
+        <span className="small muted">{T.hint}</span></div>
       {rows.map((r, i) => {
         const d = Math.floor(r.sort / 100000) * 10;
-        const head = d !== dec ? <div className="decade">{d}s</div> : null;
+        const head = d !== dec ? <div className="decade">{T.decade(d)}</div> : null;
         dec = d;
         return (
           <Fragment key={i}>

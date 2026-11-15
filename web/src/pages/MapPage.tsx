@@ -7,8 +7,11 @@ import { useTitle } from "../lib";
 import { eventLabel } from "../tree";
 import { useBrowse, type BEvent, type BPerson } from "./browse/shared";
 import { loadLeaflet } from "./browse/leaflet";
+import { S } from "../../../strings/index.ts";
 
-const isDark = () => (document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
+const T = S.browse.map;
+
+const isDark = () => (document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark"; // strings-ok (a media query)
 const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#888";
 
 /** A DOM element with text (Leaflet popups and tooltips take elements; text is never parsed as HTML). */
@@ -19,7 +22,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEl
 }
 
 export function MapPage() {
-  useTitle("Map");
+  useTitle(T.title);
   const { D, people } = useBrowse();
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
@@ -98,7 +101,7 @@ export function MapPage() {
         a.addEventListener("click", (ev) => { ev.preventDefault(); nav.current(`/person/${p.id}`); });
         return el("li", {}, a, ` — ${eventLabel(e).toLowerCase()}${e.dateDisplay ? " " + e.dateDisplay : ""}`);
       });
-      m.bindPopup(el("div", {}, el("h4", {}, pl.name), el("div", { className: "small muted" }, `${uniq.length} people · ${evs.length} events`), el("ul", {}, ...rows)));
+      m.bindPopup(el("div", {}, el("h4", {}, pl.name), el("div", { className: "small muted" }, T.place(uniq.length, evs.length)), el("ul", {}, ...rows)));
       m.addTo(layer);
       pts.push([pl.lat, pl.lng]);
     }
@@ -122,16 +125,16 @@ export function MapPage() {
   return (
     <>
       <div className="map-bar">
-        <strong style={{ fontFamily: "var(--serif)", fontSize: "1.1rem", marginRight: "auto" }}>Where the family lived</strong>
+        <strong style={{ fontFamily: "var(--serif)", fontSize: "1.1rem", marginRight: "auto" }}>{T.heading}</strong>
         <select id="mb" value={branch} onChange={(e) => setBranch(e.target.value)}>
-          <option value="">All branches</option>{(D.research.branches || []).map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+          <option value="">{S.browse.filters.allBranches}</option>{(D.research.branches || []).map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
         </select>
-        <label className="small"><input type="checkbox" id="md" checked={direct} onChange={(e) => setDirect(e.target.checked)} /> Direct ancestors only</label>
-        <label className="small"><input type="checkbox" id="mj" checked={journeys} onChange={(e) => setJourneys(e.target.checked)} /> Show journeys</label>
+        <label className="small"><input type="checkbox" id="md" checked={direct} onChange={(e) => setDirect(e.target.checked)} /> {S.browse.filters.directOnly}</label>
+        <label className="small"><input type="checkbox" id="mj" checked={journeys} onChange={(e) => setJourneys(e.target.checked)} /> {T.journeys}</label>
       </div>
       <div id="map" ref={mapEl}>
-        {status === "loading" && <div className="empty" style={{ margin: 40 }}>Loading map…</div>}
-        {status === "error" && <div className="empty" style={{ margin: 40 }}>The map library could not be loaded (offline?).</div>}
+        {status === "loading" && <div className="empty" style={{ margin: 40 }}>{T.loading}</div>}
+        {status === "error" && <div className="empty" style={{ margin: 40 }}>{T.failed}</div>}
       </div>
     </>
   );
