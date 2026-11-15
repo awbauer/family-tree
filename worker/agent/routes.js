@@ -46,7 +46,7 @@ const runOut = (r) => {
   id: r.id, kind: r.kind || "research", tree: r.tree_id, todo_id: r.todo_id, person: r.person_id, started_by: r.started_by, instructions: r.instructions,
   options: opts ? { ...opts, items: undefined, count: (opts.items || []).length } : undefined,
   report: r.report ? parse(r.report, []) : undefined, summary: (parse(r.result, {}) || {}).summary,
-  status: r.status, steps: r.steps, tokens: { input: r.input_tokens, output: r.output_tokens }, model: r.model,
+  status: r.status, steps: r.steps, tokens: { input: r.input_tokens, output: r.output_tokens }, usd: r.cost_usd || 0, model: r.model,
   log: parse(r.log, []), proposals: parse(r.proposal_ids, []), error: r.error,
   created_at: r.created_at, started_at: r.started_at, finished_at: r.finished_at,
   };
@@ -121,8 +121,8 @@ export async function listRuns(c, { grantOrFail }) {
   const s = settings(c.env);
   return json({
     runs: rows.filter((r) => !person || r.person_id === person).map(runOut),
-    today: u && { runs: u.runs, tokens: u.input_tokens + u.output_tokens },
-    limits: { runs_per_day: s.maxRunsPerDay, tokens_per_day: s.dailyTokens, searches_per_run: s.maxSearches, minutes_per_run: s.maxMinutes, model: s.model },
+    today: u && { runs: u.runs, usd: u.cost_usd || 0, tokens: u.input_tokens + u.output_tokens },
+    limits: { runs_per_day: s.maxRunsPerDay, usd_per_day: s.dailyUsd, usd_per_run: s.runUsd, searches_per_run: s.maxSearches, minutes_per_run: s.maxMinutes, agents: s.agents },
   });
 }
 

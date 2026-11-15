@@ -31,7 +31,7 @@ app.use("*", async (c, next) => {
   await next();
 });
 
-app.get("/health", (c) => c.json({ ok: true, model: S.model }));
+app.get("/health", (c) => c.json({ ok: true, agents: S.agents }));
 app.route(RESEARCHER_PATH, createAgentRouter(Researcher));
 app.route(CHAT_PATH, createAgentRouter(Assistant));
 app.route(QUALITY_PATH, createAgentRouter(QualityReviewer));

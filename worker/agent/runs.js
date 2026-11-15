@@ -64,10 +64,10 @@ export async function recordUsed(env, id, item) {
 }
 
 /** Record a response's token use on the run and in today's budget. */
-export async function recordRunUsage(env, id, { input, output }, model) {
+export async function recordRunUsage(env, id, { input, output, cost = 0 }, model) {
   await env.DB.batch([
-    env.DB.prepare("UPDATE agent_runs SET steps = steps + 1, input_tokens = input_tokens + ?, output_tokens = output_tokens + ?, model = COALESCE(?, model) WHERE id = ?").bind(input, output, model || null, id),
-    recordUsage(env, { input, output }),
+    env.DB.prepare("UPDATE agent_runs SET steps = steps + 1, input_tokens = input_tokens + ?, output_tokens = output_tokens + ?, cost_usd = cost_usd + ?, model = COALESCE(?, model) WHERE id = ?").bind(input, output, cost, model || null, id),
+    recordUsage(env, { input, output, cost }),
   ]);
 }
 

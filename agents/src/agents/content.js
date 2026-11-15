@@ -6,7 +6,7 @@
 import { env } from "cloudflare:workers";
 import { useAgentFinish, useInitialData, useModel, usePersistentState, useTool } from "@flue/runtime";
 import * as v from "valibot";
-import { settings, recordUsage } from "../../../worker/agent/config.js";
+import { settings, recordUsage, modelSpec } from "../../../worker/agent/config.js";
 import { PROFILE_SYSTEM, STORY_SYSTEM, saveProfile, saveStoryVerdict } from "../../../worker/agent/content.js";
 import { useUsage } from "./usage.js";
 
@@ -24,16 +24,17 @@ function useMustCall(tool, nudge) {
 }
 
 export function ProfileWriter() {
-  useModel(`cloudflare/${S.model}`, { thinkingLevel: S.contentEffort, compaction: false });
+  const M = S.agents.profiles;
+  useModel(modelSpec(M.model), { thinkingLevel: M.effort, compaction: false });
   const job = useInitialData();
-  useUsage((u) => spendOnly(u));
+  useUsage((u) => spendOnly(u), M.model);
   useTool({
     name: "save_profile",
     description: "Save the finished profile. Call exactly once with the full text.",
     input: v.object({ text: v.pipe(v.string(), v.minLength(40), v.maxLength(4000)) }),
     durable: true,
     async run({ data, step }) {
-      await step.do("save", () => saveProfile(env, job.person, { text: data.text, hash: job.hash, model: S.model }));
+      await step.do("save", () => saveProfile(env, job.person, { text: data.text, hash: job.hash, model: M.model }));
       return { output: "Saved. You're done." }; // no terminate: the finish hook records token use
     },
   });
@@ -45,9 +46,10 @@ ProfileWriter.initialData = v.object({ person: v.string(), hash: v.pipe(v.string
 ProfileWriter.durability = { maxAttempts: 3, timeoutMs: 10 * 60_000 };
 
 export function StoryReviewer() {
-  useModel(`cloudflare/${S.model}`, { thinkingLevel: S.contentEffort, compaction: false });
+  const M = S.agents.profiles;
+  useModel(modelSpec(M.model), { thinkingLevel: M.effort, compaction: false });
   const job = useInitialData();
-  useUsage((u) => spendOnly(u));
+  useUsage((u) => spendOnly(u), M.model);
   useTool({
     name: "record_verdict",
     description: "Record whether the story still agrees with the facts. When it doesn't, include the full revised story; it goes to an editor as a suggestion.",
