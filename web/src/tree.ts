@@ -1,8 +1,9 @@
 // Pure helpers over the tree data (/api/tree). No React here; components use these through useData().
 import type { Family, Person, Story, Tree } from "./types";
+import { S } from "../../strings/index.ts";
 
-export const STATUS_LABEL: Record<string, string> = { verified: "Verified", "partly-verified": "Partly verified", unverified: "Unverified", disputed: "Disputed" };
-export const FINDING_KINDS: Record<string, string> = { confirmed: "Confirmed", correction: "Correction", conflict: "Conflict", "new-fact": "New fact", "new-person": "New person", "data-error": "Data error" };
+export const STATUS_LABEL: Record<string, string> = S.common.status;
+export const FINDING_KINDS: Record<string, string> = S.common.findingKinds;
 
 const famOf = (D: Tree, fid: string): Family | undefined => D.families[fid];
 
@@ -50,8 +51,8 @@ export function sourceUses(D: Tree): Record<string, SourceUse[]> {
   };
   const label = (e: any) => [eventLabel(e), e.date].filter(Boolean).join(" ");
   for (const p of Object.values(D.people) as any[]) {
-    for (const c of p.citations || []) if (c && c.source) add(c.source, { person: p.id, fact: "the person" }, c);
-    for (const n of p.names || []) fact(n, { person: p.id, fid: n.fid, fact: `name ${`${n.given || ""} ${n.surname || ""}`.trim()}` });
+    for (const c of p.citations || []) if (c && c.source) add(c.source, { person: p.id, fact: S.common.facts.thePerson }, c);
+    for (const n of p.names || []) fact(n, { person: p.id, fid: n.fid, fact: S.common.facts.name(`${n.given || ""} ${n.surname || ""}`.trim()) });
     for (const e of p.events || []) fact(e, { person: p.id, fid: e.fid, fact: label(e) });
   }
   for (const f of Object.values(D.families) as any[]) {
@@ -59,7 +60,7 @@ export function sourceUses(D: Tree): Record<string, SourceUse[]> {
     for (const e of f.events || []) for (const s of sp) fact(e, { person: s, family: f.id, fid: e.fid, fact: label(e) });
   }
   for (const [pid, list] of Object.entries(((D.research as any).media || {}) as Record<string, any[]>)) {
-    for (const m of list || []) if (m && m.source && D.people[pid]) add(m.source, { person: pid, file: m.file, fact: `photo: ${m.caption || m.file.split("/").pop()}` }, null);
+    for (const m of list || []) if (m && m.source && D.people[pid]) add(m.source, { person: pid, file: m.file, fact: S.common.facts.photo(m.caption || m.file.split("/").pop()) }, null);
   }
   return out;
 }
@@ -71,20 +72,20 @@ export function apidLink(apid?: string) {
   if (!m || m[2] === "0") return "";
   return `https://www.ancestry.com/discoveryui-content/view/${m[2]}:${m[1]}`;
 }
-const EVENT_LABEL: Record<string, string> = { Residence: "Lived in", Arrival: "Arrived", Departure: "Departed", Burial: "Buried", Military: "Military service", NaturalizationPetition: "Naturalization petition" };
+const EVENT_LABEL: Record<string, string> = S.common.events;
 export const eventLabel = (e: { type: string }) => EVENT_LABEL[e.type] || e.type;
 export const mediaUrl = (f: string) => (/^(https?:)?\/\//.test(f) || f.startsWith("/") ? f : "media/" + f.replace(/^media\//, ""));
 export const initials = (p: Person) => (p.given[0] || "?") + (p.surname[0] || "");
 
 /** "me", "🤖 researcher" or the part of an email before the @. */
 export const whoText = (principal: string | null | undefined, x?: string | null) =>
-  !x ? "—" : principal && x === principal ? "me" : x.startsWith("service:") || x.startsWith("agent:") ? "🤖 " + x.replace(/^(service|agent):/, "") : x.split("@")[0];
+  !x ? S.common.who.none : principal && x === principal ? S.common.who.me : x.startsWith("service:") || x.startsWith("agent:") ? S.common.who.agent(x.replace(/^(service|agent):/, "")) : x.split("@")[0];
 
 export function ago(iso?: string | null) {
   if (!iso) return "";
   const d = (Date.now() - Date.parse(iso)) / 86400000;
-  return d < 1 ? "today" : d < 2 ? "yesterday" : d < 31 ? `${Math.floor(d)} days ago` : iso.slice(0, 10);
+  return d < 1 ? S.common.ago.today : d < 2 ? S.common.ago.yesterday : d < 31 ? S.common.ago.days(Math.floor(d)) : iso.slice(0, 10);
 }
 
 /** The first name of the home person, for "<name>'s great-grandfather". */
-export const homeFirst = (D: Tree) => (D.people[D.home] && D.people[D.home].given.split(" ")[0]) || "the home person";
+export const homeFirst = (D: Tree) => (D.people[D.home] && D.people[D.home].given.split(" ")[0]) || S.common.homeFallback;
