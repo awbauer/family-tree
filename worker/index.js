@@ -535,7 +535,7 @@ async function history(c) {
   const batches = {};
   for (const r of rows) {
     const k = r.batch_id || `c${r.id}`;
-    const g0 = (batches[k] = batches[k] || { batch: r.batch_id, at: r.at, actor: r.actor, op: r.op, reason: r.reason, proposal: r.proposal_id, sources: parse(r.sources, undefined), entities: [] });
+    const g0 = (batches[k] = batches[k] || { batch: r.batch_id, at: r.at, actor: r.actor, actor_kind: r.actor_kind, on_behalf_of: r.on_behalf_of || undefined, op: r.op, reason: r.reason, proposal: r.proposal_id, sources: parse(r.sources, undefined), entities: [] });
     if (r.op === "edit" || r.op === "revert") g0.op = r.op; // an edit that also resolved a finding is still an edit
     g0.entities.push({ type: r.entity_type, id: r.entity_id, change: r.before == null ? "created" : r.after == null ? "deleted" : "updated", before: c.access.isOwner || can.review(g) ? parse(r.before) : undefined, after: c.access.isOwner || can.review(g) ? parse(r.after) : undefined });
   }

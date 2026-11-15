@@ -1,17 +1,24 @@
-// The page assistant: a chat on every page for editors, shared by the site Worker (which owns chats, builds the page
-// context and applies confirmed changes) and the agents Worker (where the Flue agent talks and drafts changes).
+// The page assistant: a chat on every page for editors, shared by the site Worker (which builds the page context and
+// applies confirmed changes) and the agents Worker (where the Flue agent talks and drafts changes).
+//
+// Where things live: each chat's conversation is a Flue Durable Object (agents/src/agents/assistant.js); each editor's
+// chat list and drafted changes are a ChatStore Durable Object (worker/agent/chat-store.js), addressed by their
+// principal. D1 holds only the tree and its change log.
 //
 // The agent never writes to the tree. Its one write is propose_change, which checks the ops against the tree as the
-// chat's owner sees it, dry-runs them, and files a pending change. The person confirms it in the chat panel; only
-// then does the site Worker apply it, as them, through the same code path as a hand edit (history, provenance, undo).
-import { J, now, parse } from "../db.js";
+// chat's owner sees it, dry-runs them, and files a draft in their ChatStore. The editor confirms it in the chat panel;
+// only then does the site Worker apply it, logged as made by the assistant on the editor's behalf (history,
+// provenance, undo work as for a hand edit).
 import { scopedFor } from "../bundle.js";
 import { can } from "../auth.js";
 import { referencedIds, applyOps, OpError } from "../ops.js";
 import { loadEditable } from "../store.js";
 import { recordUsage } from "./config.js";
+import { REMOTE_METHODS } from "./chat-store.js";
 
 export const CHAT_PATH = "/agents/assistant"; // where agents/src/app.js mounts the Assistant
+export const STORE_PATH = "/internal/chats";   // the ChatStore route over the service binding
+export const ASSISTANT = "agent:assistant";    // the actor the change log records for applied drafts
 export const CONTEXT_OPEN = "<page_context>", CONTEXT_CLOSE = "</page_context>";
 const MAX_PAGE_TEXT = 4000;
 
@@ -47,24 +54,38 @@ Edit ops (fids come from get_person; e… are events, n… are names; for new pe
 - media.update {person, file, set: {caption?, type?, date?, place?, note?}}; media.set_primary {person, file}; media.detach {person, file}`;
 
 // ---------------------------------------------------------------- chats
-export const chatOut = (r) => r && ({ id: r.id, tree: r.tree_id, title: r.title, created_at: r.created_at, updated_at: r.updated_at, tokens: { input: r.input_tokens, output: r.output_tokens } });
-
-export async function loadChat(env, id) {
-  return env.DB.prepare("SELECT * FROM chats WHERE id = ?").bind(id).first();
+/** The editor's ChatStore. In the agents Worker it's the Durable Object itself (RPC); in the site Worker it's reached
+ *  over the AGENTS service binding. Every method returns a promise. */
+export function chatStore(env, principal) {
+  const p = String(principal || "").toLowerCase();
+  if (!p) throw new Error("chatStore needs a principal");
+  let call;
+  if (env.CHAT_STORE) {
+    const stub = env.CHAT_STORE.get(env.CHAT_STORE.idFromName(p));
+    call = (method, args) => stub.call(method, args);
+  } else {
+    call = async (method, args) => {
+      const headers = { "Content-Type": "application/json" };
+      if (env.AGENTS_TOKEN) headers["X-Agents-Token"] = env.AGENTS_TOKEN;
+      const res = await env.AGENTS.fetch(new Request(`https://agents.internal${STORE_PATH}/${encodeURIComponent(p)}`, { method: "POST", headers, body: JSON.stringify({ method, args }) }));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `the chat store answered ${res.status}`);
+      return data.result;
+    };
+  }
+  return Object.fromEntries([...REMOTE_METHODS, "propose", "addUsage"].map((m) => [m, (...args) => call(m, args)]));
 }
 
 /** What the chat's owner can see of its tree, re-checked on every use; null once they lose editor access. */
-export async function chatScope(env, chat) {
-  const sc = await scopedFor(env, chat.principal, chat.tree_id);
+export async function chatScope(env, { principal, tree }) {
+  const sc = await scopedFor(env, principal, tree);
   if (!sc || !can.review(sc.grant)) return null;
   return sc;
 }
 
-export async function recordChatUsage(env, id, { input, output }) {
-  await env.DB.batch([
-    env.DB.prepare("UPDATE chats SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ? WHERE id = ?").bind(input, output, id),
-    recordUsage(env, { input, output }),
-  ]);
+export async function recordChatUsage(env, store, chatId, { input, output }) {
+  await env.DB.batch([recordUsage(env, { input, output })]);
+  await store.addUsage(chatId, { input, output });
 }
 
 // ---------------------------------------------------------------- what the agent sees
@@ -186,10 +207,11 @@ export async function checkChange(env, sc, ops) {
   }
 }
 
-/** File a pending change for the person to confirm. Returns {ok, id} or {ok: false, errors}. */
-export async function proposeChange(env, chat, input) {
+/** File a draft for the editor to confirm. `chat` is {id, principal, tree}. Returns {ok, id} or {ok: false, errors}. */
+export async function proposeChange(env, store, chat, input) {
   const sc = await chatScope(env, chat);
   if (!sc) return { ok: false, errors: ["this chat's editor no longer has editor access to the tree"] };
+  if (!(await store.getChat(chat.id))) return { ok: false, errors: ["this chat no longer exists"] };
   const summary = clip(input && input.summary, 500), reason = clip(input && input.reason, 2000);
   const errors = [];
   if (!summary) errors.push("summary: say in one line what the change does");
@@ -197,17 +219,6 @@ export async function proposeChange(env, chat, input) {
   const r = await checkChange(env, sc, input && input.ops);
   if (r.errors) errors.push(...r.errors);
   if (errors.length) return { ok: false, errors };
-  const sources = cleanSources(input.sources);
-  // a new proposal replaces any earlier one still waiting in this chat
-  const res = await env.DB.batch([
-    env.DB.prepare("UPDATE chat_changes SET status = 'superseded', decided_at = ? WHERE chat_id = ? AND status = 'pending'").bind(now(), chat.id),
-    env.DB.prepare("INSERT INTO chat_changes (chat_id, principal, tree_id, summary, reason, sources, ops, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
-      .bind(chat.id, chat.principal, chat.tree_id, summary, reason, sources.length ? J(sources) : null, J(input.ops), now()),
-  ]);
-  return { ok: true, id: res[1].results[0].id, records: r.touched.map((x) => `${x.type} ${x.id}`) };
+  const ch = await store.propose(chat.id, { summary, reason, sources: cleanSources(input.sources), ops: input.ops });
+  return { ok: true, id: ch.id, records: r.touched.map((x) => `${x.type} ${x.id}`) };
 }
-
-export const changeOut = (r) => r && ({
-  id: r.id, chat: r.chat_id, summary: r.summary, reason: r.reason, sources: parse(r.sources, undefined), ops: parse(r.ops, []),
-  status: r.status, batch: r.batch_id || null, error: r.error || null, created_at: r.created_at, decided_at: r.decided_at || null, decided_by: r.decided_by || null,
-});

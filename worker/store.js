@@ -20,7 +20,7 @@ export async function loadEditable(env) {
 const guard = (env, sql, ...args) => env.DB.prepare(`INSERT INTO _guard (x) SELECT NULL WHERE ${sql}`).bind(...args);
 
 /** Statements that write `touched` (from applyOps) with version guards and audit rows. */
-export function commitStatements(env, { touched, versions, state, actor, actorKind, reason, sources, proposalId, batchId, op = "edit", mode = "working" }) {
+export function commitStatements(env, { touched, versions, state, actor, actorKind, reason, sources, proposalId, batchId, op = "edit", mode = "working", onBehalfOf = null, via = null }) {
   const t = now();
   const st = [];
   // the evidence cited for this change (prov:used), kept with every row of the batch
@@ -32,8 +32,8 @@ export function commitStatements(env, { touched, versions, state, actor, actorKi
     const w = writeRecord(env, mode, x, versions, t, actor);
     st.push(...w.statements);
     const vAfter = w.versionAfter;
-    st.push(env.DB.prepare("INSERT INTO changes (at, actor, actor_kind, entity_type, entity_id, op, before, after, reason, proposal_id, batch_id, version_after, sources) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .bind(t, actor, actorKind, x.type, x.id, op, x.before == null ? null : J(x.before), x.after == null ? null : J(x.after), reason || null, proposalId || null, batchId, vAfter, src));
+    st.push(env.DB.prepare("INSERT INTO changes (at, actor, actor_kind, entity_type, entity_id, op, before, after, reason, proposal_id, batch_id, version_after, sources, on_behalf_of, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(t, actor, actorKind, x.type, x.id, op, x.before == null ? null : J(x.before), x.after == null ? null : J(x.after), reason || null, proposalId || null, batchId, vAfter, src, onBehalfOf, via));
   }
   // A merge (person.merge) adds an alias drop -> keep. Re-point the research rows filed under the dropped person in the
   // same batch, so findings, to-dos, log entries, statuses and comments follow them to the surviving record.
@@ -60,8 +60,8 @@ export function commitStatements(env, { touched, versions, state, actor, actorKi
       st.push(guard(env, "NOT EXISTS (SELECT 1 FROM config WHERE key = ? AND version = ?)", key, v));
       st.push(env.DB.prepare("UPDATE config SET value = ?, version = version + 1, updated_at = ?, updated_by = ? WHERE key = ?").bind(J(value), t, actor, key));
     }
-    st.push(env.DB.prepare("INSERT INTO changes (at, actor, actor_kind, entity_type, entity_id, op, before, after, reason, proposal_id, batch_id, version_after, sources) VALUES (?, ?, ?, 'config', ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .bind(t, actor, actorKind, key, op, J(Object.fromEntries(before.map((b) => [b.id, b.before ?? null]))), J(Object.fromEntries(before.map((b) => [b.id, b.after ?? null]))), reason || null, proposalId || null, batchId, v == null ? 1 : v + 1, src));
+    st.push(env.DB.prepare("INSERT INTO changes (at, actor, actor_kind, entity_type, entity_id, op, before, after, reason, proposal_id, batch_id, version_after, sources, on_behalf_of, via) VALUES (?, ?, ?, 'config', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(t, actor, actorKind, key, op, J(Object.fromEntries(before.map((b) => [b.id, b.before ?? null]))), J(Object.fromEntries(before.map((b) => [b.id, b.after ?? null]))), reason || null, proposalId || null, batchId, v == null ? 1 : v + 1, src, onBehalfOf, via));
   }
   st.push(bumpVersion(env));
   return st;

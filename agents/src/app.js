@@ -8,7 +8,8 @@ import { createCloudflareTracing } from "@flue/runtime/cloudflare";
 import { cloudflareBindingProvider } from "@flue/runtime/cloudflare/workers-ai";
 import { settings } from "../../worker/agent/config.js";
 import { RESEARCHER_PATH } from "../../worker/agent/runs.js";
-import { CHAT_PATH } from "../../worker/agent/chat.js";
+import { CHAT_PATH, STORE_PATH } from "../../worker/agent/chat.js";
+import { REMOTE_METHODS } from "../../worker/agent/chat-store.js";
 import { Researcher } from "./agents/researcher.js";
 import { Assistant } from "./agents/assistant.js";
 import { queueProfile, runContentJob } from "./content-jobs.js";
@@ -32,6 +33,15 @@ app.use("*", async (c, next) => {
 app.get("/health", (c) => c.json({ ok: true, model: S.model }));
 app.route(RESEARCHER_PATH, createAgentRouter(Researcher));
 app.route(CHAT_PATH, createAgentRouter(Assistant));
+// The site Worker's door to an editor's ChatStore. The principal comes from the site Worker, which checked Access.
+app.post(`${STORE_PATH}/:principal`, async (c) => {
+  const { method, args } = await c.req.json();
+  if (!REMOTE_METHODS.includes(method)) return c.json({ error: "Unknown method" }, 400);
+  const p = decodeURIComponent(c.req.param("principal")).toLowerCase();
+  try {
+    return c.json({ result: (await env.CHAT_STORE.get(env.CHAT_STORE.idFromName(p)).call(method, Array.isArray(args) ? args : [])) ?? null });
+  } catch (e) { return c.json({ error: String(e && e.message || e) }, 400); }
+});
 app.post("/internal/profiles", async (c) => {
   const d = await c.req.json();
   return c.json(await queueProfile(String(d.person || ""), { force: !!d.force }), 202);
