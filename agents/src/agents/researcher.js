@@ -100,9 +100,17 @@ export function Researcher({ id }) {
       await tree();
       const n = await spend("searches", S.maxSearches);
       if (n == null) return "The search budget for this run (or today's AI budget) is used up. Submit what you have with submit_results now.";
-      const res = await createAIWebSearch({ binding: env.AI, gateway: S.gateway, provider: S.searchProvider }).search({ query: data.query, limit: data.limit || 6 }, { signal });
-      await logRun(env, runId, `web_search: ${data.query}`);
-      return renderWebSearchResults(res);
+      try {
+        const res = await createAIWebSearch({ binding: env.AI, gateway: S.gateway, provider: S.searchProvider, byokAlias: S.searchByokAlias }).search({ query: data.query, limit: data.limit || 6 }, { signal });
+        await logRun(env, runId, `web_search: ${data.query}`);
+        return renderWebSearchResults(res);
+      } catch (e) {
+        // Search bills to AI Gateway credits (or a stored provider key). Without them, keep researching by reading
+        // record sites' own search pages directly.
+        if (!/payment|credit|402|byok/i.test(String(e && (e.code || e.message)))) throw e;
+        await logRun(env, runId, "web_search unavailable (no AI Gateway credits); using sites' own search pages");
+        return "Web search is not available for this run (no AI Gateway credits). Don't call web_search again. Instead, use web_fetch on the search pages of free record sites with the query in the URL, for example https://www.findagrave.com/memorial/search?firstname=…&lastname=…&deathyear=…, https://www.freebmd.org.uk/, https://www.familysearch.org/search/ (may need a login), https://billiongraves.com/search/results?given_names=…&family_names=…, and national archive catalogues. Cite only pages you actually read.";
+      }
     },
   });
   useTool({
