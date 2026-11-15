@@ -38,7 +38,7 @@ export function QualityReviewer({ id }) {
   }
 
   useAgentStart(async () => { await markRunning(env, runId); });
-  useUsage((u, model) => recordRunUsage(env, runId, u, model), M.model);
+  useUsage((u, model) => recordRunUsage(env, runId, u, model), { model: M.model });
 
   useTool({
     name: "get_item",

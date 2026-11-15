@@ -27,7 +27,7 @@ export function ProfileWriter() {
   const M = S.agents.profiles;
   useModel(modelSpec(M.model), { thinkingLevel: M.effort, compaction: false });
   const job = useInitialData();
-  useUsage((u) => spendOnly(u), M.model);
+  useUsage((u) => spendOnly(u), { model: M.model });
   useTool({
     name: "save_profile",
     description: "Save the finished profile. Call exactly once with the full text.",
@@ -49,7 +49,7 @@ export function StoryReviewer() {
   const M = S.agents.profiles;
   useModel(modelSpec(M.model), { thinkingLevel: M.effort, compaction: false });
   const job = useInitialData();
-  useUsage((u) => spendOnly(u), M.model);
+  useUsage((u) => spendOnly(u), { model: M.model });
   useTool({
     name: "record_verdict",
     description: "Record whether the story still agrees with the facts. When it doesn't, include the full revised story; it goes to an editor as a suggestion.",

@@ -4,7 +4,7 @@
 // that editor sees it, re-checked on every tool call, and its only write is propose_change: a pending change the
 // editor applies or dismisses in the chat panel. It has no web access.
 import { env } from "cloudflare:workers";
-import { useAgentStart, useInitialData, useModel, usePersistentState, useTool } from "@flue/runtime";
+import { useInitialData, useModel, useTool } from "@flue/runtime";
 import * as v from "valibot";
 import { settings, compactAt, modelSpec } from "../../../worker/agent/config.js";
 import { searchPeople, relationship } from "../../../worker/agent/tools.js";
@@ -20,7 +20,6 @@ export function Assistant({ id }) {
   useModel(modelSpec(M.model), { thinkingLevel: M.effort, compaction: compactAt(M.model, 32000, 8000) });
   const data = useInitialData();
   const chatId = (data && data.chatId) || id;
-  const [, setSeen] = usePersistentState("usage_recorded", { input: 0, output: 0 });
 
   async function chat() {
     const c = await loadChat(env, chatId);
@@ -33,9 +32,8 @@ export function Assistant({ id }) {
     return sc.bundle;
   }
 
-  // Each delivered message starts a new response, whose usage counts from zero: reset the high-water mark useUsage keeps.
-  useAgentStart(async () => { setSeen({ input: 0, output: 0 }); });
-  useUsage((u) => recordChatUsage(env, chatId, u), M.model);
+  // Each delivered message starts a new response, whose usage counts from zero.
+  useUsage((u) => recordChatUsage(env, chatId, u), { model: M.model, perDelivery: true });
 
   useTool({
     name: "get_person",
