@@ -7,13 +7,16 @@ const int = (v, d) => (Number.isFinite(+v) && +v > 0 ? Math.floor(+v) : d);
 
 export function settings(env) {
   return {
-    // AI Gateway catalog id (Workers AI binding → AI Gateway → Anthropic). Billed to gateway credits or a key stored on the gateway.
-    model: env.AI_MODEL || "anthropic/claude-opus-5.5",
+    // Model id for the Workers AI binding. The default runs on Workers AI (billed to the Workers plan, with a daily
+    // free allocation). A gateway model such as "anthropic/claude-opus-5-5" needs AI Gateway credits or a provider key
+    // stored on the gateway.
+    model: env.AI_MODEL || "@cf/moonshotai/kimi-k2.6",
     effort: env.AI_EFFORT || "high",                      // research runs (Flue thinkingLevel)
     contentEffort: env.AI_CONTENT_EFFORT || "medium",     // profiles and story checks
     gateway: env.AI_GATEWAY_ID || "default",
-    gatewayLogs: env.AI_GATEWAY_LOGS === "true",          // prompts hold family data: no gateway logs unless debugging
-    searchProvider: env.WEB_SEARCH_PROVIDER || "exa",
+    gatewayLogs: env.AI_GATEWAY_LOGS !== "false",         // gateway logs on (they include prompts, i.e. family data); "false" turns them off
+    searchProvider: env.WEB_SEARCH_PROVIDER || "exa",     // Cloudflare Web Search API: needs AI Gateway credits…
+    searchByokAlias: env.WEB_SEARCH_BYOK_ALIAS || undefined, // …or a search provider key stored on the gateway, by alias
     maxSearches: int(env.AGENT_MAX_SEARCHES, 25),          // web searches per run
     maxFetches: int(env.AGENT_MAX_FETCHES, 40),            // pages read per run
     maxMinutes: int(env.AGENT_MAX_MINUTES, 45),            // wall clock per run (Flue durability timeout)

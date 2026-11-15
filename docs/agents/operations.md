@@ -152,8 +152,12 @@ Editors can hand a to-do or a person to a research agent that runs in Cloudflare
 **How it's built.** A second, private Worker, `family-tree-agents`, in `agents/`:
 
 - **[Flue](https://flueframework.com/)** agents on its Cloudflare target. Each run is one Flue conversation: a Durable Object on Cloudflare's **Agents SDK**, with **Pi** running the loop (model turns, tool calls, retries, compaction). If the object is evicted or crashes mid-run, Flue resumes from its durable records. It never re-runs a model call or tool call whose result was already recorded.
-- **Claude through AI Gateway.** The model is `cloudflare/<AI_MODEL>` (default `anthropic/claude-opus-5.5`): the Workers AI binding sends it through your AI Gateway. No Anthropic key sits in the Worker; billing goes to AI Gateway credits, or to an Anthropic key you store on the gateway (BYOK).
+- **The model runs on Workers AI by default.** The model is `cloudflare/<AI_MODEL>`, called through the Workers AI binding and your AI Gateway. The default, `@cf/moonshotai/kimi-k2.6`, is a strong tool-using model hosted on Workers AI. It's billed to your Workers plan, with a daily free allocation, and needs no AI Gateway credits or provider key.
+  - To use Claude, set `AI_MODEL=anthropic/claude-opus-5-5` and load AI Gateway credits, or store an Anthropic key on the gateway.
+  - With a zero credit balance, gateway models fail with error 2002, "Model execution failed".
 - **Cloudflare's agent tools:** `web_search` (Cloudflare Web Search API) and `web_fetch` (pages and PDFs to Markdown) from the Agents SDK.
+  - Web search bills to AI Gateway credits, or to a search provider key you store on the gateway. Set its alias as `WEB_SEARCH_BYOK_ALIAS`.
+  - Without either, the agent is told search is unavailable and works from record sites' own search pages through `web_fetch`, which needs neither.
 - **The site's own code for everything that matters.** Scoping (`worker/bundle.js`, `worker/scope.js`), submission checks (`worker/agent/tools.js`, `worker/research.js`, the edit-ops dry run) and filing suggestions (`worker/agent/runs.js`) are the same modules the site uses, imported into the agents Worker. The Flue files (`agents/src/`) only declare tools and wiring.
 
 **Who sees what.**
@@ -163,7 +167,7 @@ Editors can hand a to-do or a person to a research agent that runs in Cloudflare
 - Findings about living people are rejected.
 - Profiles are written only for people who have died. Their facts name a living relative only as "a living son".
 - The agents Worker has no public URL (`workers_dev` and preview URLs off, no routes). Only the site Worker reaches it, over a service binding. Set `AGENTS_TOKEN` as a secret on both Workers for a second check.
-- AI Gateway keeps **no logs** of these requests unless `AI_GATEWAY_LOGS=true`, because prompts contain family data. Token use is still recorded in D1 (`agent_runs`, `ai_usage`). Workers Traces get spans without content.
+- **AI Gateway logs every request, prompts and responses included.** That means the facts sent to the model are stored in the gateway's logs, which only members of your Cloudflare account can read. Logs are kept per the gateway's retention setting; set `AI_GATEWAY_LOGS=false` to stop logging. Token use is also recorded in D1 (`agent_runs`, `ai_usage`), and Workers Traces get spans without content.
 - This does send family data (the people being researched, and their deceased relatives' facts) to Anthropic through Cloudflare. Leave the feature off if that isn't acceptable for your family.
 
 **Budgets** (dashboard variables on the agents Worker; the first two also on the site Worker, which enforces them when starting runs):
@@ -176,11 +180,11 @@ Editors can hand a to-do or a person to a research agent that runs in Cloudflare
 | `AGENT_MAX_MINUTES` | 45 | per run (Flue's durability timeout); stale runs are closed on the next read |
 | `CONTENT_MAX_PER_RUN` | 50 | profiles and story checks per weekly job; for the first backfill, run it on demand a few times |
 
-Also set a **spend limit and rate limit on the AI Gateway itself** (dashboard → AI → AI Gateway → your gateway → Settings). That is the hard stop if anything here misbehaves. Other variables: `AI_MODEL`, `AI_EFFORT` (`high`), `AI_CONTENT_EFFORT` (`medium`), `AI_GATEWAY_ID` (`default`), `WEB_SEARCH_PROVIDER` (`exa`), `CONTENT_JOB_ENABLED` (`false`).
+Also set a **spend limit and rate limit on the AI Gateway itself** (dashboard → AI → AI Gateway → your gateway → Settings). That is the hard stop if anything here misbehaves. Other variables: `AI_MODEL` (`@cf/moonshotai/kimi-k2.6`), `WEB_SEARCH_BYOK_ALIAS`, `AI_EFFORT` (`high`), `AI_CONTENT_EFFORT` (`medium`), `AI_GATEWAY_ID` (`default`), `WEB_SEARCH_PROVIDER` (`exa`), `CONTENT_JOB_ENABLED` (`false`).
 
 **One-time setup (owner):**
 
-1. **AI Gateway:** create a gateway (or use `default`). Load AI Gateway credits, or store an Anthropic key on the gateway (Provider keys → Anthropic). Set a spend limit.
+1. **AI Gateway:** use `default` or create a gateway, and set a spend limit. Credits (or stored provider keys) are only needed for web search and for gateway models such as Claude.
 2. **Deploy the agents Worker.** Workers & Pages → Create → connect the same repo again as a second Worker named `family-tree-agents`:
    - Root directory: `agents`
    - Build command: *(empty)*
