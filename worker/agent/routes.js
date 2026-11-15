@@ -6,6 +6,8 @@
 //   GET  /api/agent/runs?tree=         recent runs in this tree (editors)
 //   GET  /api/agent/runs/:id           one run: status, step log, tokens, resulting suggestions (editors)
 //   POST /api/agent/runs/:id/cancel    stop a run and release its to-do (editors)
+//   POST /api/agent/runs               {tree, kind: "quality", scope?, person?, limit?, dry_run?}  a data quality review
+//   POST /api/agent/runs/:id/apply     apply a finished dry-run review's decisions (editors)
 //   POST /api/profiles/:id/refresh     queue a rewrite of one person's AI profile (editors)
 //   POST /api/content/refresh          run the content job now (owner)
 import { J, now, parse, write } from "../db.js";
@@ -13,6 +15,10 @@ import { can, grantFor } from "../auth.js";
 import { fail, json } from "../http.js";
 import { settings, agentsEnabled, checkDaily, recordUsage, usageToday, BudgetError } from "./config.js";
 import { AGENT, RESEARCHER_PATH, firstMessage, endRun } from "./runs.js";
+import * as Quality from "./quality.js";
+
+/** Where each kind of run's agent is mounted in the agents Worker. */
+const PATHS = { research: RESEARCHER_PATH, quality: Quality.QUALITY_PATH };
 
 export const enabled = agentsEnabled;
 
@@ -34,17 +40,24 @@ function needAgents(c) {
   if (!agentsEnabled(c.env)) fail(503, "Research agents aren't set up yet: deploy the agents Worker and add the AGENTS service binding. See docs/agents/operations.md → Cloud research agents.");
 }
 
-const runOut = (r) => ({
-  id: r.id, tree: r.tree_id, todo_id: r.todo_id, person: r.person_id, started_by: r.started_by, instructions: r.instructions,
+const runOut = (r) => {
+  const opts = parse(r.options, null);
+  return {
+  id: r.id, kind: r.kind || "research", tree: r.tree_id, todo_id: r.todo_id, person: r.person_id, started_by: r.started_by, instructions: r.instructions,
+  options: opts ? { ...opts, items: undefined, count: (opts.items || []).length } : undefined,
+  report: r.report ? parse(r.report, []) : undefined, summary: (parse(r.result, {}) || {}).summary,
   status: r.status, steps: r.steps, tokens: { input: r.input_tokens, output: r.output_tokens }, model: r.model,
   log: parse(r.log, []), proposals: parse(r.proposal_ids, []), error: r.error,
   created_at: r.created_at, started_at: r.started_at, finished_at: r.finished_at,
-});
+  };
+};
 
 export async function startRun(c, d, { grantOrFail, scoped, loadTodo }) {
   const g = grantOrFail(c, d.tree);
   editorOnly(c, g);
   needAgents(c);
+  if (d.kind === "quality") return startQuality(c, d, g, { scoped });
+  if (d.kind && d.kind !== "research") fail(400, "kind must be research or quality");
   const env = c.env, s = settings(env), b = await scoped(c, g);
   let todo = null;
   if (d.todo_id) {
@@ -129,7 +142,7 @@ export async function getRun(c, id) {
 export async function cancel(c, id) {
   const r = await runFor(c, id);
   if (!["queued", "running"].includes(r.status)) fail(409, "That run has already finished.");
-  if (agentsEnabled(c.env)) await agentsFetch(c.env, `${RESEARCHER_PATH}/${id}/abort`, {}).catch(() => null);
+  if (agentsEnabled(c.env)) await agentsFetch(c.env, `${PATHS[r.kind] || RESEARCHER_PATH}/${id}/abort`, {}).catch(() => null);
   await endRun(c.env, id, `cancelled by ${c.access.principal}`, "cancelled");
   return json({ ok: true });
 }
@@ -151,4 +164,41 @@ export async function refreshContent(c) {
   if (!c.access.isOwner) fail(403, "Owner only.");
   needAgents(c);
   return json(await agentsFetch(c.env, "/internal/content/refresh", { by: c.access.principal }), 202);
+}
+
+// ---------------------------------------------------------------- data quality review (#31)
+async function startQuality(c, d, g, { scoped }) {
+  const env = c.env, s = settings(env), b = await scoped(c, g);
+  const scope = ["todos", "findings", "both"].includes(d.scope) ? d.scope : "both";
+  const person = d.person ? String(d.person) : null;
+  if (person && !b.people[person]) fail(404, "That person isn't in this tree.");
+  const limit = Math.max(1, Math.min(Quality.MAX_ITEMS, parseInt(d.limit, 10) || 10));
+  const dryRun = d.dry_run !== false; // dry run unless asked otherwise
+  const items = Quality.planItems(b, { scope, person, limit, starter: c.access.principal });
+  if (!items.length) fail(400, "There are no open items to review with those options.");
+  try { await checkDaily(env, s, { runs: true }); } catch (e) { if (e instanceof BudgetError) fail(429, e.message); throw e; }
+  const id = `run-${now().slice(0, 10).replace(/-/g, "")}-${crypto.randomUUID().slice(0, 8)}`;
+  const options = { scope, person, limit, dry_run: dryRun, items };
+  await write(env, [
+    env.DB.prepare("INSERT INTO agent_runs (id, kind, person_id, tree_id, started_by, instructions, options, report, created_at) VALUES (?, 'quality', ?, ?, ?, ?, ?, '[]', ?)")
+      .bind(id, person, g.tree_id, c.access.principal, `Data quality review of ${items.length} item${items.length === 1 ? "" : "s"}${dryRun ? " (dry run)" : ""}`, J(options), now()),
+    recordUsage(env, { runs: 1 }),
+  ]);
+  try {
+    await agentsFetch(env, `${Quality.QUALITY_PATH}/${id}`, { kind: "user", body: Quality.firstMessage(b, options, items), initialData: { runId: id } });
+  } catch (e) {
+    await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
+    fail(502, `Couldn't start the review: ${e.message}`);
+  }
+  return json({ run: runOut(await env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) }, 201);
+}
+
+export async function applyRun(c, id) {
+  const r = await runFor(c, id);
+  if (r.kind !== "quality") fail(400, "Only a data quality review can be applied.");
+  if (r.status !== "succeeded") fail(409, "Wait for the review to finish.");
+  try {
+    const report = await Quality.applyReport(c.env, r, c.access.principal);
+    return json({ ok: true, report, run: runOut(await c.env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) });
+  } catch (e) { if (e.status) fail(e.status, e.message); throw e; }
 }
