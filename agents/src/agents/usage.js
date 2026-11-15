@@ -8,7 +8,7 @@ import { settings, tokensOf } from "../../../worker/agent/config.js";
 export function useUsage(record) {
   const [seen, setSeen] = usePersistentState("usage_recorded", { input: 0, output: 0 });
   useAgentFinish(async ({ response }) => {
-    const t = tokensOf(response.usage);
+    const t = tokensOf(response.usage, settings(env));
     const d = { input: Math.max(0, t.input - seen.input), output: Math.max(0, t.output - seen.output) };
     console.log("[usage]", JSON.stringify({ total: t, delta: d, toolCalls: response.toolCalls.length }));
     if (!d.input && !d.output) return;

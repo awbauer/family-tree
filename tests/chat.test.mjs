@@ -61,20 +61,45 @@ test("chats are for editors, and only their owner can see one", async () => {
   assert.equal((await call("GET", "/api/chat?tree=all", { as: EDITOR })).data.chats.length, 1);
 });
 
-test("a message carries the page the editor is on: its record (with fids) and visible text", async () => {
+test("a message carries a short pointer to the page, only when the page changes; the rest is read on demand", async () => {
   const id = await newChat(), p = dead();
-  const r = await call("POST", `/api/chat/${id}/messages`, { as: EDITOR, body: { text: "When did she die?", page: { path: `person/${p.id}`, title: p.name, text: "Visible page words" } } });
+  const page = { path: `person/${p.id}`, title: p.name, text: "Visible page words\nExample second line" };
+  const r = await call("POST", `/api/chat/${id}/messages`, { as: EDITOR, body: { text: "When did she die?", page } });
   assert.equal(r.status, 202, JSON.stringify(r.data));
-  const sent = lastPost();
+  let sent = lastPost();
   assert.equal(sent.url, `/agents/assistant/${id}`);
   assert.equal(sent.body.kind, "user");
   assert.deepEqual(sent.body.initialData, { chatId: id });
   assert.ok(sent.body.body.startsWith("When did she die?\n\n<page_context>"));
-  assert.ok(sent.body.body.includes(`profile of ${p.name} (${p.id})`));
-  assert.match(sent.body.body, /"fid":"e\d+"/, "fact ids so edits can point at facts");
-  assert.ok(sent.body.body.includes("Visible page words"));
+  assert.ok(sent.body.body.includes(`profile of ${p.name} (${p.id}`));
+  assert.ok(sent.body.body.includes(`get_person("${p.id}")`), "points at the record instead of carrying it");
+  assert.doesNotMatch(sent.body.body, /"fid"/, "the record itself isn't in the message");
+  assert.ok(!sent.body.body.includes("Visible page words"), "nor the page text");
+  assert.ok(sent.body.body.length < 1200, `the pointer is short (${sent.body.body.length} chars)`);
   assert.equal(Chat.stripContext(sent.body.body), "When did she die?");
   assert.equal((await chatRow(id)).title, "When did she die?");
+
+  await call("POST", `/api/chat/${id}/messages`, { as: EDITOR, body: { text: "And her burial?", page } });
+  assert.equal(lastPost().body.body, "And her burial?", "same page: no context re-sent");
+  const snap = JSON.parse((await chatRow(id)).page);
+  assert.deepEqual(Chat.readPage(snap).text, page.text);
+  assert.deepEqual(Chat.readPage(snap, "second").matching_lines, ["Example second line"]);
+  await call("POST", `/api/chat/${id}/messages`, { as: EDITOR, body: { text: "What about this one?", page: { path: "people", title: "People", text: "List" } } });
+  assert.match(lastPost().body.body, /<page_context>/, "a new page sends a new pointer");
+});
+
+test("the assistant has its own daily allowance, separate from agent runs", async () => {
+  const Cfg = await import("../worker/agent/config.js");
+  const s = Cfg.settings({ AI_DAILY_TOKEN_BUDGET: "1000", AI_CHAT_DAILY_TOKENS: "500" });
+  await env.DB.batch([Cfg.recordUsage(env, { input: 5000 })]); // agent work over its budget…
+  await Cfg.checkDaily(env, s, { chat: true }); // …doesn't block the assistant
+  await assert.rejects(Cfg.checkDaily(env, s), /AI budget/);
+  await env.DB.batch([Cfg.recordUsage(env, { input: 600, chat: true })]);
+  await assert.rejects(Cfg.checkDaily(env, s, { chat: true }), /for the assistant/);
+  const id = await newChat();
+  await Chat.recordChatUsage(env, id, { input: 10, output: 2 });
+  assert.equal((await chatRow(id)).input_tokens, 10);
+  await env.DB.prepare("DELETE FROM ai_usage").run();
 });
 
 test("an editor's assistant sees living relatives in full", async () => {

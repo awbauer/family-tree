@@ -9,13 +9,13 @@
 //   POST /api/chat/:id/messages                {text, page: {path, title, text}}  send a message
 //   POST /api/chat/:id/abort                   stop the reply in progress
 //   POST /api/chat/changes/:cid/apply|dismiss|undo
-import { now } from "../db.js";
+import { J, now, parse } from "../db.js";
 import { can, grantFor } from "../auth.js";
 import { fail, json } from "../http.js";
 import { applyAndCommit, revertBatch, isConflict, newBatchId } from "../store.js";
 import { settings, agentsEnabled, checkDaily, BudgetError } from "./config.js";
 import { agentsFetch } from "./routes.js";
-import { CHAT_PATH, ASSISTANT, chatOut, changeOut, loadChat, chatScope, checkChange, pageContext, composeMessage, stripContext } from "./chat.js";
+import { CHAT_PATH, ASSISTANT, chatOut, changeOut, loadChat, chatScope, checkChange, pageSnapshot, pageContext, composeMessage, stripContext } from "./chat.js";
 
 const MAX_TEXT = 4000;
 
@@ -102,11 +102,16 @@ export async function sendMessage(c, id, d, { scoped }) {
   const text = String(d.text || "").trim();
   if (!text) fail(400, "Say something.");
   if (text.length > MAX_TEXT) fail(400, `Keep messages under ${MAX_TEXT} characters.`);
-  try { await checkDaily(c.env, settings(c.env)); } catch (e) { if (e instanceof BudgetError) fail(429, e.message); throw e; }
+  try { await checkDaily(c.env, settings(c.env), { chat: true }); } catch (e) { if (e instanceof BudgetError) fail(429, e.message); throw e; }
   const b = await scoped(c, grantFor(c.access, chat.tree_id));
-  const body = composeMessage(text, pageContext(b, d.page));
+  // The page pointer goes with a message only when the editor has moved to another page; the page's text is kept on
+  // the chat for read_page.
+  const snap = pageSnapshot(d.page);
+  const prev = parse(chat.page, null);
+  const moved = snap && (!prev || prev.key !== snap.key);
+  const body = composeMessage(text, moved ? pageContext(b, snap) : "");
   const adm = await agentsFetch(c.env, `${CHAT_PATH}/${id}`, { kind: "user", body, initialData: { chatId: id } });
-  await c.env.DB.prepare("UPDATE chats SET updated_at = ?, title = COALESCE(title, ?) WHERE id = ?").bind(now(), text.slice(0, 80), id).run();
+  await c.env.DB.prepare("UPDATE chats SET updated_at = ?, title = COALESCE(title, ?), page = COALESCE(?, page) WHERE id = ?").bind(now(), text.slice(0, 80), snap ? J(snap) : null, id).run();
   return json({ ok: true, submission: adm.submissionId }, 202);
 }
 

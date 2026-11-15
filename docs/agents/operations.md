@@ -175,10 +175,16 @@ Editors can hand a to-do or a person to a research agent that runs in Cloudflare
 | Variable | Default | |
 |---|---|---|
 | `AGENT_MAX_RUNS_PER_DAY` | 10 | research runs per day |
-| `AI_DAILY_TOKEN_BUDGET` | 4,000,000 | all AI work together; tools stop when it's used up |
+| `AI_DAILY_TOKEN_BUDGET` | 10,000,000 | agent runs and the content job together, per day; tools stop when it's used up |
+| `AI_CHAT_DAILY_TOKENS` | 2,000,000 | the page assistant's own daily allowance (agent runs can't use it up) |
+| `AGENT_MAX_RUN_TOKENS` | 1,500,000 | one research run; past it, its web tools tell it to submit what it has |
+| `AI_CACHE_READ_WEIGHT` | 0.17 | a cached input token counts as this fraction of a fresh one (Kimi K2.6: $0.16/M vs $0.95/M) |
+| `AI_CONTEXT_WINDOW` | 262,144 | the model's context window, for early compaction; set it if you change `AI_MODEL` |
 | `AGENT_MAX_SEARCHES` / `AGENT_MAX_FETCHES` | 25 / 40 | per run |
 | `AGENT_MAX_MINUTES` | 45 | per run (Flue's durability timeout); stale runs are closed on the next read |
 | `CONTENT_MAX_PER_RUN` | 50 | profiles and story checks per weekly job; for the first backfill, run it on demand a few times |
+
+Budgets count "budget tokens": fresh input, cache writes and output in full, cached input at `AI_CACHE_READ_WEIGHT`. Every model call re-sends the whole conversation, so the agents are built to keep it small: research agents read pages in 6,000-character windows (with an outline) or only the passages that mention what they're after (`web_fetch` with `find`), and older steps are summarised once a conversation passes about 48k tokens (32k for the assistant). Each model call logs a `[turn]` line with its token counts (no content) to Workers Logs.
 
 Also set a **spend limit and rate limit on the AI Gateway itself** (dashboard → AI → AI Gateway → your gateway → Settings). That is the hard stop if anything here misbehaves. Other variables: `AI_MODEL` (`@cf/moonshotai/kimi-k2.6`), `WEB_SEARCH_BYOK_ALIAS`, `AI_EFFORT` (`high`), `AI_CONTENT_EFFORT` (`medium`), `AI_GATEWAY_ID` (`default`), `WEB_SEARCH_PROVIDER` (`exa`), `CONTENT_JOB_ENABLED` (`false`).
 
@@ -218,14 +224,14 @@ npm run dev
 
 ## Page assistant (chat on every page)
 
-Editors get an **Ask** button on every page. It opens a chat with an agent (`agents/src/agents/assistant.js`, Flue) that knows the page you're on: each message carries the page's address, its visible text and, on a person or tree page, that person's full record (names and events with their fact ids, sources, photos, families, open findings and to-dos). It reads more of the tree with tools, always as you see it.
+Editors get an **Ask** button on every page. It opens a chat with an agent (`agents/src/agents/assistant.js`, Flue) that knows the page you're on. When you move to another page, your next message carries a short pointer: the page, the person it's about (id, years, how many events and relatives are recorded). The record itself and the page's visible text aren't sent; the agent fetches what the question needs, with `get_person` and `read_page` (the page snapshot is kept on the chat, `chats.page`). It reads the rest of the tree with tools, always as you see it.
 
 - **It drafts, you decide.** When you describe a change, the assistant checks it against the tree and files a draft. The chat shows it as a card with exactly what would change and **Apply** / **Dismiss** buttons. Nothing changes until you press Apply. **Undo** on the card reverts it. A newer draft replaces one still waiting.
 - **Who made the change.** An applied draft is logged as made by `agent:assistant` **on behalf of** the editor who pressed Apply (`changes.actor` / `actor_kind = 'agent'` / `on_behalf_of`, plus `via` = the chat and draft). History shows "🤖 assistant on behalf of …"; PROV-O (`/api/prov`) has the agent with a `prov:qualifiedDelegation` from the editor for that activity. Undo is logged as the editor's own act.
 - **Where chats live.** Each conversation is a Flue `FlueAssistantAgent` Durable Object (id = chat id). The chat list (`chats`: owner, tree, title, tokens) and the drafted changes (`chat_changes`) are in D1, so applying a draft marks it applied in the same transaction as the edit. Only the editor who started a chat can read or use it.
 - **Who:** editors and the owner, only for trees they edit. Losing editor access stops it.
 - **What it sees:** what you see, living relatives included, so it can help keep them current. It has no web access and never deletes people (duplicates are merged).
-- **Model and cost:** the same model as research (`AI_MODEL`), at `AI_CHAT_EFFORT` (default `low`), counted against `AI_DAILY_TOKEN_BUDGET`. With AI Gateway logs on (`AI_GATEWAY_LOGS`), chat messages, page context included, are kept in the gateway's logs like research prompts.
+- **Model and cost:** the same model as research (`AI_MODEL`), at `AI_CHAT_EFFORT` (default `low`), counted against its own allowance, `AI_CHAT_DAILY_TOKENS`. With AI Gateway logs on (`AI_GATEWAY_LOGS`), chat messages, page context included, are kept in the gateway's logs like research prompts.
 - **Setup:** none beyond the agents Worker. Migration `0006_chat.sql` adds `chats`, `chat_changes` and the attribution columns on `changes`; the agents Worker's `v2` Durable Object migration adds `FlueAssistantAgent`. Routes: `worker/agent/chat-routes.js`.
 
 ## Data quality review (agent)

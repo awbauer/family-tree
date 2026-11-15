@@ -9,7 +9,9 @@ import * as v from "valibot";
 import { createAIWebSearch, renderWebSearchResults } from "agents/websearch";
 import { fetchWeb, windowWebFetchPage, renderWebFetchPage } from "agents/webfetch";
 import { scopedFor } from "../../../worker/bundle.js";
-import { settings, checkDaily, tokensOf, BudgetError } from "../../../worker/agent/config.js";
+import { settings, checkDaily, compactAt, BudgetError } from "../../../worker/agent/config.js";
+import { usedTokens } from "../meter.js";
+import { pageView } from "../../../worker/agent/pages.js";
 import { SYSTEM, loadRun, markRunning, logRun, recordRunUsage, recordUsed, submitResults, endRun } from "../../../worker/agent/runs.js";
 import { personView, searchPeople, relationship, checkSubmission } from "../../../worker/agent/tools.js";
 import { useUsage } from "./usage.js";
@@ -19,6 +21,10 @@ const S = settings(env);
 // Web Search API; without it, the agent uses record sites' own search pages.
 const BLOCKED_HOSTS = ["google.com", "*.google.com", "*.google.co.uk", "bing.com", "*.bing.com", "duckduckgo.com", "*.duckduckgo.com", "search.yahoo.com", "yandex.com", "*.yandex.com", "*.baidu.com"];
 const FINISHED = ["succeeded", "failed", "cancelled"];
+const PAGE_CHARS = 6000; // one window of a fetched page (the library default is 20,000)
+// Pages this conversation fetched, so reading on or searching within one doesn't download it again (per isolate).
+const pageCache = new Map();
+const remember = (url, page) => { pageCache.set(url, page); if (pageCache.size > 12) pageCache.delete(pageCache.keys().next().value); };
 const str = (d) => v.pipe(v.string(), v.description(d));
 const opt = (schema) => v.optional(schema);
 
@@ -53,7 +59,9 @@ const Submission = v.object({
 });
 
 export function Researcher({ id }) {
-  useModel(`cloudflare/${S.model}`, { thinkingLevel: S.effort, compaction: { keepRecentTokens: 20000 } });
+  // Every model call re-sends the whole conversation, so keep it small: older steps are summarised once it passes
+  // ~48k tokens, and pages come back in short windows (web_fetch) that the agent widens only where it needs to.
+  useModel(`cloudflare/${S.model}`, { thinkingLevel: S.effort, compaction: compactAt(S, 48000, 12000) });
   const data = useInitialData();
   const runId = (data && data.runId) || id;
   const [reminded, setReminded] = usePersistentState("reminded", false);
@@ -70,6 +78,7 @@ export function Researcher({ id }) {
   }
   /** Count a web call against the run's budget (atomically, in D1); null when the budget is used up. */
   async function spend(kind, max) {
+    if (usedTokens(id) >= S.runTokens) return null; // this run's own token cap
     try { await checkDaily(env, S); } catch (e) { if (e instanceof BudgetError) return null; throw e; }
     const r = await env.DB.prepare(`UPDATE agent_runs SET ${kind} = ${kind} + 1 WHERE id = ? AND ${kind} < ? RETURNING ${kind}`).bind(runId, max).first();
     return r ? r[kind] : null;
@@ -121,19 +130,25 @@ export function Researcher({ id }) {
   });
   useTool({
     name: "web_fetch",
-    description: `Read one web page, PDF or document as Markdown. Long pages come in sections: pass the offset the result gives to continue. Only cite pages you have read this way. Budget: ${S.maxFetches} fetches per run.`,
-    input: v.object({ url: v.pipe(v.string(), v.url()), offset: opt(v.pipe(v.number(), v.integer(), v.minValue(0))) }),
+    description: `Read a web page, PDF or document as Markdown, a piece at a time. The first call returns the page's outline (its headings, with offsets) and the first ${PAGE_CHARS.toLocaleString("en")} characters. To read on, pass offset; to see only the passages that mention something (a name, a year, a place), pass find, e.g. find: "Smith 1923". Prefer find on long pages. Reading more of a page you already fetched doesn't count against the budget. Only cite pages you have read this way. Budget: ${S.maxFetches} pages per run.`,
+    input: v.object({
+      url: v.pipe(v.string(), v.url()),
+      offset: opt(v.pipe(v.number(), v.integer(), v.minValue(0))),
+      find: opt(str("Words to look for on the page; returns only the passages that mention them, with their offsets")),
+    }),
     timeoutMs: 60_000,
     async run({ data, signal }) {
       await tree();
-      const n = await spend("fetches", S.maxFetches);
-      if (n == null) return "The page budget for this run (or today's AI budget) is used up. Submit what you have with submit_results now.";
-      const page = await fetchWeb({ url: data.url }, { binding: env.AI, timeoutMs: 45_000, maxBytes: 4_000_000, blockedHosts: BLOCKED_HOSTS, signal });
-      if (!data.offset) {
+      let page = pageCache.get(data.url);
+      if (!page) {
+        const n = await spend("fetches", S.maxFetches);
+        if (n == null) return "The page budget for this run (or its token budget, or today's AI budget) is used up. Submit what you have with submit_results now.";
+        page = await fetchWeb({ url: data.url }, { binding: env.AI, timeoutMs: 45_000, maxBytes: 4_000_000, blockedHosts: BLOCKED_HOSTS, signal });
+        remember(data.url, page);
         await logRun(env, runId, `web_fetch: ${data.url}`);
         await recordUsed(env, runId, { kind: "page", url: page.finalUrl || data.url, title: page.title, status: page.status, contentType: page.contentType });
-      }
-      return renderWebFetchPage(windowWebFetchPage(page, { offset: data.offset || 0 }));
+      } else if (usedTokens(id) >= S.runTokens) return "This run's token budget is used up. Submit what you have with submit_results now.";
+      return pageView(page, { offset: data.offset, find: data.find, chars: PAGE_CHARS, render: (w) => renderWebFetchPage(windowWebFetchPage(page, w)) });
     },
   });
   useTool({

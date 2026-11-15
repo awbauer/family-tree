@@ -17,7 +17,7 @@ export const ASSISTANT = "agent:assistant";    // the actor the change log recor
 export const CONTEXT_OPEN = "<page_context>", CONTEXT_CLOSE = "</page_context>";
 const MAX_PAGE_TEXT = 4000;
 
-export const CHAT_SYSTEM = `You are the assistant built into a private family-history site. The person talking to you is an editor of this family tree. They are looking at a page of the site; each of their messages may carry a <page_context> block describing that page and the records on it. Use it: "this person", "her father", "the marriage" refer to what's on their page.
+export const CHAT_SYSTEM = `You are the assistant built into a private family-history site. The person talking to you is an editor of this family tree. They are looking at a page of the site; a message may carry a <page_context> block. It says which page and which record they mean, briefly; it is only sent when they move to another page. "This person", "her father", "the marriage" refer to that page. Fetch what you need: get_person for a record, read_page for the rest of what they see. Don't fetch what the question doesn't need.
 
 What you do:
 - Answer questions about the tree from the records (get_person, search_people, relationship_path, person_history). Say plainly when the tree doesn't record something. Never make up facts, dates, places or sources.
@@ -65,7 +65,7 @@ export async function chatScope(env, chat) {
 export async function recordChatUsage(env, id, { input, output }) {
   await env.DB.batch([
     env.DB.prepare("UPDATE chats SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ? WHERE id = ?").bind(input, output, id),
-    recordUsage(env, { input, output }),
+    recordUsage(env, { input, output, chat: true }), // the assistant's own daily allowance
   ]);
 }
 
@@ -115,32 +115,53 @@ export function chatPersonView(b, id) {
       .map((f) => ({ id: f.id, kind: f.kind, finding: f.finding, confidence: f.confidence })),
     open_todos: (R.todo || []).filter((t) => t.person === id).map((t) => ({ id: t.id, task: t.task, status: t.status })),
     data_warnings: (p.issues || []).length ? p.issues.map((i) => i.message || i.kind) : undefined,
-    profile: p.profile ? p.profile.text : undefined,
   };
 }
 
-/** The <page_context> block for one message: what the page is, the records it is about, and its visible text. */
-export function pageContext(b, page) {
-  if (!page || typeof page !== "object") return "";
+/** Where the editor is: a page's address and the record it is about, as a key (the context is only re-sent when
+ *  it changes) and a snapshot kept on the chat for read_page. */
+export function pageSnapshot(page) {
+  if (!page || typeof page !== "object") return null;
   const path = String(page.path || "").replace(/^#?\/?/, "").slice(0, 200);
-  const [kind, arg] = path.split("?")[0].split("/");
-  const lines = [`Page: ${String(page.title || "").slice(0, 200)} (#/${path})`];
+  const title = String(page.title || "").slice(0, 200);
+  const text = String(page.text || "").replace(/\s+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, MAX_PAGE_TEXT);
+  return { key: `${path}|${title}`, path, title, text };
+}
+
+/** A short <page_context> block: which page, which record, how big it is, and how to read more. The record itself and
+ *  the page's text stay out of the message; the agent calls get_person or read_page for what it actually needs. */
+export function pageContext(b, snap) {
+  if (!snap) return "";
+  const [kind, arg] = snap.path.split("?")[0].split("/");
+  const lines = [`The editor is on: ${snap.title} (#/${snap.path}).`];
   const P = b.people || {};
-  if ((kind === "person" || kind === "tree") && arg && P[decodeURIComponent(arg)]) {
-    const id = decodeURIComponent(arg);
-    lines.push(kind === "person" ? `This page is the profile of ${P[id].name} (${id}).` : `This page is the family tree chart centred on ${P[id].name} (${id}).`);
-    lines.push(`Their record: ${JSON.stringify(chatPersonView(b, id))}`);
+  const id = arg && decodeURIComponent(arg);
+  if ((kind === "person" || kind === "tree") && P[id]) {
+    const p = P[id], yrs = [p.birth && p.birth.year, p.death && p.death.year].map((y) => y || "?").join("–");
+    const fam = (b.families || {});
+    const parents = (p.famc || []).flatMap((f) => [fam[f] && fam[f].husband, fam[f] && fam[f].wife]).filter(Boolean).length;
+    const spouses = (p.fams || []).filter((f) => fam[f] && (fam[f].husband === id ? fam[f].wife : fam[f].husband)).length;
+    const kids = (p.fams || []).reduce((n, f) => n + ((fam[f] && fam[f].children) || []).length, 0);
+    lines.push(`${kind === "person" ? "It is the profile of" : "It is the family tree chart centred on"} ${p.name} (${id}, ${p.private ? "shown as a name only" : `${p.living ? "living" : yrs}; ${(p.events || []).length} events, ${parents} parents, ${spouses} spouses, ${kids} children recorded`}).`);
+    if (!p.private) lines.push(`Call get_person("${id}") for their record before answering about them or changing it.`);
   } else if (kind === "story" && arg) {
-    const s = ((b.research || {}).stories || []).find((x) => x.slug === decodeURIComponent(arg));
-    if (s) lines.push(`This page is the story "${s.title}" about ${(s.people || []).map((x) => `${(P[x] || {}).name || x} (${x})`).join(", ")}.`);
-  } else if (kind === "branch" && arg) {
-    lines.push(`This page lists the people in the branch "${decodeURIComponent(arg)}".`);
-  }
+    const s = ((b.research || {}).stories || []).find((x) => x.slug === id);
+    if (s) lines.push(`It is the story "${s.title}" about ${(s.people || []).map((x) => `${(P[x] || {}).name || x} (${x})`).join(", ")}.`);
+  } else if (kind === "branch" && arg) lines.push(`It lists the people in the branch "${id}".`);
+  if (snap.text) lines.push(`The page's visible text (${snap.text.length} characters) is available with read_page.`);
   const home = b.home && P[b.home];
   if (home) lines.push(`The tree's home person is ${home.name} (${b.home}).`);
-  const text = String(page.text || "").replace(/\s+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, MAX_PAGE_TEXT);
-  if (text) lines.push(`Visible text on the page (may be cut short):\n${text}`);
   return `${CONTEXT_OPEN}\n${lines.join("\n")}\n${CONTEXT_CLOSE}`;
+}
+
+/** read_page: the visible text of the page the editor was last on, or the part of it that mentions `find`. */
+export function readPage(snap, find) {
+  if (!snap || !snap.text) return { error: "No page text was sent with the editor's messages." };
+  const text = snap.text;
+  if (!String(find || "").trim()) return { page: snap.title, text };
+  const terms = String(find).toLowerCase().split(/\s+/).filter(Boolean);
+  const paras = text.split(/\n+/).filter((l) => terms.some((t) => l.toLowerCase().includes(t)));
+  return { page: snap.title, matching_lines: paras.slice(0, 40) };
 }
 
 /** The message as the agent receives it; the page block goes after the words so the UI can strip it back off. */
