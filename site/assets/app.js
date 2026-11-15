@@ -912,6 +912,15 @@ function startFamilyApp(D) {
         <form id="ar-new" class="card filters" style="margin-bottom:16px"><input name="person" list="ar-people" placeholder="Person (optional)" style="flex:1;min-width:200px">
           <datalist id="ar-people">${people.filter((p) => !isUnknown(p) && !p.living).map((p) => `<option value="${esc(p.name)} (${p.id})">`).join("")}</datalist>
           <input name="instructions" placeholder="What should it look for?" style="flex:2;min-width:240px"><button class="btn primary">Start a run</button></form>
+        <details class="card" style="margin-bottom:16px"><summary><b>Data quality review</b> <span class="small muted">· check open to-dos and findings against what the tree now records</span></summary>
+          <p class="small muted">The agent reads the tree only (no web). It keeps, closes, resolves or dismisses each item, and files any fix to the facts as a suggestion. A dry run changes nothing: you get a report and can apply it afterwards.</p>
+          <form id="dq-new" class="filters">
+            <select name="scope" aria-label="What to review"><option value="both">To-dos and findings</option><option value="todos">To-dos only</option><option value="findings">Findings only</option></select>
+            <input name="person" list="dq-people" placeholder="Person (optional)" style="flex:1;min-width:180px">
+            <datalist id="dq-people">${people.filter((p) => !isUnknown(p)).map((p) => `<option value="${esc(p.name)} (${p.id})">`).join("")}</datalist>
+            <label class="small">Up to <input name="limit" type="number" min="1" max="100" value="10" style="width:64px"> items</label>
+            <label class="small"><input name="dry" type="checkbox" checked> Dry run</label>
+            <button class="btn primary">Start review</button></form></details>
         <div id="ar-out"><p class="muted">Loading…</p></div>`;
     } else if (tab === "todo") {
       const pr = { high: 0, medium: 1, low: 2 };
@@ -1028,6 +1037,22 @@ function startFamilyApp(D) {
 
   // ---------------------------------------------------------------- cloud research runs (editors)
   const RUN_TXT = { queued: "Queued", running: "Running", succeeded: "Done", failed: "Failed", cancelled: "Cancelled" };
+  const VERDICT_TXT = { still_valid: "Still valid", resolved: "Resolved", obsolete: "Obsolete", duplicate: "Duplicate", needs_human: "Needs a person" };
+  const DQ_STATUS = { would: "would apply", applied: "applied", skipped: "skipped (changed meanwhile)" };
+  /** A data quality review's decisions, and "Apply" for a finished dry run that hasn't been applied. */
+  function qualityReport(r) {
+    const rep = r.report || [], o = r.options || {};
+    const counts = rep.reduce((a, d) => ((a[d.verdict] = (a[d.verdict] || 0) + 1), a), {});
+    const ref = (x) => { const [t, n] = x.split(":"); return t === "todo" ? `<a href="#/research/todo">to-do #${esc(n)}</a>` : `<a href="#/research/findings">finding #${esc(n)}</a>`; };
+    const waiting = o.dry_run && !o.applied_at && r.status === "succeeded" && rep.some((d) => d.status === "would");
+    return `<p class="small">${o.dry_run ? `<b>Dry run</b>${o.applied_at ? ` · applied by ${who(o.applied_by)} ${esc(o.applied_at.slice(0, 16).replace("T", " "))}` : ""} · ` : ""}${rep.length} of ${o.count || "?"} reviewed${rep.length ? ": " + Object.entries(counts).map(([k, n]) => `${n} ${esc((VERDICT_TXT[k] || k).toLowerCase())}`).join(", ") : ""}</p>
+      ${r.summary ? `<p class="small">${esc(r.summary)}</p>` : ""}
+      ${rep.length ? `<details${waiting ? " open" : ""}><summary class="small">Decisions</summary><div class="table-wrap"><table class="data small"><thead><tr><th>Item</th><th>Verdict</th><th>Action</th><th>Why</th></tr></thead><tbody>${rep.map((d) => `<tr>
+        <td>${ref(d.item)}${d.person && P[d.person] ? `<br>${plink(d.person)}` : ""}</td><td>${esc(VERDICT_TXT[d.verdict] || d.verdict)}</td>
+        <td>${esc(d.detail || "")}<br><span class="muted">${esc(DQ_STATUS[d.status] || d.status)}${d.proposal ? ` · <a href="#/research/queue">suggestion #${esc(d.proposal)}</a>` : ""}</span></td>
+        <td>${esc(d.note)}${(d.evidence || []).length ? `<br><span class="muted">${esc(d.evidence.join("; "))}</span>` : ""}${d.duplicate_of ? `<br><span class="muted">same as ${esc(d.duplicate_of)}</span>` : ""}</td></tr>`).join("")}</tbody></table></div></details>` : ""}
+      ${waiting ? `<button class="btn primary" data-apply-run="${esc(r.id)}">Apply these decisions</button>` : ""}`;
+  }
   function wireAgentRuns() {
     const out = document.getElementById("ar-out");
     let timer = null;
@@ -1036,15 +1061,29 @@ function startFamilyApp(D) {
       try {
         const { runs, today, limits } = await api("GET", "agent/runs");
         out.innerHTML = `<p class="small muted">Today: ${today ? today.runs : 0} of ${limits.runs_per_day} runs, ${(today ? today.tokens : 0).toLocaleString()} of ${limits.tokens_per_day.toLocaleString()} tokens · ${esc(limits.model)} · up to ${limits.searches_per_run} searches and ${limits.minutes_per_run} minutes per run</p>` +
-          (runs.length ? runs.map((r) => `<section class="card" style="margin-bottom:12px"><div class="eyebrow">${esc(r.created_at.slice(0, 16).replace("T", " "))} · ${who(r.started_by)} · <span class="badge st-${r.status === "succeeded" ? "verified" : r.status === "failed" ? "disputed" : "unverified"}">${RUN_TXT[r.status]}</span></div>
+          (runs.length ? runs.map((r) => `<section class="card" style="margin-bottom:12px"><div class="eyebrow">${esc(r.created_at.slice(0, 16).replace("T", " "))} · ${who(r.started_by)} · ${r.kind === "quality" ? "Data quality review · " : ""}<span class="badge st-${r.status === "succeeded" ? "verified" : r.status === "failed" ? "disputed" : "unverified"}">${RUN_TXT[r.status]}</span></div>
             <p>${r.todo_id ? `To-do #${r.todo_id}` : ""}${r.person && P[r.person] ? ` ${plink(r.person)}` : ""}${r.instructions ? ` · ${esc(r.instructions)}` : ""}</p>
+            ${r.kind === "quality" ? qualityReport(r) : ""}
             <p class="small muted">${r.steps} model responses · ${(r.tokens.input + r.tokens.output).toLocaleString()} tokens${r.proposals.length ? ` · suggestion ${r.proposals.map((x) => `<a href="#/research/queue">#${x}</a>`).join(", ")}` : ""}${r.error ? ` · ${esc(r.error)}` : ""}</p>
             ${r.log.length ? `<details><summary class="small">${r.log.length} steps</summary><ul class="small">${r.log.map((l) => `<li>${esc(l.text)}</li>`).join("")}</ul></details>` : ""}
             ${["queued", "running"].includes(r.status) ? `<button class="btn" data-cancel="${esc(r.id)}">Stop</button>` : ""}</section>`).join("") : `<div class="empty">No runs yet.</div>`);
+        out.querySelectorAll("[data-apply-run]").forEach((b) => (b.onclick = async () => {
+          if (!confirm("Apply this review's decisions? Items changed since the review are skipped; fixes become suggestions.")) return;
+          b.disabled = true;
+          try { const r = await api("POST", `agent/runs/${b.dataset.applyRun}/apply`); alert(`Applied ${r.report.filter((d) => d.status === "applied").length}, skipped ${r.report.filter((d) => d.status === "skipped").length}.`); } catch (e) { alert(e.message); }
+          load();
+        }));
         out.querySelectorAll("[data-cancel]").forEach((b) => (b.onclick = async () => { if (!confirm("Stop this run? Its to-do goes back to the list.")) return; try { await api("POST", `agent/runs/${b.dataset.cancel}/cancel`); } catch (e) { alert(e.message); } load(); }));
         if (runs.some((r) => ["queued", "running"].includes(r.status)) && location.hash.startsWith("#/research/agents")) timer = setTimeout(load, 8000);
       } catch (e) { out.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
     }
+    document.getElementById("dq-new").onsubmit = async (ev) => {
+      ev.preventDefault();
+      const f = ev.target, person = (f.person.value.match(/\(([^)]+)\)\s*$/) || [])[1];
+      if (!f.dry.checked && !confirm("Not a dry run: the agent will close, resolve and dismiss items as it goes. Continue?")) return;
+      try { await api("POST", "agent/runs", { kind: "quality", scope: f.scope.value, person: person || undefined, limit: +f.limit.value || 10, dry_run: f.dry.checked }); load(); }
+      catch (e) { alert(e.message); }
+    };
     document.getElementById("ar-new").onsubmit = async (ev) => {
       ev.preventDefault();
       const f = ev.target, person = (f.person.value.match(/\(([^)]+)\)\s*$/) || [])[1];

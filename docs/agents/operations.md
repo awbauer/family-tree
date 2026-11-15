@@ -228,6 +228,23 @@ Editors get an **Ask** button on every page. It opens a chat with an agent (`age
 - **Model and cost:** the same model as research (`AI_MODEL`), at `AI_CHAT_EFFORT` (default `low`), counted against `AI_DAILY_TOKEN_BUDGET`. With AI Gateway logs on (`AI_GATEWAY_LOGS`), chat messages, page context included, are kept in the gateway's logs like research prompts.
 - **Setup:** none beyond the agents Worker. Migration `0006_chat.sql` adds `chats`, `chat_changes` and the attribution columns on `changes`; the agents Worker's `v2` Durable Object migration adds `FlueAssistantAgent`. Routes: `worker/agent/chat-routes.js`.
 
+## Data quality review (agent)
+
+Research → Agent runs → **Data quality review** starts an agent (`agents/src/agents/quality.js`, Flue, one Durable Object per run) that works through open items and checks each against what the tree now records. Editors only.
+
+- **Options:** to-dos, findings or both; optionally one person; a limit of 1–100 items (default 10); **dry run** (on by default).
+- **Items:** open to-dos (open, or in progress and held by nobody else) and open findings the editor can see, oldest-updated first. The plan is fixed when the run starts and kept in `agent_runs.options`.
+- **Per item** the agent gives a verdict: still valid, resolved, obsolete, duplicate or needs a person, with a note and the records it relied on. It reads the tree only, with no web access.
+  - **To-dos:** resolved → done (the outcome names the evidence); obsolete or duplicate → won't do; otherwise kept, with a comment and perhaps a new priority.
+  - **Findings:** resolved → resolved; obsolete or duplicate → dismissed.
+  - **Fixes** to the facts are always filed as suggestions. It may add new to-dos for concrete follow-ups.
+- **Applying:**
+  - Outside a dry run, each decision applies as soon as it is made.
+  - A dry run changes nothing and keeps a report (`agent_runs.report`). **Apply these decisions** applies it later without running the model again, once per run.
+  - Either way, every write is conditional on the item's version, so an item someone changed meanwhile is skipped, not overwritten.
+- **Attribution:** changes are logged as `agent:data-quality` on behalf of the editor who started the run, or who applied the dry run. This shows in to-do history (`on_behalf_of`), on finding resolutions and in the change log (`on_behalf_of`, `via` = the run id).
+- **Budget:** one run against `AGENT_MAX_RUNS_PER_DAY`, tokens against `AI_DAILY_TOKEN_BUDGET`, model effort `AI_CONTENT_EFFORT`. Migration `0007_agent_kinds.sql`; Durable Object migration `v3` (`FlueQualityReviewerAgent`).
+
 ## GEDCOM X storage, export and import
 
 The tree is stored as GEDCOM X (docs/design/standards.md):
