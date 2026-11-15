@@ -6,16 +6,17 @@
 import { env } from "cloudflare:workers";
 import { useAgentStart, useInitialData, useModel, usePersistentState, useTool } from "@flue/runtime";
 import * as v from "valibot";
-import { settings } from "../../../worker/agent/config.js";
+import { settings, compactAt } from "../../../worker/agent/config.js";
 import { searchPeople, relationship } from "../../../worker/agent/tools.js";
-import { CHAT_SYSTEM, loadChat, chatScope, chatPersonView, proposeChange, recordChatUsage } from "../../../worker/agent/chat.js";
+import { CHAT_SYSTEM, loadChat, chatScope, chatPersonView, proposeChange, recordChatUsage, readPage } from "../../../worker/agent/chat.js";
 import { useUsage } from "./usage.js";
 
 const S = settings(env);
 const str = (d) => v.pipe(v.string(), v.description(d));
 
 export function Assistant({ id }) {
-  useModel(`cloudflare/${S.model}`, { thinkingLevel: S.chatEffort, compaction: { keepRecentTokens: 12000 } });
+  // Keep the conversation small (it is re-sent on every model call): older turns are summarised past ~32k tokens.
+  useModel(`cloudflare/${S.model}`, { thinkingLevel: S.chatEffort, compaction: compactAt(S, 32000, 8000) });
   const data = useInitialData();
   const chatId = (data && data.chatId) || id;
   const [, setSeen] = usePersistentState("usage_recorded", { input: 0, output: 0 });
@@ -40,6 +41,17 @@ export function Assistant({ id }) {
     description: "Everything recorded about one person: names and events with their fact ids (fid), sources, notes, photos, research status, the families they are a child or spouse in (with family ids, spouses and children), open findings and to-dos. Use the fids and family ids in propose_change.",
     input: v.object({ id: str("Person id, e.g. I12") }),
     async run({ data }) { return { output: chatPersonView(await tree(), data.id) }; },
+  });
+  useTool({
+    name: "read_page",
+    description: "The visible text of the page the editor is on (what they see: headings, facts, lists), or with find, only the lines that mention those words. Use it when they refer to something on the page that isn't a person's record.",
+    input: v.object({ find: v.optional(str("Words to look for; omit for the whole page text")) }),
+    async run({ data }) {
+      await tree();
+      const c = await chat();
+      let snap = null; try { snap = c.page ? JSON.parse(c.page) : null; } catch {}
+      return { output: readPage(snap, data.find) };
+    },
   });
   useTool({
     name: "search_people",
