@@ -16,6 +16,7 @@
  *   /api/chat…                           the page assistant: chat, drafted changes, apply/undo (worker/agent/chat-routes.js)
  *   GET  /api/admin, PUT /api/admin/{trees,views,members}/:id, PUT|DELETE /api/admin/grants   (owner only)
  *   GET  /api/admin/audit, /api/admin/audit/:key   the audit history of every change (owner only; worker/audit.js)
+ *   GET  /api/admin/stories/hidden        stories some tree doesn't show, and why (owner only; worker/hidden-stories.js)
  *   /api/research-sites…                 the research sites list and its credentials (worker/sites.js)
  *   GET  /media/<key>                    photos/documents from R2, only if attached to someone you can see
  *   everything else                      static app from ./site (contains no family data)
@@ -23,6 +24,7 @@
  * Privacy: every /api and /media request needs a verified Cloudflare Access identity (fails closed), and data is
  * filtered per tree and view in worker/scope.js before it leaves the Worker.
  */
+import { listHiddenStories } from "./hidden-stories.js";
 import { identify, resolveAccess, grantFor, can } from "./auth.js";
 import { HttpError, fail, json } from "./http.js";
 import { scopeFor } from "./bundle.js";
@@ -119,6 +121,7 @@ async function route(c) {
   if ((r = p.match(/^\/api\/chat\/(chat-[\w-]+)\/abort$/)) && m === "POST") return Chat.abortChat(c, r[1]);
   if (p === "/api/admin" && m === "GET") return admin(c);
   if (p === "/api/admin/audit" && m === "GET") return Audit.listAudit(c);
+  if (p === "/api/admin/stories/hidden" && m === "GET") return listHiddenStories(c);
   if ((r = p.match(/^\/api\/admin\/audit\/([\w-]+)$/)) && m === "GET") return Audit.auditDetail(c, r[1]);
   if ((r = p.match(/^\/api\/admin\/(trees|views|members)\/([^/]+)$/)) && m === "PUT") return adminPut(c, r[1], decodeURIComponent(r[2]));
   if (p === "/api/admin/grants" && (m === "PUT" || m === "DELETE")) return adminGrant(c, m);
