@@ -62,6 +62,7 @@ export async function createChat(c, d, { grantOrFail }) {
 function viewMessages(snap) {
   const out = [];
   for (const m of snap.messages || []) {
+    if (m.settlement) { out.push({ id: m.id, role: "notice", text: m.settlement.outcome === "aborted" ? "Stopped." : "The assistant couldn't reply to that. Try again; if it keeps happening, check the agents Worker's logs." }); continue; }
     if (m.display !== "visible") continue;
     const text = (m.parts || []).filter((p) => p.type === "text").map((p) => p.text).join("");
     if (m.role === "user") out.push({ id: m.id, role: "user", text: stripContext(text), at: m.timestamp });
@@ -78,7 +79,7 @@ function viewMessages(snap) {
         }
       }
       if (parts.length) out.push({ id: m.id, role: "assistant", parts, at: m.timestamp });
-    } else if (m.settlement) out.push({ id: m.id, role: "notice", text: m.settlement.outcome === "aborted" ? "Stopped." : "Something went wrong with that reply. Try again." });
+    }
   }
   const settled = new Set((snap.settlements || []).map((s) => s.submissionId));
   const busy = (snap.messages || []).some((m) => m.submissionId && !settled.has(m.submissionId));

@@ -129,7 +129,9 @@
       if (!chatId) { state = { messages: [], changes: [], busy: false }; render(); return; }
       try {
         const r = await api("GET", `chat/${chatId}`);
-        state = { messages: r.messages, changes: r.changes, busy: r.busy };
+        // never let a reply that went missing wipe what the editor just sent
+        const lost = !r.busy && state.messages.length > r.messages.length && !r.messages.some((m) => m.role !== "user");
+        state = { messages: lost ? [...state.messages.filter((m) => m.role === "user"), { role: "notice", text: "The assistant didn't reply. Try again in a moment." }] : r.messages, changes: r.changes, busy: r.busy };
       } catch (e) {
         if (e.status === 404 || e.status === 403) { chatId = null; store.set(key, null); state = { messages: [], changes: [], busy: false }; }
         else state.messages = [...state.messages, { role: "notice", text: `Couldn't reach the assistant: ${e.message}` }];
