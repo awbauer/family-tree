@@ -188,7 +188,7 @@ Editors can hand a to-do or a person to a research agent that runs in Cloudflare
 
 | Variable | Default | |
 |---|---|---|
-| `AGENT_MAX_RUNS_PER_DAY` | 10 | research runs per day |
+| `AGENT_MAX_RUNS_PER_DAY` | 50 | agent runs per day |
 | `AI_DAILY_BUDGET_USD` | 5 | agent runs and the weekly content job together, per day, priced per model; tools stop when it's used up |
 | `AI_CHAT_DAILY_BUDGET_USD` | 1 | the page assistant's own daily allowance (agent runs can't use it up) |
 | `AGENT_MAX_RUN_USD` | 1 | one run; past it, the agent submits what it has |

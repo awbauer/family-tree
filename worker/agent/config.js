@@ -20,7 +20,7 @@ export function settings(env) {
     maxSearches: int(env.AGENT_MAX_SEARCHES, 25),          // web searches per run
     maxFetches: int(env.AGENT_MAX_FETCHES, 40),            // pages read per run
     maxMinutes: int(env.AGENT_MAX_MINUTES, 45),            // wall clock per run (Flue durability timeout)
-    maxRunsPerDay: int(env.AGENT_MAX_RUNS_PER_DAY, 10),
+    maxRunsPerDay: int(env.AGENT_MAX_RUNS_PER_DAY, 50),
     // Budgets are in US dollars, priced per model (models.js), so they mean the same whichever models the agents use.
     dailyUsd: usd(env.AI_DAILY_BUDGET_USD, 5),            // agent runs and the content job together, per day
     chatDailyUsd: usd(env.AI_CHAT_DAILY_BUDGET_USD, 1),    // the page assistant's own allowance, so a heavy run can't
