@@ -8,7 +8,7 @@ A **public, generic template** for a private family-history site. It is two thin
 
 | | Where | In git? |
 |---|---|---|
-| **Code** | `site/`, `worker/`, `tools/`, `example/` (fictional family), docs | Yes, public |
+| **Code** | `web/`, `worker/`, `tools/`, `example/` (fictional family), docs | Yes, public |
 | **The owner's family data** | `family-data/` (GEDCOM, `research.json`, `places.json`, `media/`, `batches/`), `build/`, `wrangler.local.jsonc`, `.dev.vars` | **Never** |
 
 Living people are in the real data. It is only ever served by the Worker, behind Cloudflare Access.
@@ -64,9 +64,11 @@ Free to do without asking: read anything, run `tools/build.py`, `tools/serve.py`
 
 ## Working on code
 
-- Python tools: standard library only, Python 3.9+. Site: plain JS/CSS with no build step. Worker: plain ES modules.
+- Python tools: standard library only, Python 3.9+. Worker: plain ES modules.
+- Site: React + TypeScript in `web/src`, built by Vite into `dist/site` (`npm run build:web`), which the Worker serves. Pages not yet ported live in `web/public/legacy/` (plain JS) and are drawn through `<LegacyRoute>`. New UI goes in React; when you change a legacy page substantially, port it instead. `npm run typecheck` must pass.
+- Work on the site with `npm run dev:example` (the real Worker on the fictional family, port 8790) plus `npm run dev:web` (Vite with hot reload, proxying `/api` to it). `npm run test:e2e` drives every page in a browser against the built site.
 - Test against the fictional family: `python3 tools/build.py --data example --out build-example && python3 tools/serve.py --data example`. If the owner's data exists locally, also run `python3 tools/build.py` and check the counts and issue summary didn't change unexpectedly.
-- The site shell in `site/` is public static content. It must never contain family data. Data comes only from `/api/tree`.
+- The site (`web/`, built to `dist/site`) is public static content. It must never contain family data. Data comes only from `/api/tree`.
 - Keep `wrangler.jsonc` a placeholder template with **no `vars` block** (runtime variables live in the Cloudflare dashboard; `keep_vars` protects them). Real IDs live in the git-ignored `wrangler.local.jsonc` for manual deploys; Workers Builds generates `wrangler.ci.jsonc` via `npm run deploy:ci`.
 - Branch, commit and open PRs against `main`. Keep PR text generic ("fix date parsing for dual-dated years"), never "fix Grandpa X's birth date".
 

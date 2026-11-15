@@ -3,7 +3,7 @@
 
     python3 tools/build.py && python3 tools/serve.py     # http://localhost:8000
 
-Serves site/ as static files, /api/tree from build/family.json, and /media/<path> from
+Serves dist/site/ (npm run build:web) as static files, /api/tree from build/family.json, and /media/<path> from
 <data folder>/media/. Binds to 127.0.0.1 only — this is your private data.
 """
 import argparse
@@ -25,7 +25,7 @@ def main():
 
     class H(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args, **kw):
-            super().__init__(*args, directory=str(ROOT / "site"), **kw)
+            super().__init__(*args, directory=str(ROOT / "dist" / "site"), **kw)
 
         def do_GET(self):
             path = self.path.split("?")[0]

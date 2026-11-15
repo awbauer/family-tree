@@ -26,7 +26,9 @@ places.json        ─┘                 └▶ build/seed.sql   ─▶ D1 (npm
 | Step | Command | Notes |
 |---|---|---|
 | Build | `python3 tools/build.py` | Prints counts, unmatched places and a data-issue summary. Compare with the last build; a big drop in people means a bad export. |
-| Local preview | `python3 tools/serve.py` → http://localhost:8000 | No Cloudflare needed. |
+| Local preview | `python3 tools/serve.py` → http://localhost:8000 (after `npm run build:web`) | No Cloudflare needed. |
+| Work on the site | `npm run dev:example` and `npm run dev:web` → http://localhost:5173 | The real Worker on the fictional family; Vite reloads as you edit `web/`. |
+| Site smoke tests | `npm run build:web && npm run test:e2e` | Every page in a real browser (Playwright); fails on any script error. |
 | Local Worker | `npm run db:load:local && npm run dev` | Needs `.dev.vars` with `ALLOW_UNAUTHENTICATED=true` (local only, never production). |
 | Load remote D1 **⚠ ask** | `npm run db:load` | Full replace of every table. Run `npm run db:counts` afterwards and compare with the build output. |
 | Deploy Worker **⚠ ask** | `npm run deploy` | Only after Access is configured (otherwise the Worker refuses every request, which is safe but useless). |
@@ -47,7 +49,7 @@ After a new GEDCOM export: replace the `.ged` in `family-data/`, build, check wh
 
 **Why not `ctx.access`?** Since August 2026, Workers protected by Access receive `ctx.access` (and `ctx.access.getIdentity()`), which removes the need to parse JWTs. It doesn't work here as built: this Worker serves `site/` as **Static Assets**, and Cloudflare documents that Workers with Static Assets run behind an internal router that **does not pass `ctx.access` to the user Worker**. Switching to it without other changes would make `ctx.access` always `undefined` and lock everyone out. See [ctx.access limitations](https://developers.cloudflare.com/workers/configuration/cloudflare-access/#ctxaccess-limitations).
 
-If you ever move off Static Assets (for example, the Worker serves the three `site/` files itself), you can replace `authorize()` with "no `ctx.access` → 403, and `ctx.access.aud` must equal `ACCESS_AUD`", drop the JWKS code and `ACCESS_TEAM_DOMAIN`, and use Wrangler's `access.dev` block for local testing instead of `ALLOW_UNAUTHENTICATED`.
+If you ever move off Static Assets (for example, the Worker serves the built `dist/site` files itself), you can replace `authorize()` with "no `ctx.access` → 403, and `ctx.access.aud` must equal `ACCESS_AUD`", drop the JWKS code and `ACCESS_TEAM_DOMAIN`, and use Wrangler's `access.dev` block for local testing instead of `ALLOW_UNAUTHENTICATED`.
 
 **Which Access setup:**
 

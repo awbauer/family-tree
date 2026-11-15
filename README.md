@@ -11,7 +11,7 @@ A private family-history site you run on your own Cloudflare account. You keep y
 **Your family data never goes in this repository.** The repo holds only code and a fictional example family. Your GEDCOM and research files live in a git-ignored folder on your machine. The built data is loaded into a **Cloudflare D1** database, and photos go into **R2**. The Worker serves data only to people signed in through **Cloudflare Access**, and without Access configured it refuses.
 
 ```
-site/            the web app (static; contains no family data)
+web/             the web app: React + TypeScript (Vite), built to dist/site; contains no family data
 worker/          Cloudflare Worker: serves /api/tree from D1, /media/* from R2, checks Access JWTs
 tools/
   build.py       GEDCOM + research.json → build/family.json + build/seed.sql
@@ -116,7 +116,7 @@ The map groups raw GEDCOM place strings into canonical places using regexes: `{"
 ## Privacy notes
 
 - The site shows living people. Access is what protects them; `noindex` is just belt and braces.
-- `.assetsignore` keeps a stray `site/family.json` from being uploaded as a public static file.
+- `web/public/.assetsignore` keeps a stray `family.json` from being uploaded as a public static file.
 - GEDCOM, `family-data/`, `build/`, `wrangler.local.jsonc` and `.dev.vars` are git-ignored, and the pre-commit hook blocks them even with `git add -f`. Check `git status` before you push anyway.
 
 ## License
