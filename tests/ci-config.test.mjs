@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const run = (env, src, out) => spawnSync(process.execPath, [join(ROOT, "tools/ci_config.mjs"), src, out], { env: { ...process.env, ...env }, encoding: "utf8" });
+const run = (env, src, out) => spawnSync(process.execPath, [join(ROOT, "tools/ci_config.mjs"), src, out], { env: { ...process.env, CLOUDFLARE_API_TOKEN: "", CLOUDFLARE_ACCOUNT_ID: "", ...env }, encoding: "utf8" });
 const ID = ["0".repeat(8), "1".repeat(4), "2".repeat(4), "3".repeat(4), "4".repeat(12)].join("-"); // built at runtime: the privacy hook blocks UUID literals
 
 test("the committed template has no vars and keeps dashboard vars", () => {
@@ -40,7 +40,7 @@ test("strips vars even if someone adds them back to the template", () => {
   assert.match(r.stderr, /dropping vars ACCESS_AUD, URL/);
 });
 
-test("the agents Worker binding is added only when AGENTS_SERVICE names it", () => {
+test("the agents Worker binding follows AGENTS_SERVICE, or off", () => {
   const dir = mkdtempSync(join(tmpdir(), "ci-"));
   const off = run({ D1_DATABASE_ID: ID, AGENTS_SERVICE: "" }, join(ROOT, "wrangler.jsonc"), join(dir, "a.json"));
   assert.equal(off.status, 0, off.stderr);
@@ -49,6 +49,46 @@ test("the agents Worker binding is added only when AGENTS_SERVICE names it", () 
   assert.equal(on.status, 0, on.stderr);
   assert.deepEqual(JSON.parse(readFileSync(join(dir, "b.json"), "utf8")).services, [{ binding: "AGENTS", service: "family-tree-agents" }]);
   assert.notEqual(run({ D1_DATABASE_ID: ID, AGENTS_SERVICE: "bad name!" }, join(ROOT, "wrangler.jsonc"), join(dir, "c.json")).status, 0);
+  const never = run({ D1_DATABASE_ID: ID, AGENTS_SERVICE: "off" }, join(ROOT, "wrangler.jsonc"), join(dir, "d.json"));
+  assert.equal(never.status, 0, never.stderr);
+  assert.equal(JSON.parse(readFileSync(join(dir, "d.json"), "utf8")).services, undefined);
+});
+
+test("unset, it binds the agents Worker only if the build token can see it", async () => {
+  const { createServer } = await import("node:http");
+  const seen = [];
+  let exists = true;
+  const srv = createServer((req, res) => {
+    seen.push(req.url);
+    if (req.url === "/accounts") return res.writeHead(200).end(JSON.stringify({ success: true, result: [{ id: "a2" }] }));
+    res.writeHead(exists ? 200 : 404).end("{}");
+  });
+  await new Promise((r) => srv.listen(0, r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const dir = mkdtempSync(join(tmpdir(), "ci-"));
+  const env = { D1_DATABASE_ID: ID, AGENTS_SERVICE: "", CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a1", CLOUDFLARE_API_BASE_URL: base };
+  const runAsync = (e, src, out) => new Promise((resolve) => {
+    const p = spawn(process.execPath, [join(ROOT, "tools/ci_config.mjs"), src, out], { env: { ...process.env, ...e } });
+    let err = ""; p.stderr.on("data", (d) => (err += d)); p.on("close", (status) => resolve({ status, stderr: err }));
+  });
+  try {
+    let r = await runAsync(env, join(ROOT, "wrangler.jsonc"), join(dir, "yes.json"));
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, "yes.json"), "utf8")).services, [{ binding: "AGENTS", service: "family-tree-agents" }]);
+    assert.ok(seen.includes("/accounts/a1/workers/scripts/family-tree-agents/settings"));
+    exists = false;
+    r = await runAsync(env, join(ROOT, "wrangler.jsonc"), join(dir, "no.json"));
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(readFileSync(join(dir, "no.json"), "utf8")).services, undefined);
+    // the agents Worker never binds to itself
+    exists = true;
+    r = await runAsync(env, join(ROOT, "agents/wrangler.jsonc"), join(dir, "self.json"));
+    assert.equal(JSON.parse(readFileSync(join(dir, "self.json"), "utf8")).services, undefined);
+    // without an account id, it's looked up from the token
+    r = await runAsync({ ...env, CLOUDFLARE_ACCOUNT_ID: "" }, join(ROOT, "wrangler.jsonc"), join(dir, "lookup.json"));
+    assert.equal(JSON.parse(readFileSync(join(dir, "lookup.json"), "utf8")).services[0].service, "family-tree-agents");
+    assert.ok(seen.includes("/accounts/a2/workers/scripts/family-tree-agents/settings"));
+  } finally { srv.close(); }
 });
 
 test("the agents Worker template is private, keeps dashboard vars and gets the D1 id", () => {
