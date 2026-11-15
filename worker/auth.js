@@ -1,5 +1,6 @@
 // Identity (Cloudflare Access JWT, verified here as defense in depth) and per-tree grants.
 // Why not ctx.access: Static Assets don't pass it through; see docs/agents/operations.md.
+import { S } from "../strings/index.ts";
 
 const ROLE_RANK = { agent: 1, member: 1, editor: 2, owner: 3 };
 
@@ -14,9 +15,9 @@ export async function identify(request, env) {
   }
   const team = (env.ACCESS_TEAM_DOMAIN || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
   const aud = env.ACCESS_AUD;
-  if (!team || !aud) return { ok: false, error: "Cloudflare Access is not configured (set ACCESS_TEAM_DOMAIN and ACCESS_AUD). Refusing to serve family data." };
+  if (!team || !aud) return { ok: false, error: S.api.auth.accessNotConfigured };
   const token = request.headers.get("Cf-Access-Jwt-Assertion") || cookie(request, "CF_Authorization");
-  if (!token) return { ok: false, error: "Not signed in through Cloudflare Access." };
+  if (!token) return { ok: false, error: S.api.auth.notSignedIn };
   try {
     const [h64, p64, s64] = token.split(".");
     const header = JSON.parse(b64text(h64));
@@ -34,7 +35,7 @@ export async function identify(request, env) {
     if (payload.common_name) return { ok: true, principal: `service:${payload.common_name}`, kind: "agent" };
     throw new Error("token has neither an email nor a service-token name");
   } catch (e) {
-    return { ok: false, error: "Invalid Access token: " + e.message };
+    return { ok: false, error: S.api.auth.invalidToken(e.message) };
   }
 }
 
