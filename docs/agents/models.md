@@ -1,6 +1,6 @@
 # Which model each agent uses
 
-Each agent runs on its own model, set in the agents Worker's dashboard variables:
+Each agent runs on its own model, set in the Worker's dashboard variables:
 
 - `AI_MODEL_<AGENT>`: which model the agent uses.
 - `AI_EFFORT_<AGENT>`: how hard it reasons.

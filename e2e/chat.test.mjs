@@ -1,4 +1,4 @@
-// The page assistant panel in a real browser. The agents Worker isn't part of the dev server, so the chat endpoints
+// The page assistant panel in a real browser. The agents aren't part of the dev server, so the chat endpoints
 // are answered here (and /api/me says the agents are on); the edit preview goes to the real Worker.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";

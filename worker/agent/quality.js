@@ -1,6 +1,6 @@
 // The data quality review (issue #31): an agent run that works through open to-dos and findings, checks each against
 // what the tree now records, and keeps, closes, resolves or dismisses it. Shared by the site Worker (starts runs,
-// applies a dry run's report later) and the agents Worker (agents/src/agents/quality.js, where the Flue agent decides).
+// applies a dry run's report later) and the agents (agents/src/agents/quality.js, where the Flue agent decides).
 //
 // The agent reads the tree only (no web) and decides one item at a time with record_decision. Outside a dry run, to-do
 // and finding bookkeeping is applied at once, logged as agent:data-quality on behalf of the editor who started the

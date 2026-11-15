@@ -1,6 +1,6 @@
 // Sherlock, the relatives finder (#44), site side: starting a run and validating its options, what reaches the agent,
 // how candidates are checked (already in the tree, possibly living), and how accepted ones land in the tree. The
-// agents Worker is a fake service binding; the shared logic runs directly. Fictional example family only.
+// agents are a fake env.AGENTS; the shared logic runs directly. Fictional example family only.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

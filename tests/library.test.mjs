@@ -1,6 +1,6 @@
 // The stories librarian (#36): auditing every story against the tree, filing fixes as story revisions (nothing
 // published changes until an editor approves), ranking candidate subjects for new stories, and commissioning at most
-// N story-writer runs, each linked to the librarian run. The agents Worker is a fake service binding; the shared
+// N story-writer runs, each linked to the librarian run. The agents are a fake env.AGENTS; the shared
 // logic runs directly. Fictional example family only.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";

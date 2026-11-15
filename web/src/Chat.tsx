@@ -1,4 +1,4 @@
-// The page assistant: a chat panel on every page, for editors when the agents Worker is set up.
+// The page assistant: a chat panel on every page, for editors when the agents is set up.
 // Each message carries the page you're on. The assistant drafts changes; each shows as a card with exactly what would
 // change, and nothing happens until you press Apply. Holds no family data: everything comes from /api.
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";

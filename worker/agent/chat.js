@@ -1,5 +1,5 @@
 // The page assistant: a chat on every page for editors, shared by the site Worker (which owns chats, builds the page
-// context and applies confirmed changes) and the agents Worker (where the Flue agent talks and drafts changes).
+// context and applies confirmed changes) and the agents (where the Flue agent talks and drafts changes).
 //
 // The agent never writes to the tree. Its one write is propose_change, which checks the ops against the tree as the
 // chat's owner sees it, dry-runs them, and files a pending change. The person confirms it in the chat panel; only

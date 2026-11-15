@@ -1,6 +1,6 @@
 // The stories agent (#33): reviewing a story and drafting a new one, both only ever as a suggestion. Checks that a
 // submission links only real people, cites only the tree's sources, and keeps living people out of the subject;
-// approving files the story like any research suggestion. The agents Worker is a fake service binding.
+// approving files the story like any research suggestion. The agents are a fake env.AGENTS.
 // Fictional example family only.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";

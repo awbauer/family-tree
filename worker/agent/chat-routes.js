@@ -1,5 +1,5 @@
 // HTTP routes for the page assistant (worker/agent/chat.js). Editors only; a chat belongs to the editor who started
-// it and nobody else can read or write it. The conversation runs in the agents Worker (Flue, agents/src/agents/
+// it and nobody else can read or write it. The conversation runs in the agents (Flue, agents/src/agents/
 // assistant.js); this Worker owns the chat rows, adds the page context to each message, and applies changes the
 // editor confirms.
 //

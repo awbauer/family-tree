@@ -40,69 +40,78 @@ test("strips vars even if someone adds them back to the template", () => {
   assert.match(r.stderr, /dropping vars ACCESS_AUD, URL/);
 });
 
-test("the agents Worker binding follows AGENTS_SERVICE, or off", () => {
-  const dir = mkdtempSync(join(tmpdir(), "ci-"));
-  const off = run({ D1_DATABASE_ID: ID, AGENTS_SERVICE: "" }, join(ROOT, "wrangler.jsonc"), join(dir, "a.json"));
-  assert.equal(off.status, 0, off.stderr);
-  assert.equal(JSON.parse(readFileSync(join(dir, "a.json"), "utf8")).services, undefined);
-  const on = run({ D1_DATABASE_ID: ID, AGENTS_SERVICE: "family-tree-agents" }, join(ROOT, "wrangler.jsonc"), join(dir, "b.json"));
-  assert.equal(on.status, 0, on.stderr);
-  assert.deepEqual(JSON.parse(readFileSync(join(dir, "b.json"), "utf8")).services, [{ binding: "AGENTS", service: "family-tree-agents" }]);
-  assert.notEqual(run({ D1_DATABASE_ID: ID, AGENTS_SERVICE: "bad name!" }, join(ROOT, "wrangler.jsonc"), join(dir, "c.json")).status, 0);
-  const never = run({ D1_DATABASE_ID: ID, AGENTS_SERVICE: "off" }, join(ROOT, "wrangler.jsonc"), join(dir, "d.json"));
-  assert.equal(never.status, 0, never.stderr);
-  assert.equal(JSON.parse(readFileSync(join(dir, "d.json"), "utf8")).services, undefined);
+const AGENTS = ["FlueAssistantAgent", "FlueProfileWriterAgent", "FlueQualityReviewerAgent", "FlueResearcherAgent", "FlueSherlockAgent", "FlueStoryLibrarianAgent", "FlueStoryReviewerAgent", "FlueStoryWriterAgent"];
+
+test("one Worker: the site and the agents, with every agent's class bound and created by migration v1", () => {
+  const out = join(mkdtempSync(join(tmpdir(), "ci-")), "w.json");
+  const r = run({ D1_DATABASE_ID: ID, AGENTS_TRANSFER_FROM: "off" }, join(ROOT, "wrangler.jsonc"), out);
+  assert.equal(r.status, 0, r.stderr);
+  const cfg = JSON.parse(readFileSync(out, "utf8"));
+  assert.equal(cfg.main, "worker/main.js");
+  assert.equal(cfg.services, undefined, "no service binding to a separate agents Worker");
+  assert.ok(cfg.compatibility_flags.includes("nodejs_compat"));
+  assert.deepEqual(cfg.ai, { binding: "AI" });
+  assert.deepEqual(cfg.durable_objects.bindings.map((b) => b.class_name).sort(), AGENTS);
+  assert.deepEqual(cfg.migrations.map((m) => m.tag), ["v1"]);
+  assert.deepEqual([...cfg.migrations[0].new_sqlite_classes].sort(), AGENTS);
+  assert.ok(cfg.triggers.crons.length);
 });
 
-test("unset, it binds the agents Worker only if the build token can see it", async () => {
+test("AGENTS_TRANSFER_FROM turns v1 into a transfer of every agent from the old agents Worker", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ci-"));
+  const r = run({ D1_DATABASE_ID: ID, AGENTS_TRANSFER_FROM: "family-tree-agents" }, join(ROOT, "wrangler.jsonc"), join(dir, "t.json"));
+  assert.equal(r.status, 0, r.stderr);
+  const m = JSON.parse(readFileSync(join(dir, "t.json"), "utf8")).migrations;
+  assert.equal(m[0].tag, "v1");
+  assert.equal(m[0].new_sqlite_classes, undefined);
+  assert.deepEqual(m[0].transferred_classes.map((t) => t.from).sort(), AGENTS);
+  assert.ok(m[0].transferred_classes.every((t) => t.from === t.to && t.from_script === "family-tree-agents"));
+  assert.notEqual(run({ D1_DATABASE_ID: ID, AGENTS_TRANSFER_FROM: "bad name!" }, join(ROOT, "wrangler.jsonc"), join(dir, "x.json")).status, 0);
+});
+
+test("unset, it transfers only if the build token finds the old agents Worker, and stops if it can't tell", async () => {
   const { createServer } = await import("node:http");
   const seen = [];
-  let exists = true;
+  let status = 200;
   const srv = createServer((req, res) => {
     seen.push(req.url);
     if (req.url === "/accounts") return res.writeHead(200).end(JSON.stringify({ success: true, result: [{ id: "a2" }] }));
-    res.writeHead(exists ? 200 : 404).end("{}");
+    res.writeHead(status).end("{}");
   });
   await new Promise((r) => srv.listen(0, r));
   const base = `http://127.0.0.1:${srv.address().port}`;
   const dir = mkdtempSync(join(tmpdir(), "ci-"));
-  const env = { D1_DATABASE_ID: ID, AGENTS_SERVICE: "", CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a1", CLOUDFLARE_API_BASE_URL: base };
-  const runAsync = (e, src, out) => new Promise((resolve) => {
-    const p = spawn(process.execPath, [join(ROOT, "tools/ci_config.mjs"), src, out], { env: { ...process.env, ...e } });
-    let err = ""; p.stderr.on("data", (d) => (err += d)); p.on("close", (status) => resolve({ status, stderr: err }));
+  const env = { D1_DATABASE_ID: ID, AGENTS_TRANSFER_FROM: "", CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a1", CLOUDFLARE_API_BASE_URL: base };
+  const runAsync = (e, out) => new Promise((resolve) => {
+    const p = spawn(process.execPath, [join(ROOT, "tools/ci_config.mjs"), join(ROOT, "wrangler.jsonc"), out], { env: { ...process.env, ...e } });
+    let err = ""; p.stderr.on("data", (d) => (err += d)); p.on("close", (code) => resolve({ status: code, stderr: err }));
   });
+  const first = (f) => JSON.parse(readFileSync(join(dir, f), "utf8")).migrations[0];
   try {
-    let r = await runAsync(env, join(ROOT, "wrangler.jsonc"), join(dir, "yes.json"));
+    let r = await runAsync(env, join(dir, "yes.json"));
     assert.equal(r.status, 0, r.stderr);
-    assert.deepEqual(JSON.parse(readFileSync(join(dir, "yes.json"), "utf8")).services, [{ binding: "AGENTS", service: "family-tree-agents" }]);
+    assert.ok(first("yes.json").transferred_classes, "found: transfer");
     assert.ok(seen.includes("/accounts/a1/workers/scripts/family-tree-agents/settings"));
-    exists = false;
-    r = await runAsync(env, join(ROOT, "wrangler.jsonc"), join(dir, "no.json"));
+    status = 404;
+    r = await runAsync(env, join(dir, "no.json"));
     assert.equal(r.status, 0, r.stderr);
-    assert.equal(JSON.parse(readFileSync(join(dir, "no.json"), "utf8")).services, undefined);
-    // the agents Worker never binds to itself
-    exists = true;
-    r = await runAsync(env, join(ROOT, "agents/wrangler.jsonc"), join(dir, "self.json"));
-    assert.equal(JSON.parse(readFileSync(join(dir, "self.json"), "utf8")).services, undefined);
+    assert.ok(first("no.json").new_sqlite_classes, "not found: a new site creates the classes");
+    status = 403;
+    r = await runAsync(env, join(dir, "unknown.json"));
+    assert.notEqual(r.status, 0, "can't tell: stop rather than leave the agents' data behind");
+    assert.match(r.stderr, /AGENTS_TRANSFER_FROM/);
     // without an account id, it's looked up from the token
-    r = await runAsync({ ...env, CLOUDFLARE_ACCOUNT_ID: "" }, join(ROOT, "wrangler.jsonc"), join(dir, "lookup.json"));
-    assert.equal(JSON.parse(readFileSync(join(dir, "lookup.json"), "utf8")).services[0].service, "family-tree-agents");
+    status = 200;
+    r = await runAsync({ ...env, CLOUDFLARE_ACCOUNT_ID: "" }, join(dir, "lookup.json"));
+    assert.ok(first("lookup.json").transferred_classes);
     assert.ok(seen.includes("/accounts/a2/workers/scripts/family-tree-agents/settings"));
   } finally { srv.close(); }
 });
 
-test("the agents Worker template is private, keeps dashboard vars and gets the D1 id", () => {
-  const out = join(mkdtempSync(join(tmpdir(), "ci-")), "w.json");
-  const r = run({ D1_DATABASE_ID: ID, AGENTS_SERVICE: "" }, join(ROOT, "agents/wrangler.jsonc"), out);
-  assert.equal(r.status, 0, r.stderr);
-  const cfg = JSON.parse(readFileSync(out, "utf8"));
-  assert.equal(cfg.name, "family-tree-agents");
-  assert.equal(cfg.workers_dev, false);
-  assert.equal(cfg.preview_urls, false);
-  assert.equal(cfg.routes, undefined);
-  assert.equal(cfg.vars, undefined);
-  assert.equal(cfg.keep_vars, true);
-  assert.equal(cfg.d1_databases[0].database_id, ID);
-  assert.ok(cfg.compatibility_flags.includes("nodejs_compat"));
-  assert.deepEqual(cfg.migrations[0].new_sqlite_classes.sort(), ["FlueProfileWriterAgent", "FlueResearcherAgent", "FlueStoryReviewerAgent"]);
+test("the agents' build config is build input only: never deployed on its own", () => {
+  const raw = readFileSync(join(ROOT, "agents/wrangler.jsonc"), "utf8");
+  assert.match(raw, /Build input only/);
+  const pkg = JSON.parse(readFileSync(join(ROOT, "agents/package.json"), "utf8"));
+  assert.equal(pkg.scripts.deploy, undefined);
+  assert.equal(pkg.scripts["deploy:ci"], undefined);
 });

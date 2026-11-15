@@ -1,7 +1,7 @@
 // The page assistant: chats belong to one editor, messages carry the page they're on, the agent only drafts changes,
 // and nothing reaches the tree until the editor applies it; then it's logged as the assistant acting on the editor's
 // behalf (history, provenance, undo). The agents
-// Worker (Flue) is replaced by a fake service binding. Fictional example family only.
+// agents (Flue) are replaced by a fake env.AGENTS. Fictional example family only.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

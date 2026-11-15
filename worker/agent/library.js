@@ -287,7 +287,7 @@ export function checkCommission(b, run, input, { year } = {}) {
 
 /**
  * Create the child story-writer run for a checked commission and link it to this run. Returns {id, message} for the
- * agents Worker to dispatch, or {error} when today's budget is used up. Idempotent per set of people.
+ * agents to dispatch, or {error} when today's budget is used up. Idempotent per set of people.
  */
 export async function commissionStory(env, run, b, v) {
   if (v.prior) return { id: v.prior.run, message: v.prior.message, existing: true };

@@ -1,6 +1,6 @@
 // The data quality review (#31): which items a run plans, how decisions are checked, dry runs that change nothing
 // until an editor applies them, version checks against items changed meanwhile, and attribution (agent:data-quality
-// on behalf of the editor). The agents Worker is a fake service binding; the shared logic runs directly.
+// on behalf of the editor). The agents are a fake env.AGENTS; the shared logic runs directly.
 // Fictional example family only.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";

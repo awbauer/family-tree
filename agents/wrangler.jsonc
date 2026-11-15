@@ -1,45 +1,16 @@
 {
-  // The private agents Worker. It has NO public URL: the site Worker reaches it through a service binding (AGENTS).
-  // Same rules as the site's wrangler.jsonc: no real ids here (tools/ci_config.mjs fills the D1 id in Workers Builds;
-  // local deploys use the git-ignored wrangler.local.jsonc), and no "vars" block (keep_vars protects dashboard values).
+  // Build input only, never deployed on its own: Flue's Vite plugin needs a Worker config to generate the agents'
+  // entry and Durable Object classes. `npm run build:agents` builds them into agents/dist/agents_bundle, and the one
+  // Worker (worker/main.js, the root wrangler.jsonc) bundles that with the site. The deployed bindings, Durable
+  // Object migrations and cron trigger live in the root wrangler.jsonc.
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "family-tree-agents",
+  "name": "agents-bundle",
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "preview_urls": false,
-  // Workers AI binding: Claude through AI Gateway, Cloudflare's Web Search API, and page-to-Markdown conversion.
   "ai": { "binding": "AI" },
-  // The same database as the site: agents read the tree through the site's own scoping code and write only
-  // suggestions, run status, usage and AI profiles.
   "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "family-tree",
-      "migrations_dir": "../migrations",
-      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
-    }
-  ],
-  // One Durable Object class per Flue agent (Flue generates the classes and bindings; migrations are ours).
-  // Append new entries, never edit deployed ones.
-  "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["FlueResearcherAgent", "FlueProfileWriterAgent", "FlueStoryReviewerAgent"] },
-    { "tag": "v2", "new_sqlite_classes": ["FlueAssistantAgent"] },
-    { "tag": "v3", "new_sqlite_classes": ["FlueQualityReviewerAgent"] },
-    { "tag": "v4", "new_sqlite_classes": ["FlueStoryWriterAgent"] },
-    { "tag": "v5", "new_sqlite_classes": ["FlueStoryLibrarianAgent"] },
-    { "tag": "v6", "new_sqlite_classes": ["FlueSherlockAgent"] }
-  ],
-  // Weekly content job, Sundays 03:23 UTC (src/cloudflare.js). Does nothing unless CONTENT_JOB_ENABLED=true.
-  "triggers": { "crons": ["23 3 * * SUN"] },
-  // Workers Logs and Traces, everything kept: every invocation (request URL, status, timing), every console line, and
-  // every trace span, unsampled. Readable only by members of the Cloudflare account (Workers → this Worker →
-  // Observability). Request and response bodies are never logged; agent traces carry no prompt or tool content.
-  "observability": {
-    "enabled": true,
-    "head_sampling_rate": 1,
-    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": true, "persist": true },
-    "traces": { "enabled": true, "head_sampling_rate": 1, "persist": true }
-  },
-  "keep_vars": true
+    { "binding": "DB", "database_name": "family-tree", "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID" }
+  ]
 }
