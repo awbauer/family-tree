@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router";
 import { store, useData } from "./data";
+import { Chat } from "./Chat";
 import { isUnknown, norm, useSite, years } from "./lib";
 
 const NAV: [string, string][] = [["/tree", "Tree"], ["/people", "People"], ["/stories", "Stories"], ["/map", "Map"], ["/timeline", "Timeline"], ["/research", "Research"]];
@@ -111,6 +112,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
       </header>
       <main id="app" tabIndex={-1} ref={main}>{children}</main>
+      <Chat />
       <footer className="site-footer">
         <div className="wrap">
           <span id="footer-meta">{people.length} people · data built {D.generated}</span>
