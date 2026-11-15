@@ -6,7 +6,8 @@
 import { env } from "cloudflare:workers";
 import { useAgentFinish, useAgentStart, useInitialData, useModel, usePersistentState, useTool } from "@flue/runtime";
 import * as v from "valibot";
-import { settings } from "../../../worker/agent/config.js";
+import { settings, compactAt } from "../../../worker/agent/config.js";
+import { usedTokens } from "../meter.js";
 import { loadRun, markRunning, logRun, recordRunUsage, endRun } from "../../../worker/agent/runs.js";
 import { searchPeople, relationship } from "../../../worker/agent/tools.js";
 import { chatPersonView } from "../../../worker/agent/chat.js";
@@ -19,7 +20,8 @@ const str = (d) => v.pipe(v.string(), v.description(d));
 const parse = (s, d) => { try { return s ? JSON.parse(s) : d; } catch { return d; } };
 
 export function QualityReviewer({ id }) {
-  useModel(`cloudflare/${S.model}`, { thinkingLevel: S.contentEffort, compaction: { keepRecentTokens: 16000 } });
+  // Items are decided one at a time; earlier ones needn't stay in full. Summarise past ~40k tokens.
+  useModel(`cloudflare/${S.model}`, { thinkingLevel: S.contentEffort, compaction: compactAt(S, 40000, 10000) });
   const runId = (useInitialData() || {}).runId || id;
   const [reminded, setReminded] = usePersistentState("reminded", false);
 
@@ -28,6 +30,7 @@ export function QualityReviewer({ id }) {
     const run = await loadRun(env, runId);
     if (!run) throw new Error("This run no longer exists.");
     if (FINISHED.includes(run.status) && !(finishing && run.status === "succeeded")) throw new Error(`This run is ${run.status}. Stop working.`);
+    if (usedTokens(id) >= S.runTokens && !finishing) throw new Error("This run's token budget is used up. Call finish_review now; the remaining items stay open for another run.");
     const sc = await runScope(env, run);
     if (!sc) throw new Error(`${run.started_by} is no longer an editor of this tree. Stop working.`);
     return { run, sc, b: sc.bundle };
@@ -94,7 +97,8 @@ export function QualityReviewer({ id }) {
       const { run } = await ctx({ finishing: true });
       const report = reportOf(run);
       const missing = (parse(run.options, {}).items || []).filter((x) => !report.some((d) => d.item === x.ref)).map((x) => x.ref);
-      if (missing.length && run.status !== "succeeded") throw new Error(`Decide these first with record_decision: ${missing.join(", ")}`);
+      // past the run's token cap it may stop early; the undecided items simply stay open
+      if (missing.length && run.status !== "succeeded" && usedTokens(id) < S.runTokens) throw new Error(`Decide these first with record_decision: ${missing.join(", ")}`);
       await step.do("finish", () => env.DB.prepare("UPDATE agent_runs SET status = 'succeeded', result = ?, proposal_ids = ?, finished_at = COALESCE(finished_at, ?) WHERE id = ? AND status IN ('queued', 'running', 'succeeded')")
         .bind(JSON.stringify({ summary: data.summary, counts: summarize(report) }), JSON.stringify(report.map((d) => d.proposal).filter(Boolean)), new Date().toISOString(), runId).run());
       return { output: "Saved. You're done: reply with one short sentence and stop." };
