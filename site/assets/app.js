@@ -480,6 +480,7 @@ function startFamilyApp(D) {
           ${p.profile || (AI && !p.living) ? `<section class="card profile" style="margin-bottom:20px"><h2>Profile</h2>
             ${p.profile ? `<p class="prose">${esc(p.profile.text)}</p><p class="small muted">Written by AI from the recorded facts on ${esc(p.profile.generated_at.slice(0, 10))}, and rewritten when they change. It can be wrong: the events and sources below are the record.</p>` : `<p class="small muted">No profile yet. Profiles are written by AI from the recorded facts.</p>`}
             ${AI && !p.living ? `<button class="btn" id="profile-refresh">${p.profile ? "Rewrite now" : "Write one now"}</button>` : ""}</section>` : ""}
+          ${LIVE ? `<section class="card" id="w-graph" style="margin-bottom:20px"><h2>Family graph</h2><p class="muted small">Loading…</p></section>` : ""}
           <section class="card">
             <h2>Life events</h2>
             ${items.length ? `<ul class="timeline-list" ${bstyle(p.branch)}>${tl}</ul>` : '<p class="muted">No events recorded yet.</p>'}
