@@ -229,9 +229,48 @@
     for (const e of own) {
       const row = c.app.querySelector(`[data-fid="${CSS.escape(e.fid)}"]`);
       if (!row) continue;
-      row.insertAdjacentHTML("beforeend", `${X.factBadge(e.review)} <button class="linklike fact-verify" data-fid="${esc(e.fid)}">${e.review && e.review.status !== "unverified" ? "review" : "verify"}</button>`);
+      row.insertAdjacentHTML("beforeend", `${X.factBadge(e.review)} <button class="linklike fact-verify" data-fid="${esc(e.fid)}">${e.review && e.review.status !== "unverified" ? "review" : "verify"}</button> <button class="linklike fact-prov" data-fid="${esc(e.fid)}">history</button>`);
     }
     c.app.querySelectorAll(".fact-verify").forEach((b) => (b.onclick = () => X.verifyForm(c, id, ctx, own.find((e) => e.fid === b.dataset.fid), b.closest(".t-body"))));
+    c.app.querySelectorAll(".fact-prov").forEach((b) => (b.onclick = () => X.factProvenance(c, id, b.dataset.fid, b.closest(".t-body"))));
+  };
+
+  // ---------------------------------------------------------------- provenance (PROV-O, from /api/prov)
+  let provCache = null;
+  /** One fact's chain: each change to it, who made it (and on whose behalf), why, from which sources. */
+  X.factProvenance = async function (c, id, fid, anchor) {
+    const open = anchor.querySelector(".prov-panel");
+    if (open) { open.remove(); return; }
+    const panel = document.createElement("div");
+    panel.className = "card sub prov-panel small";
+    panel.textContent = "Loading the history…";
+    anchor.appendChild(panel);
+    try {
+      if (!provCache || provCache.id !== id) {
+        const r = await fetch(`api/prov?id=${encodeURIComponent(id)}${c.TREE ? `&tree=${encodeURIComponent(c.TREE)}` : ""}`, { credentials: "same-origin" });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `The server answered ${r.status}.`);
+        provCache = { id, doc: await r.json() };
+      }
+      const g = provCache.doc["@graph"], byId = new Map(g.map((n) => [n["@id"], n]));
+      const label = (ref) => (byId.get(ref && ref["@id"]) || {})["rdfs:label"] || "";
+      const steps = [];
+      for (const n of g) for (const f of n["ft:changedFacts"] || []) {
+        if (f.fact !== fid) continue;
+        const act = byId.get(n["prov:wasGeneratedBy"]["@id"]) || {};
+        const used = (act["prov:used"] || []).map((u) => byId.get(u["@id"]) || u);
+        const sugg = used.find((u) => (u["@type"] || []).includes("ft:Suggestion"));
+        const run = sugg && sugg["prov:wasGeneratedBy"] && byId.get(sugg["prov:wasGeneratedBy"]["@id"]);
+        steps.push({ at: (n["prov:generatedAtTime"] || {})["@value"] || "", who: label(act["prov:wasAssociatedWith"]), kind: (act["@type"] || [])[1] || "", change: f.change, reason: act["rdfs:comment"],
+          sources: used.filter((u) => (u["@type"] || []).includes("gx:SourceDescription")), sugg, author: sugg && label(sugg["prov:wasAttributedTo"]), run,
+          onBehalf: run && label((byId.get((run["prov:wasAssociatedWith"] || {})["@id"]) || {})["prov:actedOnBehalfOf"]) });
+      }
+      const KIND = { "ft:Import": "imported", "ft:Edit": "edited", "ft:Revert": "undone", "ft:Resolution": "resolved" };
+      panel.innerHTML = steps.length ? `<b>History of this fact</b><ol class="prov-steps">${steps.map((s) => `<li><span class="muted">${esc(s.at.slice(0, 16).replace("T", " "))} · ${esc(c.who(s.who))}</span> ${esc(KIND[s.kind] || "changed")}: <b>${esc(s.change)}</b>${s.reason ? ` — ${esc(s.reason)}` : ""}
+          ${s.sugg ? `<div>from <a href="#/research/queue">${esc(s.sugg["rdfs:label"])}</a> by ${esc(c.who(s.author))}${s.run ? `, written by a research agent on behalf of ${esc(c.who(s.onBehalf))} after reading ${(s.run["prov:used"] || []).length} page${(s.run["prov:used"] || []).length === 1 ? "" : "s"}` : ""}</div>` : ""}
+          ${s.sources.length ? `<div>Evidence: ${s.sources.map((x) => x["ft:url"] ? `<a href="${esc(x["ft:url"])}" target="_blank" rel="noopener">${esc(x["rdfs:label"] || x["ft:url"])}</a>` : esc(x["rdfs:label"] || "")).join("; ")}</div>` : ""}</li>`).join("")}</ol>
+        <a class="muted" href="api/prov?id=${encodeURIComponent(id)}${c.TREE ? `&tree=${encodeURIComponent(c.TREE)}` : ""}" target="_blank" rel="noopener">Provenance as PROV-O (JSON-LD)</a>`
+        : `<p class="muted">No recorded changes to this fact since the tree was imported.</p>`;
+    } catch (e) { panel.textContent = e.message; }
   };
   X.verifyForm = function (c, id, ctx, e, anchor, preset = {}) {
     document.querySelectorAll(".verify-form").forEach((f) => f.remove());

@@ -29,6 +29,7 @@ import { J, now, parse, loadState, todoOut, write, audit, meta } from "./db.js";
 import { OpError, referencedIds, applyOps } from "./ops.js";
 import { loadEditable, applyAndCommit, revertBatch, isConflict, newBatchId } from "./store.js";
 import * as Graph from "./graph.js";
+import * as Prov from "./prov.js";
 import { exportGedcom } from "./gedcom_export.js";
 
 const TODO_STATUSES = ["open", "in_progress", "needs_review", "done", "wont_do"];
@@ -83,6 +84,7 @@ async function route(c) {
   if (p === "/api/edit/preview" && m === "POST") return previewEdit(c);
   if ((r = p.match(/^\/api\/findings\/(\d+)$/)) && m === "PATCH") return updateFinding(c, +r[1]);
   if (p === "/api/history" && m === "GET") return history(c);
+  if (p === "/api/prov" && m === "GET") return provenance(c);
   if ((r = p.match(/^\/api\/changes\/([\w-]+)\/revert$/)) && m === "POST") return revert(c, r[1]);
   if (p === "/api/comments" && m === "GET") return listComments(c);
   if (p === "/api/comments" && m === "POST") return addComment(c);
@@ -481,44 +483,74 @@ async function updateFinding(c, id) {
   return json({ ok: true, finding: { id, ...after } });
 }
 
+/** The change rows about one person (and their families, findings, photos and status), scoped to the caller. */
+async function entityRows(c, g, b, id, { limit = 200 } = {}) {
+  if (!b.people[id] && !b.families[id]) fail(404, "Not found.");
+  const fams = b.people[id] ? [...(b.people[id].famc || []), ...(b.people[id].fams || [])] : [];
+  const ids = [id, ...fams];
+  const fids = (b.research.findings || []).filter((f) => f.person === id).map((f) => String(f.id));
+  const rows = (await c.env.DB.prepare(`SELECT * FROM changes WHERE (entity_id IN (${ids.map(() => "?").join(",")}) AND entity_type IN ('person','family','status'))${fids.length ? ` OR (entity_type = 'finding' AND entity_id IN (${fids.map(() => "?").join(",")}))` : ""} ORDER BY id DESC LIMIT ${limit}`).bind(...ids, ...fids).all()).results;
+  // photo changes live in one config record keyed by person: keep this person's slice
+  if (b.people[id]) {
+    const media = (await c.env.DB.prepare(`SELECT * FROM changes WHERE entity_type = 'config' AND entity_id = 'media_map' ORDER BY id DESC LIMIT ${limit}`).all()).results;
+    for (const r of media) {
+      const bf = parse(r.before, {}) || {}, af = parse(r.after, {}) || {};
+      if (!(id in bf) && !(id in af)) continue;
+      rows.push({ ...r, entity_type: "media", entity_id: id, before: J(bf[id] ?? null), after: J(af[id] ?? null) });
+    }
+    rows.sort((x, y) => y.id - x.id);
+  }
+  return rows.filter(visibleRow(c, g, b));
+}
+
+/** Never show snapshots of entities outside the caller's scope. */
+const visibleRow = (c, g, b) => (r) => ["person", "media", "status"].includes(r.entity_type) ? !!b.people[r.entity_id] || c.access.isOwner
+  : r.entity_type === "family" ? !!b.families[r.entity_id] || c.access.isOwner
+  : r.entity_type === "finding" ? (b.research.findings || []).some((f) => String(f.id) === r.entity_id)
+  : c.access.isOwner || can.review(g);
+
 async function history(c) {
   const g = grantOrFail(c);
   const b = await scoped(c, g);
   const id = c.url.searchParams.get("id");
   let rows;
-  if (id) {
-    if (!b.people[id] && !b.families[id]) fail(404, "Not found.");
-    const fams = b.people[id] ? [...(b.people[id].famc || []), ...(b.people[id].fams || [])] : [];
-    const ids = [id, ...fams];
-    const fids = (b.research.findings || []).filter((f) => f.person === id).map((f) => String(f.id));
-    rows = (await c.env.DB.prepare(`SELECT * FROM changes WHERE (entity_id IN (${ids.map(() => "?").join(",")}) AND entity_type IN ('person','family','status'))${fids.length ? ` OR (entity_type = 'finding' AND entity_id IN (${fids.map(() => "?").join(",")}))` : ""} ORDER BY id DESC LIMIT 200`).bind(...ids, ...fids).all()).results;
-    // photo changes live in one config record keyed by person: keep this person's slice
-    if (b.people[id]) {
-      const media = (await c.env.DB.prepare("SELECT * FROM changes WHERE entity_type = 'config' AND entity_id = 'media_map' ORDER BY id DESC LIMIT 200").all()).results;
-      for (const r of media) {
-        const bf = parse(r.before, {}) || {}, af = parse(r.after, {}) || {};
-        if (!(id in bf) && !(id in af)) continue;
-        rows.push({ ...r, entity_type: "media", entity_id: id, before: J(bf[id] ?? null), after: J(af[id] ?? null) });
-      }
-      rows.sort((x, y) => y.id - x.id);
-    }
-  } else {
+  if (id) rows = await entityRows(c, g, b, id);
+  else {
     if (!can.review(g)) fail(403, "Only editors can see the full history.");
-    rows = (await c.env.DB.prepare("SELECT * FROM changes WHERE entity_type IN ('person','family','source','config') ORDER BY id DESC LIMIT 200").all()).results;
+    rows = (await c.env.DB.prepare("SELECT * FROM changes WHERE entity_type IN ('person','family','source','config') ORDER BY id DESC LIMIT 200").all()).results.filter(visibleRow(c, g, b));
   }
-  // never show snapshots of entities outside the caller's scope
-  const visible = (r) => ["person", "media", "status"].includes(r.entity_type) ? !!b.people[r.entity_id] || c.access.isOwner
-    : r.entity_type === "family" ? !!b.families[r.entity_id] || c.access.isOwner
-    : r.entity_type === "finding" ? (b.research.findings || []).some((f) => String(f.id) === r.entity_id)
-    : c.access.isOwner || can.review(g);
   const batches = {};
-  for (const r of rows.filter(visible)) {
+  for (const r of rows) {
     const k = r.batch_id || `c${r.id}`;
-    const g0 = (batches[k] = batches[k] || { batch: r.batch_id, at: r.at, actor: r.actor, op: r.op, reason: r.reason, proposal: r.proposal_id, entities: [] });
+    const g0 = (batches[k] = batches[k] || { batch: r.batch_id, at: r.at, actor: r.actor, op: r.op, reason: r.reason, proposal: r.proposal_id, sources: parse(r.sources, undefined), entities: [] });
     if (r.op === "edit" || r.op === "revert") g0.op = r.op; // an edit that also resolved a finding is still an edit
     g0.entities.push({ type: r.entity_type, id: r.entity_id, change: r.before == null ? "created" : r.after == null ? "deleted" : "updated", before: c.access.isOwner || can.review(g) ? parse(r.before) : undefined, after: c.access.isOwner || can.review(g) ? parse(r.after) : undefined });
   }
   return json({ history: Object.values(batches) });
+}
+
+/** PROV-O (JSON-LD) for one person's records, or for one research run. docs/design/standards.md */
+async function provenance(c) {
+  const g = grantOrFail(c);
+  const b = await scoped(c, g);
+  const sp = c.url.searchParams;
+  let rows = [], runs = [];
+  if (sp.get("run")) {
+    if (!can.review(g)) fail(403, "Only editors can see research runs.");
+    const run = await c.env.DB.prepare("SELECT * FROM agent_runs WHERE id = ? AND tree_id = ?").bind(sp.get("run"), g.tree_id).first();
+    if (!run) fail(404, "No such run.");
+    runs = [run];
+  } else {
+    const id = sp.get("id");
+    rows = (await entityRows(c, g, b, id, { limit: 1000 })).reverse();
+    const pids = [...new Set(rows.map((r) => r.proposal_id).filter(Boolean))];
+    if (pids.length) runs = (await c.env.DB.prepare(`SELECT * FROM agent_runs WHERE tree_id = ? AND proposal_ids IS NOT NULL`).bind(g.tree_id).all()).results
+      .filter((r) => (parse(r.proposal_ids, []) || []).some((p) => pids.includes(p)));
+  }
+  const pids = [...new Set([...rows.map((r) => r.proposal_id), ...runs.flatMap((r) => parse(r.proposal_ids, []) || [])].filter(Boolean))];
+  const proposals = pids.length ? (await c.env.DB.prepare(`SELECT id, author, author_kind, created_at, reviewed_by, reviewed_at, status, kind FROM proposals WHERE id IN (${pids.map(() => "?").join(",")})`).bind(...pids).all()).results : [];
+  const doc = Prov.toProv({ rows, runs, proposals, people: b.people, base: c.url.origin, detail: c.access.isOwner || can.review(g) });
+  return new Response(JSON.stringify(doc), { headers: { "Content-Type": "application/ld+json; charset=utf-8", "Cache-Control": "private, no-store", "X-Robots-Tag": "noindex" } });
 }
 
 async function revert(c, batchId) {

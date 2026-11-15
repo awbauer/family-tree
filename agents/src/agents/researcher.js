@@ -10,7 +10,7 @@ import { createAIWebSearch, renderWebSearchResults } from "agents/websearch";
 import { fetchWeb, windowWebFetchPage, renderWebFetchPage } from "agents/webfetch";
 import { scopedFor } from "../../../worker/bundle.js";
 import { settings, checkDaily, tokensOf, BudgetError } from "../../../worker/agent/config.js";
-import { SYSTEM, loadRun, markRunning, logRun, recordRunUsage, submitResults, endRun } from "../../../worker/agent/runs.js";
+import { SYSTEM, loadRun, markRunning, logRun, recordRunUsage, recordUsed, submitResults, endRun } from "../../../worker/agent/runs.js";
 import { personView, searchPeople, relationship, checkSubmission } from "../../../worker/agent/tools.js";
 import { useUsage } from "./usage.js";
 
@@ -108,6 +108,7 @@ export function Researcher({ id }) {
       try {
         const res = await createAIWebSearch({ binding: env.AI, gateway: S.gateway, provider: S.searchProvider, byokAlias: S.searchByokAlias }).search({ query: data.query, limit: data.limit || 6 }, { signal });
         await logRun(env, runId, `web_search: ${data.query}`);
+        await recordUsed(env, runId, { kind: "search", query: data.query, provider: S.searchProvider });
         return renderWebSearchResults(res);
       } catch (e) {
         // Search bills to AI Gateway credits (or a stored provider key). Without them, keep researching by reading
@@ -128,7 +129,10 @@ export function Researcher({ id }) {
       const n = await spend("fetches", S.maxFetches);
       if (n == null) return "The page budget for this run (or today's AI budget) is used up. Submit what you have with submit_results now.";
       const page = await fetchWeb({ url: data.url }, { binding: env.AI, timeoutMs: 45_000, maxBytes: 4_000_000, blockedHosts: BLOCKED_HOSTS, signal });
-      if (!data.offset) await logRun(env, runId, `web_fetch: ${data.url}`);
+      if (!data.offset) {
+        await logRun(env, runId, `web_fetch: ${data.url}`);
+        await recordUsed(env, runId, { kind: "page", url: page.finalUrl || data.url, title: page.title, status: page.status, contentType: page.contentType });
+      }
       return renderWebFetchPage(windowWebFetchPage(page, { offset: data.offset || 0 }));
     },
   });
