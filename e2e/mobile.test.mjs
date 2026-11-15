@@ -1,17 +1,20 @@
 // Phone-sized checks: with very long names, places and links in the tree, no page is wider than the screen, and the
 // page assistant opens as a full-screen sheet that fits. Fictional example family plus invented long text.
+// Runs in Chromium and, when it's installed (`npx playwright install webkit`), in WebKit, which is what iPhone Safari
+// uses: Safari wraps text differently enough that a page can fit in Chromium and still overflow on a phone.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
+import { existsSync } from "node:fs";
 import { startDevServer } from "../tools/dev_server.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SITE = resolve(ROOT, process.env.E2E_SITE || "dist/site");
 const LONG = "Bartholomewmaximilianchristophersonwellingtonfeatherstonehaugh";
 const LINK = "https://records.example.org/collections/parish-registers/volume-123/page-456/entry-789?image=abcdefghijklmnopqrstuvwxyz0123456789";
-let srv, browser, page, longId, errors = [];
+let srv, browsers = [], pages = [], longId, errors = [];
 
 before(async () => {
   srv = await startDevServer({ port: 8797, site: SITE, quiet: true });
@@ -33,9 +36,21 @@ before(async () => {
   const people = (await api("GET", `tree?tree=${tree}`)).people;
   longId = Object.keys(people).find((k) => people[k].name.startsWith("Maximiliana"));
 
-  browser = await chromium.launch();
-  page = await (await browser.newContext({ viewport: { width: 320, height: 568 }, isMobile: true, hasTouch: true })).newPage();
-  page.on("pageerror", (e) => errors.push(e.message));
+  const engines = [chromium, ...(existsSync(webkit.executablePath()) ? [webkit] : [])];
+  if (engines.length === 1) console.log("mobile tests: WebKit isn't installed (npx playwright install webkit); running in Chromium only");
+  for (const engine of engines) {
+    const browser = await engine.launch();
+    browsers.push(browser);
+    const page = await (await browser.newContext({ viewport: { width: 320, height: 568 }, isMobile: true, hasTouch: true })).newPage();
+    page.engine = engine.name();
+    pages.push(page);
+    await setUp(page);
+  }
+});
+after(async () => { for (const b of browsers) await b.close(); await srv?.close(); });
+
+async function setUp(page) {
+  page.on("pageerror", (e) => errors.push(`${page.engine}: ${e.message}`));
   await page.route(/\/api\/me(\?|$)/, async (route) => { const r = await route.fetch(); route.fulfill({ response: r, json: { ...(await r.json()), ai: true } }); });
   await page.route(/\/api\/chat/, (route) => {
     const u = new URL(route.request().url());
@@ -46,23 +61,24 @@ before(async () => {
   });
   await page.goto(`${srv.url}/#/`);
   await page.waitForSelector("main h1", { timeout: 15000 });
-});
-after(async () => { await browser?.close(); await srv?.close(); });
+}
 
 test("no page is wider than a 320px screen, even with very long text", async () => {
   const wide = [];
+  for (const page of pages)
   for (const p of ["/", "/people", `/person/${longId}`, "/person/I5", `/tree/${longId}`, "/branch/novak", "/stories", "/map", "/timeline",
     "/research", "/research/todo", "/research/queue", "/sources", "/source/S99", "/admin", "/admin/sites", "/admin/audit", "/about"]) {
     await page.evaluate((h) => { location.hash = h; }, "#" + p);
     await page.waitForTimeout(500);
     const w = await page.evaluate(() => document.documentElement.scrollWidth);
-    if (w > 320) wide.push(`${p} is ${w}px wide`);
+    if (w > 320) wide.push(`${page.engine}: ${p} is ${w}px wide`);
   }
   assert.deepEqual(wide, []);
   assert.deepEqual(errors, []);
 });
 
 test("the assistant opens as a full-screen sheet that fits, with 16px input", async () => {
+  for (const page of pages) {
   await page.evaluate(() => { location.hash = "#/person/I5"; });
   await page.click(".chat-fab");
   await page.fill(".chat-form textarea", "hello");
@@ -81,5 +97,6 @@ test("the assistant opens as a full-screen sheet that fits, with 16px input", as
   assert.ok(r.locked, "the page behind doesn't scroll");
   await page.click(".chat-close");
   assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).overflow), "visible", "scrolling comes back when it closes");
+  }
   assert.deepEqual(errors, []);
 });
