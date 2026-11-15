@@ -62,10 +62,10 @@ export async function chatScope(env, chat) {
   return sc;
 }
 
-export async function recordChatUsage(env, id, { input, output }) {
+export async function recordChatUsage(env, id, { input, output, cost = 0 }) {
   await env.DB.batch([
-    env.DB.prepare("UPDATE chats SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ? WHERE id = ?").bind(input, output, id),
-    recordUsage(env, { input, output, chat: true }), // the assistant's own daily allowance
+    env.DB.prepare("UPDATE chats SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ?, cost_usd = cost_usd + ? WHERE id = ?").bind(input, output, cost, id),
+    recordUsage(env, { input, output, cost, chat: true }), // the assistant's own daily allowance
   ]);
 }
 

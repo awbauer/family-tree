@@ -9,8 +9,8 @@ import * as v from "valibot";
 import { createAIWebSearch, renderWebSearchResults } from "agents/websearch";
 import { fetchWeb, windowWebFetchPage, renderWebFetchPage } from "agents/webfetch";
 import { scopedFor } from "../../../worker/bundle.js";
-import { settings, checkDaily, compactAt, BudgetError } from "../../../worker/agent/config.js";
-import { usedTokens } from "../meter.js";
+import { settings, checkDaily, compactAt, modelSpec, BudgetError } from "../../../worker/agent/config.js";
+import { usedUsd } from "../meter.js";
 import { pageView } from "../../../worker/agent/pages.js";
 import { SYSTEM, loadRun, markRunning, logRun, recordRunUsage, recordUsed, submitResults, endRun } from "../../../worker/agent/runs.js";
 import { personView, searchPeople, relationship, checkSubmission } from "../../../worker/agent/tools.js";
@@ -61,7 +61,8 @@ const Submission = v.object({
 export function Researcher({ id }) {
   // Every model call re-sends the whole conversation, so keep it small: older steps are summarised once it passes
   // ~48k tokens, and pages come back in short windows (web_fetch) that the agent widens only where it needs to.
-  useModel(`cloudflare/${S.model}`, { thinkingLevel: S.effort, compaction: compactAt(S, 48000, 12000) });
+  const M = S.agents.research;
+  useModel(modelSpec(M.model), { thinkingLevel: M.effort, compaction: compactAt(M.model, 48000, 12000) });
   const data = useInitialData();
   const runId = (data && data.runId) || id;
   const [reminded, setReminded] = usePersistentState("reminded", false);
@@ -78,14 +79,14 @@ export function Researcher({ id }) {
   }
   /** Count a web call against the run's budget (atomically, in D1); null when the budget is used up. */
   async function spend(kind, max) {
-    if (usedTokens(id) >= S.runTokens) return null; // this run's own token cap
+    if (usedUsd(id) >= S.runUsd) return null; // this run's own spending cap
     try { await checkDaily(env, S); } catch (e) { if (e instanceof BudgetError) return null; throw e; }
     const r = await env.DB.prepare(`UPDATE agent_runs SET ${kind} = ${kind} + 1 WHERE id = ? AND ${kind} < ? RETURNING ${kind}`).bind(runId, max).first();
     return r ? r[kind] : null;
   }
 
   useAgentStart(async () => { await markRunning(env, runId); });
-  useUsage((u, model) => recordRunUsage(env, runId, u, model));
+  useUsage((u, model) => recordRunUsage(env, runId, u, model), { model: M.model });
 
   useTool({
     name: "get_person",
@@ -142,12 +143,12 @@ export function Researcher({ id }) {
       let page = pageCache.get(data.url);
       if (!page) {
         const n = await spend("fetches", S.maxFetches);
-        if (n == null) return "The page budget for this run (or its token budget, or today's AI budget) is used up. Submit what you have with submit_results now.";
+        if (n == null) return "The page budget for this run (or its budget, or today's AI budget) is used up. Submit what you have with submit_results now.";
         page = await fetchWeb({ url: data.url }, { binding: env.AI, timeoutMs: 45_000, maxBytes: 4_000_000, blockedHosts: BLOCKED_HOSTS, signal });
         remember(data.url, page);
         await logRun(env, runId, `web_fetch: ${data.url}`);
         await recordUsed(env, runId, { kind: "page", url: page.finalUrl || data.url, title: page.title, status: page.status, contentType: page.contentType });
-      } else if (usedTokens(id) >= S.runTokens) return "This run's token budget is used up. Submit what you have with submit_results now.";
+      } else if (usedUsd(id) >= S.runUsd) return "This run's budget is used up. Submit what you have with submit_results now.";
       return pageView(page, { offset: data.offset, find: data.find, chars: PAGE_CHARS, render: (w) => renderWebFetchPage(windowWebFetchPage(page, w)) });
     },
   });

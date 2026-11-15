@@ -5,7 +5,8 @@
 import { env } from "cloudflare:workers";
 import { useAgentFinish, useAgentStart, useInitialData, useModel, usePersistentState, useTool } from "@flue/runtime";
 import * as v from "valibot";
-import { settings } from "../../../worker/agent/config.js";
+import { settings, compactAt, modelSpec } from "../../../worker/agent/config.js";
+import { usedUsd } from "../meter.js";
 import { loadRun, markRunning, recordRunUsage, endRun } from "../../../worker/agent/runs.js";
 import { searchPeople, relationship } from "../../../worker/agent/tools.js";
 import { STORY_WRITER_SYSTEM, runScope, storyView, listStories, siteContext, storyPerson, checkStory, submitStory } from "../../../worker/agent/stories.js";
@@ -17,7 +18,8 @@ const str = (d) => v.pipe(v.string(), v.description(d));
 const parse = (s, d) => { try { return s ? JSON.parse(s) : d; } catch { return d; } };
 
 export function StoryWriter({ id }) {
-  useModel(`cloudflare/${S.model}`, { thinkingLevel: S.contentEffort, compaction: { keepRecentTokens: 20000 } });
+  const M = S.agents.stories;
+  useModel(modelSpec(M.model), { thinkingLevel: M.effort, compaction: compactAt(M.model, 48000, 12000) });
   const runId = (useInitialData() || {}).runId || id;
   const [reminded, setReminded] = usePersistentState("reminded", false);
 
@@ -25,13 +27,14 @@ export function StoryWriter({ id }) {
     const run = await loadRun(env, runId);
     if (!run) throw new Error("This run no longer exists.");
     if (FINISHED.includes(run.status) && !(finishing && run.status === "succeeded")) throw new Error(`This run is ${run.status}. Stop working.`);
+    if (usedUsd(id) >= S.runUsd && !finishing) throw new Error("This run's budget is used up. Call submit_story now with what you have.");
     const sc = await runScope(env, run);
     if (!sc) throw new Error(`${run.started_by} is no longer an editor of this tree. Stop working.`);
     return { run, b: sc.bundle, o: parse(run.options, {}) };
   }
 
   useAgentStart(async () => { await markRunning(env, runId); });
-  useUsage((u, model) => recordRunUsage(env, runId, u, model));
+  useUsage((u, model) => recordRunUsage(env, runId, u, model), { model: M.model });
 
   useTool({
     name: "get_story",

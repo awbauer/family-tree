@@ -1114,11 +1114,12 @@ function startFamilyApp(D) {
       clearTimeout(timer);
       try {
         const { runs, today, limits } = await api("GET", "agent/runs");
-        out.innerHTML = `<p class="small muted">Today: ${today ? today.runs : 0} of ${limits.runs_per_day} runs, ${(today ? today.tokens : 0).toLocaleString()} of ${limits.tokens_per_day.toLocaleString()} tokens · ${esc(limits.model)} · up to ${limits.searches_per_run} searches and ${limits.minutes_per_run} minutes per run</p>` +
+        const mdl = (a) => esc(String(((limits.agents || {})[a] || {}).model || "").replace(/^@cf\/[^/]+\//, ""));
+        out.innerHTML = `<p class="small muted">Today: ${today ? today.runs : 0} of ${limits.runs_per_day} runs, $${(today ? today.usd : 0).toFixed(2)} of $${(+limits.usd_per_day).toFixed(2)} · up to $${(+limits.usd_per_run).toFixed(2)}, ${limits.searches_per_run} searches and ${limits.minutes_per_run} minutes per run · models: research ${mdl("research")}, review ${mdl("quality")}</p>` +
           (runs.length ? runs.map((r) => `<section class="card" style="margin-bottom:12px"><div class="eyebrow">${esc(r.created_at.slice(0, 16).replace("T", " "))} · ${who(r.started_by)} · ${r.kind === "quality" ? "Data quality review · " : ""}<span class="badge st-${r.status === "succeeded" ? "verified" : r.status === "failed" ? "disputed" : "unverified"}">${RUN_TXT[r.status]}</span></div>
             <p>${r.todo_id ? `To-do #${r.todo_id}` : ""}${r.person && P[r.person] ? ` ${plink(r.person)}` : ""}${r.instructions ? ` · ${esc(r.instructions)}` : ""}</p>
             ${r.kind === "quality" ? qualityReport(r) : ""}
-            <p class="small muted">${r.steps} model responses · ${(r.tokens.input + r.tokens.output).toLocaleString()} tokens${r.proposals.length ? ` · suggestion ${r.proposals.map((x) => `<a href="#/research/queue">#${x}</a>`).join(", ")}` : ""}${r.error ? ` · ${esc(r.error)}` : ""}</p>
+            <p class="small muted">${r.steps} model responses · ${(r.tokens.input + r.tokens.output).toLocaleString()} tokens${r.usd ? ` · $${r.usd.toFixed(2)}` : ""}${r.model ? ` · ${esc(r.model.replace(/^@cf\/[^/]+\//, ""))}` : ""}${r.proposals.length ? ` · suggestion ${r.proposals.map((x) => `<a href="#/research/queue">#${x}</a>`).join(", ")}` : ""}${r.error ? ` · ${esc(r.error)}` : ""}</p>
             ${r.log.length ? `<details><summary class="small">${r.log.length} steps</summary><ul class="small">${r.log.map((l) => `<li>${esc(l.text)}</li>`).join("")}</ul></details>` : ""}
             ${["queued", "running"].includes(r.status) ? `<button class="btn" data-cancel="${esc(r.id)}">Stop</button>` : ""}</section>`).join("") : `<div class="empty">No runs yet.</div>`);
         out.querySelectorAll("[data-apply-run]").forEach((b) => (b.onclick = async () => {

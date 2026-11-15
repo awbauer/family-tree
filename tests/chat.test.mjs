@@ -90,11 +90,11 @@ test("a message carries a short pointer to the page, only when the page changes;
 
 test("the assistant has its own daily allowance, separate from agent runs", async () => {
   const Cfg = await import("../worker/agent/config.js");
-  const s = Cfg.settings({ AI_DAILY_TOKEN_BUDGET: "1000", AI_CHAT_DAILY_TOKENS: "500" });
-  await env.DB.batch([Cfg.recordUsage(env, { input: 5000 })]); // agent work over its budget…
+  const s = Cfg.settings({ AI_DAILY_BUDGET_USD: "2", AI_CHAT_DAILY_BUDGET_USD: "0.5" });
+  await env.DB.batch([Cfg.recordUsage(env, { input: 5000, cost: 3 })]); // agent work over its budget…
   await Cfg.checkDaily(env, s, { chat: true }); // …doesn't block the assistant
   await assert.rejects(Cfg.checkDaily(env, s), /AI budget/);
-  await env.DB.batch([Cfg.recordUsage(env, { input: 600, chat: true })]);
+  await env.DB.batch([Cfg.recordUsage(env, { input: 600, cost: 0.6, chat: true })]);
   await assert.rejects(Cfg.checkDaily(env, s, { chat: true }), /for the assistant/);
   const id = await newChat();
   await Chat.recordChatUsage(env, id, { input: 10, output: 2 });

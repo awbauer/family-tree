@@ -6,7 +6,7 @@
 import { env } from "cloudflare:workers";
 import { useInitialData, useModel, useTool } from "@flue/runtime";
 import * as v from "valibot";
-import { settings, compactAt } from "../../../worker/agent/config.js";
+import { settings, compactAt, modelSpec } from "../../../worker/agent/config.js";
 import { searchPeople, relationship } from "../../../worker/agent/tools.js";
 import { CHAT_SYSTEM, loadChat, chatScope, chatPersonView, proposeChange, recordChatUsage, readPage } from "../../../worker/agent/chat.js";
 import { useUsage } from "./usage.js";
@@ -16,7 +16,8 @@ const str = (d) => v.pipe(v.string(), v.description(d));
 
 export function Assistant({ id }) {
   // Keep the conversation small (it is re-sent on every model call): older turns are summarised past ~32k tokens.
-  useModel(`cloudflare/${S.model}`, { thinkingLevel: S.chatEffort, compaction: compactAt(S, 32000, 8000) });
+  const M = S.agents.chat;
+  useModel(modelSpec(M.model), { thinkingLevel: M.effort, compaction: compactAt(M.model, 32000, 8000) });
   const data = useInitialData();
   const chatId = (data && data.chatId) || id;
 
@@ -32,7 +33,7 @@ export function Assistant({ id }) {
   }
 
   // Each delivered message starts a new response, whose usage counts from zero.
-  useUsage((u) => recordChatUsage(env, chatId, u), { perDelivery: true });
+  useUsage((u) => recordChatUsage(env, chatId, u), { model: M.model, perDelivery: true });
 
   useTool({
     name: "get_person",

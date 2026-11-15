@@ -93,14 +93,14 @@ export async function planContent(env, { limit } = {}) {
   const plan = [];
   for (const st of (full.research && full.research.stories) || []) {
     if (plan.length >= max) break;
-    const h = await sha256(PROMPT_VERSION + s.model + J(storyFacts(full, st)));
+    const h = await sha256(PROMPT_VERSION + s.agents.story_checks.model + J(storyFacts(full, st)));
     if (checked[`story:${st.slug}`] !== h) plan.push({ kind: "story", id: st.slug });
   }
   const people = Object.values(full.people).filter(profileCandidate)
     .sort((a, b) => (b.direct ? 1 : 0) - (a.direct ? 1 : 0) || (a.generation ?? 99) - (b.generation ?? 99) || a.id.localeCompare(b.id));
   for (const p of people) {
     if (plan.length >= max) break;
-    const h = await sha256(PROMPT_VERSION + s.model + J(profileFacts(full, p.id)));
+    const h = await sha256(PROMPT_VERSION + s.agents.profiles.model + J(profileFacts(full, p.id)));
     if (have[p.id] !== h) plan.push({ kind: "profile", id: p.id });
   }
   return plan;
@@ -113,7 +113,7 @@ export async function prepareProfile(env, id) {
   const p = full.people[id];
   if (!profileCandidate(p)) return { skipped: p && p.living ? "living" : "not enough recorded to write a profile" };
   const facts = profileFacts(full, id);
-  const hash = await sha256(PROMPT_VERSION + s.model + J(facts));
+  const hash = await sha256(PROMPT_VERSION + s.agents.profiles.model + J(facts));
   const cur = await env.DB.prepare("SELECT source_hash FROM profiles WHERE person_id = ?").bind(id).first();
   return { facts, hash, current: !!(cur && cur.source_hash === hash) };
 }
@@ -152,7 +152,7 @@ export async function prepareStory(env, slug) {
   const open = await env.DB.prepare("SELECT id FROM proposals WHERE status = 'open' AND author = ? AND payload LIKE ?").bind(CONTENT_AGENT, `%"slug":${J(slug)}%`).first();
   if (open) return { skipped: `revision #${open.id} is waiting for review` };
   const facts = storyFacts(full, story);
-  return { facts, hash: await sha256(PROMPT_VERSION + s.model + J(facts)), title: story.title };
+  return { facts, hash: await sha256(PROMPT_VERSION + s.agents.story_checks.model + J(facts)), title: story.title };
 }
 
 /** Record a story check. An out-of-date story becomes a suggested revision for an editor. */

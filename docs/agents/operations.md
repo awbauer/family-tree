@@ -152,7 +152,7 @@ Editors can hand a to-do or a person to a research agent that runs in Cloudflare
 **How it's built.** A second, private Worker, `family-tree-agents`, in `agents/`:
 
 - **[Flue](https://flueframework.com/)** agents on its Cloudflare target. Each run is one Flue conversation: a Durable Object on Cloudflare's **Agents SDK**, with **Pi** running the loop (model turns, tool calls, retries, compaction). If the object is evicted or crashes mid-run, Flue resumes from its durable records. It never re-runs a model call or tool call whose result was already recorded.
-- **The model runs on Workers AI by default.** The model is `cloudflare/<AI_MODEL>`, called through the Workers AI binding and your AI Gateway. The default, `@cf/moonshotai/kimi-k2.6`, is a strong tool-using model hosted on Workers AI. It's billed to your Workers plan, with a daily free allocation, and needs no AI Gateway credits or provider key.
+- **The models run on Workers AI by default.** Each agent has its own model (`AI_MODEL_<AGENT>`; defaults and reasons in [models.md](models.md)), called through the Workers AI binding and your AI Gateway. The defaults are billed to your Workers plan, with a daily free allocation, and need no AI Gateway credits or provider key.
   - To use Claude, set `AI_MODEL=anthropic/claude-opus-5-5` and load AI Gateway credits, or store an Anthropic key on the gateway.
   - With a zero credit balance, gateway models fail with error 2002, "Model execution failed".
 - **Cloudflare's agent tools:** `web_search` (Cloudflare Web Search API) and `web_fetch` (pages and PDFs to Markdown) from the Agents SDK.
@@ -175,18 +175,22 @@ Editors can hand a to-do or a person to a research agent that runs in Cloudflare
 | Variable | Default | |
 |---|---|---|
 | `AGENT_MAX_RUNS_PER_DAY` | 10 | research runs per day |
-| `AI_DAILY_TOKEN_BUDGET` | 10,000,000 | agent runs and the content job together, per day; tools stop when it's used up |
-| `AI_CHAT_DAILY_TOKENS` | 2,000,000 | the page assistant's own daily allowance (agent runs can't use it up) |
-| `AGENT_MAX_RUN_TOKENS` | 1,500,000 | one research run; past it, its web tools tell it to submit what it has |
-| `AI_CACHE_READ_WEIGHT` | 0.17 | a cached input token counts as this fraction of a fresh one (Kimi K2.6: $0.16/M vs $0.95/M) |
-| `AI_CONTEXT_WINDOW` | 262,144 | the model's context window, for early compaction; set it if you change `AI_MODEL` |
+| `AI_DAILY_BUDGET_USD` | 5 | agent runs and the weekly content job together, per day, priced per model; tools stop when it's used up |
+| `AI_CHAT_DAILY_BUDGET_USD` | 1 | the page assistant's own daily allowance (agent runs can't use it up) |
+| `AGENT_MAX_RUN_USD` | 1 | one run; past it, the agent submits what it has |
 | `AGENT_MAX_SEARCHES` / `AGENT_MAX_FETCHES` | 25 / 40 | per run |
 | `AGENT_MAX_MINUTES` | 45 | per run (Flue's durability timeout); stale runs are closed on the next read |
 | `CONTENT_MAX_PER_RUN` | 50 | profiles and story checks per weekly job; for the first backfill, run it on demand a few times |
 
-Budgets count "budget tokens": fresh input, cache writes and output in full, cached input at `AI_CACHE_READ_WEIGHT`. Every model call re-sends the whole conversation, so the agents are built to keep it small: research agents read pages in 6,000-character windows (with an outline) or only the passages that mention what they're after (`web_fetch` with `find`), and older steps are summarised once a conversation passes about 48k tokens (32k for the assistant). Each model call logs a `[turn]` line with its token counts (no content) to Workers Logs.
+Spend is priced per model from published rates (`worker/agent/models.js`), so the budgets mean the same whichever models the agents use. Every model call re-sends the whole conversation, so the agents keep it small:
+- research agents read pages in 6,000-character windows (with an outline), or only the passages that mention what they're after (`web_fetch` with `find`);
+- older steps are summarised once a conversation passes about 48k tokens (32k for the assistant, 40k for data quality).
 
-Also set a **spend limit and rate limit on the AI Gateway itself** (dashboard → AI → AI Gateway → your gateway → Settings). That is the hard stop if anything here misbehaves. Other variables: `AI_MODEL` (`@cf/moonshotai/kimi-k2.6`), `WEB_SEARCH_BYOK_ALIAS`, `AI_EFFORT` (`high`), `AI_CONTENT_EFFORT` (`medium`), `AI_GATEWAY_ID` (`default`), `WEB_SEARCH_PROVIDER` (`exa`), `CONTENT_JOB_ENABLED` (`false`).
+Each model call logs a `[turn]` line with its model, tokens and cost (no content) to Workers Logs.
+
+**Models:** each agent's model and effort are set separately: `AI_MODEL_<AGENT>` and `AI_EFFORT_<AGENT>`, for `RESEARCH`, `CHAT`, `QUALITY`, `STORIES`, `PROFILES` and `STORY_CHECKS`. [models.md](models.md) has the defaults and why each was chosen.
+
+Also set a **spend limit and rate limit on the AI Gateway itself** (dashboard → AI → AI Gateway → your gateway → Settings). That is the hard stop if anything here misbehaves. Other variables: `AI_MODEL` (overrides every agent's default model; prefer the per-agent ones), `WEB_SEARCH_BYOK_ALIAS`, `AI_GATEWAY_ID` (`default`), `WEB_SEARCH_PROVIDER` (`exa`), `CONTENT_JOB_ENABLED` (`false`).
 
 **One-time setup (owner):**
 
@@ -231,7 +235,7 @@ Editors get an **Ask** button on every page. It opens a chat with an agent (`age
 - **Where chats live.** Each conversation is a Flue `FlueAssistantAgent` Durable Object (id = chat id). The chat list (`chats`: owner, tree, title, tokens) and the drafted changes (`chat_changes`) are in D1, so applying a draft marks it applied in the same transaction as the edit. Only the editor who started a chat can read or use it.
 - **Who:** editors and the owner, only for trees they edit. Losing editor access stops it.
 - **What it sees:** what you see, living relatives included, so it can help keep them current. It has no web access and never deletes people (duplicates are merged).
-- **Model and cost:** the same model as research (`AI_MODEL`), at `AI_CHAT_EFFORT` (default `low`), counted against its own allowance, `AI_CHAT_DAILY_TOKENS`. With AI Gateway logs on (`AI_GATEWAY_LOGS`), chat messages, page context included, are kept in the gateway's logs like research prompts.
+- **Model and cost:** its own model and effort (`AI_MODEL_CHAT`, `AI_EFFORT_CHAT`; see [models.md](models.md)), counted against its own allowance, `AI_CHAT_DAILY_BUDGET_USD`. With AI Gateway logs on (`AI_GATEWAY_LOGS`), chat messages, page context included, are kept in the gateway's logs like research prompts.
 - **Setup:** none beyond the agents Worker. Migration `0006_chat.sql` adds `chats`, `chat_changes` and the attribution columns on `changes`; the agents Worker's `v2` Durable Object migration adds `FlueAssistantAgent`. Routes: `worker/agent/chat-routes.js`.
 
 ## Data quality review (agent)
@@ -249,7 +253,7 @@ Research → Agent runs → **Data quality review** starts an agent (`agents/src
   - A dry run changes nothing and keeps a report (`agent_runs.report`). **Apply these decisions** applies it later without running the model again, once per run.
   - Either way, every write is conditional on the item's version, so an item someone changed meanwhile is skipped, not overwritten.
 - **Attribution:** changes are logged as `agent:data-quality` on behalf of the editor who started the run, or who applied the dry run. This shows in to-do history (`on_behalf_of`), on finding resolutions and in the change log (`on_behalf_of`, `via` = the run id).
-- **Budget:** one run against `AGENT_MAX_RUNS_PER_DAY`, tokens against `AI_DAILY_TOKEN_BUDGET`, model effort `AI_CONTENT_EFFORT`. Migration `0007_agent_kinds.sql`; Durable Object migration `v3` (`FlueQualityReviewerAgent`).
+- **Budget:** one run against `AGENT_MAX_RUNS_PER_DAY`, spend against `AI_DAILY_BUDGET_USD` and `AGENT_MAX_RUN_USD`; model `AI_MODEL_QUALITY`, effort `AI_EFFORT_QUALITY`. Migration `0007_agent_kinds.sql`; Durable Object migration `v3` (`FlueQualityReviewerAgent`).
 
 ## Stories agent
 
@@ -263,7 +267,7 @@ Editors can have an agent (`agents/src/agents/stories.js`, Flue, one Durable Obj
   - every source is one the tree already cites for those people, or a context entry;
   - living people are never a subject, and come to the agent as a name only.
 - **No web access**, so nothing in a story can come from outside the tree.
-- **Budget:** one run against `AGENT_MAX_RUNS_PER_DAY`, effort `AI_CONTENT_EFFORT`. Durable Object migration `v4` (`FlueStoryWriterAgent`). The weekly content job's story check (`StoryReviewer`) is separate and unchanged.
+- **Budget:** one run against `AGENT_MAX_RUNS_PER_DAY`, spend against `AI_DAILY_BUDGET_USD` and `AGENT_MAX_RUN_USD`; model `AI_MODEL_STORIES` (default GLM-5.3), effort `AI_EFFORT_STORIES`. Durable Object migration `v4` (`FlueStoryWriterAgent`). The weekly content job's story check (`StoryReviewer`) is separate and unchanged.
 
 ## GEDCOM X storage, export and import
 
