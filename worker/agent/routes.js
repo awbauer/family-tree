@@ -8,6 +8,8 @@
 //   POST /api/agent/runs/:id/cancel    stop a run and release its to-do (editors)
 //   POST /api/agent/runs               {tree, kind: "quality", scope?, person?, limit?, dry_run?}  a data quality review
 //   POST /api/agent/runs/:id/apply     apply a finished dry-run review's decisions (editors)
+//   POST /api/agent/runs               {tree, kind: "story", mode: "review", slug, instructions?}
+//                                      {tree, kind: "story", mode: "draft", people: [ids], instructions?, length?}
 //   POST /api/profiles/:id/refresh     queue a rewrite of one person's AI profile (editors)
 //   POST /api/content/refresh          run the content job now (owner)
 import { J, now, parse, write } from "../db.js";
@@ -16,9 +18,10 @@ import { fail, json } from "../http.js";
 import { settings, agentsEnabled, checkDaily, recordUsage, usageToday, BudgetError } from "./config.js";
 import { AGENT, RESEARCHER_PATH, firstMessage, endRun } from "./runs.js";
 import * as Quality from "./quality.js";
+import * as Stories from "./stories.js";
 
 /** Where each kind of run's agent is mounted in the agents Worker. */
-const PATHS = { research: RESEARCHER_PATH, quality: Quality.QUALITY_PATH };
+const PATHS = { research: RESEARCHER_PATH, quality: Quality.QUALITY_PATH, story: Stories.STORY_PATH };
 
 export const enabled = agentsEnabled;
 
@@ -57,7 +60,8 @@ export async function startRun(c, d, { grantOrFail, scoped, loadTodo }) {
   editorOnly(c, g);
   needAgents(c);
   if (d.kind === "quality") return startQuality(c, d, g, { scoped });
-  if (d.kind && d.kind !== "research") fail(400, "kind must be research or quality");
+  if (d.kind === "story") return startStory(c, d, g, { scoped });
+  if (d.kind && d.kind !== "research") fail(400, "kind must be research, quality or story");
   const env = c.env, s = settings(env), b = await scoped(c, g);
   let todo = null;
   if (d.todo_id) {
@@ -201,4 +205,42 @@ export async function applyRun(c, id) {
     const report = await Quality.applyReport(c.env, r, c.access.principal);
     return json({ ok: true, report, run: runOut(await c.env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) });
   } catch (e) { if (e.status) fail(e.status, e.message); throw e; }
+}
+
+// ---------------------------------------------------------------- stories (#33)
+async function startStory(c, d, g, { scoped }) {
+  const env = c.env, s = settings(env), b = await scoped(c, g);
+  const mode = d.mode === "review" ? "review" : d.mode === "draft" ? "draft" : fail(400, "mode must be review or draft");
+  const instructions = String(d.instructions || "").trim().slice(0, 2000) || null;
+  const o = { mode, instructions };
+  if (mode === "review") {
+    const st = (b.research.stories || []).find((x) => x.slug === d.slug);
+    if (!st) fail(404, "No such story.");
+    o.slug = st.slug;
+  } else {
+    const people = [...new Set((Array.isArray(d.people) ? d.people : []).map(String))].slice(0, 12);
+    if (!people.length) fail(400, "Choose who the story is about.");
+    for (const pid of people) {
+      const p = b.people[pid];
+      if (!p) fail(404, `${pid} isn't in this tree.`);
+      if (p.living || p.private) fail(400, `${p.name} is living. Stories are about people who have died; living relatives can be mentioned by name.`);
+    }
+    o.people = people;
+    o.length = Stories.LENGTHS[d.length] ? d.length : "medium";
+  }
+  try { await checkDaily(env, s, { runs: true }); } catch (e) { if (e instanceof BudgetError) fail(429, e.message); throw e; }
+  const id = `run-${now().slice(0, 10).replace(/-/g, "")}-${crypto.randomUUID().slice(0, 8)}`;
+  const label = mode === "review" ? `Review the story “${(b.research.stories.find((x) => x.slug === o.slug) || {}).title}”` : `Draft a ${o.length} story about ${o.people.map((x) => b.people[x].name).join(", ")}`;
+  await write(env, [
+    env.DB.prepare("INSERT INTO agent_runs (id, kind, person_id, tree_id, started_by, instructions, options, created_at) VALUES (?, 'story', ?, ?, ?, ?, ?, ?)")
+      .bind(id, mode === "draft" ? o.people[0] : null, g.tree_id, c.access.principal, `${label}${instructions ? `: ${instructions}` : ""}`, J(o), now()),
+    recordUsage(env, { runs: 1 }),
+  ]);
+  try {
+    await agentsFetch(env, `${Stories.STORY_PATH}/${id}`, { kind: "user", body: Stories.firstMessage(b, o), initialData: { runId: id } });
+  } catch (e) {
+    await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
+    fail(502, `Couldn't start the run: ${e.message}`);
+  }
+  return json({ run: runOut(await env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) }, 201);
 }
