@@ -1,11 +1,13 @@
-/* Family history — single-page app.
-   Data comes from /api/tree (Cloudflare Worker + D1, or tools/serve.py locally); this file holds no family data. */
+/* Family history: the views not yet ported to React (web/src). React loads the data, draws the header, footer and
+   search, owns routing, and asks this code to draw one page at a time into a container:
+     const legacy = window.startFamilyApp(D);  legacy.render("person/I12", element);  legacy.unmount();
+   This file holds no family data. */
 function startFamilyApp(D) {
   "use strict";
   const P = D.people, F = D.families, S = D.sources, R = D.research || {};
   const HOME = D.home;
   const HOME_FIRST = (P[HOME] && P[HOME].given.split(" ")[0]) || "the home person";
-  const app = document.getElementById("app");
+  let app = null; // the container React hands to render()
   // who is looking, and in which tree (null when previewing locally with tools/serve.py)
   const ME = D.me || null, ACCOUNT = D.account || null, TREE = ME ? ME.tree : null;
   const ROLE = ME ? ME.role : "owner";
@@ -25,35 +27,7 @@ function startFamilyApp(D) {
   }
   const whoTxt = (x) => !x ? "—" : ME && x === ME.principal ? "me" : x.startsWith("service:") || x.startsWith("agent:") ? "🤖 " + x.replace(/^(service|agent):/, "") : x.split("@")[0];
   const CTX = () => ({ P, F, S, R, D, ME, ACCOUNT, TREE, EDITOR, AI, app, api, esc, plink, findingHtml, people, isUnknown, mediaUrl, who: whoTxt });
-  if (ACCOUNT && ACCOUNT.isOwner) {
-    const a = document.createElement("a"); a.href = "#/admin"; a.textContent = "Admin";
-    document.querySelector(".site-nav").appendChild(a);
-  }
-  if (D.previewView) {
-    const bar = document.createElement("div");
-    bar.className = "preview-bar";
-    bar.innerHTML = `Previewing what someone with the view <b>${esc0(D.previewView)}</b> sees. <button class="btn">Exit preview</button>`;
-    bar.querySelector("button").onclick = () => { try { sessionStorage.removeItem("previewView"); } catch {} location.reload(); };
-    document.body.prepend(bar);
-  }
-  if (ACCOUNT && ACCOUNT.trees.length > 1) {
-    const sel = document.createElement("select");
-    sel.className = "tree-switch"; sel.setAttribute("aria-label", "Family tree");
-    sel.innerHTML = ACCOUNT.trees.map((t) => `<option value="${esc0(t.id)}"${t.id === TREE ? " selected" : ""}>${esc0(t.name)}</option>`).join("");
-    sel.onchange = () => { try { localStorage.setItem("tree", sel.value); } catch {} location.reload(); };
-    document.querySelector(".site-nav").appendChild(sel); // folds into the menu on small screens
-  }
   const SITE = Object.assign({ title: "Family History", familyName: "Our Family", eyebrow: "A family history, in progress", lede: "" }, R.site || {});
-  // brand + per-branch colours from config
-  document.querySelector(".brand-text").innerHTML = `${esc0(SITE.familyName.replace(/^The /, "").replace(/ Family$/, ""))} <em>Family History</em>`;
-  document.querySelector(".brand-mark").textContent = SITE.mark || SITE.familyName.replace(/^The /, "")[0] || "F";
-  (function () {
-    const css = (R.branches || []).map((b) => `--b-${b.key}:${b.color || "#888"};`).join("");
-    const dark = (R.branches || []).map((b) => `--b-${b.key}:${b.colorDark || `color-mix(in srgb, ${b.color || "#888"} 62%, white)`};`).join("");
-    const st = document.createElement("style");
-    st.textContent = `:root{${css}}@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){${dark}}}:root[data-theme="dark"]{${dark}}`;
-    document.head.appendChild(st);
-  })();
   function esc0(x) { return String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
   // ---------------------------------------------------------------- helpers
@@ -132,69 +106,26 @@ function startFamilyApp(D) {
   const mediaUrl = (f) => (/^(https?:)?\/\//.test(f) || f.startsWith("/") ? f : "media/" + f.replace(/^media\//, ""));
   const branchPeople = (k) => people.filter((p) => p.branch === k);
 
-  // ---------------------------------------------------------------- theme & nav
-  const themeBtn = document.getElementById("theme");
-  try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
-  themeBtn.addEventListener("click", () => {
-    const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-    const next = cur === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    try { localStorage.setItem("theme", next); } catch (e) {}
-    if (currentRoute[0] === "map") route();
-  });
-  const navToggle = document.querySelector(".nav-toggle"), nav = document.querySelector(".site-nav");
-  navToggle.addEventListener("click", () => { nav.classList.toggle("open"); navToggle.setAttribute("aria-expanded", nav.classList.contains("open")); });
-
-  // search
-  const sIn = document.getElementById("search"), sOut = document.getElementById("search-results");
-  let sSel = -1;
-  const index = people.filter((p) => !isUnknown(p)).map((p) => ({ p, key: norm(p.names.map((n) => n.given + " " + n.surname).join(" | ")) }));
-  function doSearch() {
-    const q = norm(sIn.value.trim());
-    if (!q) { sOut.hidden = true; return; }
-    const terms = q.split(/\s+/);
-    const hits = index.filter((x) => terms.every((t) => x.key.includes(t))).slice(0, 12);
-    sSel = -1;
-    sOut.innerHTML = hits.length ? hits.map((x) => `<li><a href="#/person/${x.p.id}">${esc(x.p.name)}<span class="sr-meta">${years(x.p)} · ${esc(x.p.relation || (BR[x.p.branch] || {}).label || "")}</span></a></li>`).join("")
-      : `<li class="muted small" style="padding:8px">No matches</li>`;
-    sOut.hidden = false;
-  }
-  sIn.addEventListener("input", doSearch);
-  sIn.addEventListener("keydown", (e) => {
-    const links = [...sOut.querySelectorAll("a")];
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      sSel = Math.max(0, Math.min(links.length - 1, sSel + (e.key === "ArrowDown" ? 1 : -1)));
-      links.forEach((a, i) => a.classList.toggle("sel", i === sSel));
-    } else if (e.key === "Enter" && links.length) {
-      location.hash = links[Math.max(0, sSel)].getAttribute("href");
-      sIn.value = ""; sOut.hidden = true; sIn.blur();
-    } else if (e.key === "Escape") { sOut.hidden = true; }
-  });
-  document.addEventListener("click", (e) => { if (!e.target.closest(".search")) sOut.hidden = true; });
-  sOut.addEventListener("click", () => { sIn.value = ""; sOut.hidden = true; });
-
-  // ---------------------------------------------------------------- router
+  // ---------------------------------------------------------------- rendering one page (React routes; see the header)
   let currentRoute = [];
   let cleanup = null;
-  function route() {
+  function route() { render(currentPath, app); } // re-draw the current page (the map does after a theme change)
+  let currentPath = "";
+  const VIEWS = { "": viewHome, tree: viewTree, person: viewPerson, people: viewPeople, map: viewMap, timeline: viewTimeline, research: viewResearch, branch: viewBranch,
+    admin: ([tab]) => (ACCOUNT && ACCOUNT.isOwner && window.FamilyWork ? (setTitle(tab === "audit" ? "Audit history" : "Admin"), window.FamilyWork.admin(CTX(), tab === "audit" ? "audit" : "access")) : viewNotFound()) };
+  function render(path, el) {
     if (cleanup) { cleanup(); cleanup = null; }
-    const h = location.hash.replace(/^#\/?/, "");
-    const [path, qs] = h.split("?");
-    const parts = path.split("/").filter(Boolean);
+    app = el;
+    currentPath = path;
+    const [p, qs] = String(path || "").replace(/^#?\/?/, "").split("?");
+    const parts = p.split("/").filter(Boolean);
     const params = new URLSearchParams(qs || "");
     currentRoute = parts;
-    nav.classList.remove("open");
-    document.querySelectorAll(".site-nav a").forEach((a) => a.classList.toggle("active", a.getAttribute("href") === "#/" + (parts[0] || "")));
-    const views = { "": viewHome, tree: viewTree, person: viewPerson, people: viewPeople, stories: viewStories, story: viewStory, map: viewMap, timeline: viewTimeline, research: viewResearch, about: viewAbout, branch: viewBranch,
-      admin: ([tab]) => (ACCOUNT && ACCOUNT.isOwner && window.FamilyWork ? (setTitle(tab === "audit" ? "Audit history" : "Admin"), window.FamilyWork.admin(CTX(), tab === "audit" ? "audit" : "access")) : viewNotFound()) };
-    const v = views[parts[0] || ""] || viewNotFound;
+    const v = VIEWS[parts[0] || ""] || viewNotFound;
     v(parts.slice(1), params);
-    if (!["tree"].includes(parts[0])) window.scrollTo(0, 0);
-    app.focus({ preventScroll: true });
   }
-  window.addEventListener("hashchange", route);
-  document.getElementById("footer-meta").textContent = `${people.length} people · data built ${D.generated}`;
+  function unmount() { if (cleanup) { cleanup(); cleanup = null; } app = null; }
+  window.addEventListener("themechange", () => { if (app && currentRoute[0] === "map") route(); }); // map tiles follow the theme
 
   function setTitle(t) { document.title = t ? `${t} · ${SITE.title}` : SITE.title; }
 
@@ -736,66 +667,6 @@ function startFamilyApp(D) {
   }
 
   // ---------------------------------------------------------------- stories
-  function viewStories() {
-    setTitle("Stories");
-    const st = R.stories || [];
-    app.innerHTML = `<div class="wrap page"><h1>Stories</h1>
-      <p class="prose">Narratives drawn from the records. Each story lists its sources; anything uncertain is said to be uncertain.</p>
-      ${AI ? `<details class="card" style="margin-bottom:18px"><summary><b>Draft a story with AI</b> <span class="small muted">· written from the tree's records, sent to Suggestions for review</span></summary>
-        <form id="sd-form" class="stack" style="margin-top:10px">
-          <div class="filters"><input id="sd-person" list="sd-people" placeholder="Add a person…" style="flex:1;min-width:220px"><button type="button" class="btn" id="sd-add">Add</button></div>
-          <datalist id="sd-people">${people.filter((p) => !isUnknown(p) && !p.living).map((p) => `<option value="${esc(p.name)} (${p.id})">`).join("")}</datalist>
-          <div id="sd-chips" class="small muted">Who is it about? Add one or more people (living people can't be the subject).</div>
-          <textarea name="instructions" rows="2" placeholder="The angle, e.g. “her journey to England after the war” (optional)"></textarea>
-          <div class="filters"><select name="length" aria-label="Length"><option value="short">Short (~300 words)</option><option value="medium" selected>Medium (~700 words)</option><option value="long">Long (~1,200 words)</option></select>
-          <button class="btn primary">Draft it</button><span id="sd-msg" class="small muted"></span></div></form></details>` : ""}
-      ${st.length ? `<div class="grid g3">${st.map(storyCard).join("")}</div>` : `<div class="empty">No stories written yet.${AI ? " Draft one above, or add" : " Add"} them to <code>research.json</code> → <code>stories</code>.</div>`}</div>`;
-    if (AI) wireStoryDraft();
-  }
-  function wireStoryDraft() {
-    const chosen = [], chips = document.getElementById("sd-chips"), inp = document.getElementById("sd-person"), msg = document.getElementById("sd-msg");
-    const draw = () => {
-      chips.innerHTML = chosen.length ? chosen.map((id, i) => `<span class="badge">${esc(P[id].name)} <button type="button" class="linklike" data-rm="${i}" aria-label="Remove">✕</button></span>`).join(" ") : "Who is it about? Add one or more people (living people can't be the subject).";
-      chips.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { chosen.splice(+b.dataset.rm, 1); draw(); }));
-    };
-    const add = () => {
-      const id = (inp.value.match(/\(([^)]+)\)\s*$/) || [])[1];
-      if (id && P[id] && !P[id].living && !chosen.includes(id)) chosen.push(id);
-      inp.value = ""; draw(); inp.focus();
-    };
-    document.getElementById("sd-add").onclick = add;
-    inp.addEventListener("change", add);
-    document.getElementById("sd-form").onsubmit = async (ev) => {
-      ev.preventDefault();
-      if (!chosen.length) { msg.textContent = "Add at least one person."; return; }
-      const f = ev.target;
-      try {
-        await api("POST", "agent/runs", { kind: "story", mode: "draft", people: chosen, instructions: f.instructions.value || undefined, length: f.length.value });
-        location.hash = "#/research/agents";
-      } catch (e) { msg.textContent = e.message; }
-    };
-  }
-  function viewStory([slug]) {
-    const s = (R.stories || []).find((x) => x.slug === slug);
-    if (!s) return viewNotFound();
-    setTitle(s.title);
-    const paras = (s.body || "").split(/\n\n+/).map((t) => t.startsWith("## ") ? `<h2>${esc(t.slice(3))}</h2>` : `<p>${inline(t)}</p>`).join("");
-    app.innerHTML = `<div class="wrap page"><article style="max-width:760px;margin:0 auto">
-      <div class="eyebrow" style="color:${bcolor(s.branch || "other")}">${esc((BR[s.branch] || {}).label || "Family")}${s.era ? " · " + esc(s.era) : ""}</div>
-      <h1>${esc(s.title)}</h1>
-      ${(s.people || []).length ? `<p class="small">People: ${s.people.filter((x) => P[x]).map((x) => plink(x)).join(" · ")}</p>` : ""}
-      <div class="prose">${paras}</div>
-      ${(s.sources || []).length ? `<h3>Sources</h3><ol class="sources-list">${s.sources.map((x) => `<li>${x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title || x.url)}</a>` : esc(x.title)}${x.note ? `<span class="pg">${esc(x.note)}</span>` : ""}</li>`).join("")}</ol>` : ""}
-      ${AI ? `<details class="card sub"><summary><b>Review with AI</b> <span class="small muted">· checks every claim against the records and suggests a revision</span></summary>
-        <form id="sr-form" class="stack" style="margin-top:10px"><textarea name="instructions" rows="2" placeholder="Anything to change? e.g. “make it shorter”, “say more about the move” (optional)"></textarea>
-        <div class="filters"><button class="btn primary">Start the review</button><span id="sr-msg" class="small muted"></span></div></form></details>` : ""}
-      <p><a href="#/stories">← All stories</a></p></article></div>`;
-    if (AI) document.getElementById("sr-form").onsubmit = async (ev) => {
-      ev.preventDefault();
-      try { await api("POST", "agent/runs", { kind: "story", mode: "review", slug: s.slug, instructions: ev.target.instructions.value || undefined }); location.hash = "#/research/agents"; }
-      catch (e) { document.getElementById("sr-msg").textContent = e.message; }
-    };
-  }
   /** Paragraph-level diff of two story texts: removed paragraphs struck through, added ones highlighted. */
   function storyDiff(a, b) {
     const A = String(a || "").split(/\n\n+/), B = String(b || "").split(/\n\n+/);
@@ -1215,53 +1086,12 @@ function startFamilyApp(D) {
   }
 
   // ---------------------------------------------------------------- about
-  function viewAbout() {
-    setTitle("How this site works");
-    app.innerHTML = `<div class="wrap page"><article class="prose" style="max-width:760px">
-      <h1>How this site works</h1>
-      <p>The app (<code>site/</code>) contains no family data. A Cloudflare Worker serves the tree from a private D1 database, only to people let in by Cloudflare Access. The data is built from two private inputs:</p>
-      <p><b>1. The GEDCOM file</b> (<code>*.ged</code>) — the structure of the tree: people, families, events and the Ancestry citations. Keep editing the tree in Ancestry (or Gramps), then export a new GEDCOM and replace the file.</p>
-      <p><b>2. The research file</b> (<code>research.json</code>) — everything Ancestry can’t hold well: verification status for each person, research findings with links to sources, corrections, written stories, historical context and the to-do list. It is keyed by the GEDCOM person IDs, so it survives re-exports.</p>
-      <p>Run <code>python3 tools/build.py</code> to produce <code>build/seed.sql</code>, then load it into the Cloudflare D1 database (see the README). The build also runs automatic checks (duplicates, impossible ages, people with two sets of parents, misfiled events, bad dates) which appear under <a href="#/research/review">Research → Data problems</a>.</p>
-      <h2>Verification levels</h2>
-      <p><span class="badge st-verified">Verified</span> independent records confirm identity and key dates. <span class="badge st-partly-verified">Partly verified</span> some facts confirmed. <span class="badge st-unverified">Unverified</span> only Ancestry tree data. <span class="badge st-disputed">Disputed</span> the evidence contradicts what the tree says.</p>
-      <h2>Photos</h2>
-      <p>The Ancestry export references ${Object.keys(D.media).length} photos and documents but doesn’t include the files. Download them, upload them to the R2 bucket (or <code>family-data/media/</code> for local preview) and list them under <code>media</code> in <code>research.json</code>, e.g. <code>{"I123": [{"file": "photos/name.jpg", "portrait": true}]}</code>.</p>
-    </article></div>`;
-  }
   function viewNotFound() {
     setTitle("Not found");
     app.innerHTML = `<div class="wrap page"><h1>Not found</h1><p><a href="#/">Go home</a></p></div>`;
   }
 
-  route();
   if (AI && LIVE && !D.previewView && window.FamilyChat) window.FamilyChat.mount(CTX()); // the page assistant
+  return { render, unmount, routes: Object.keys(VIEWS).filter(Boolean), ctx: CTX };
 }
-
-(function boot() {
-  const app = document.getElementById("app");
-  app.innerHTML = `<div class="wrap page"><p class="muted">Loading the family tree…</p></div>`;
-  const get = (path) => fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } })
-    .then(async (r) => ({ ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) }));
-  get("api/me")
-    .then(async (me) => {
-      let tree = null, account = null;
-      if (me.ok) { // the Cloudflare Worker (tools/serve.py has no /api/me)
-        account = me.body;
-        if (!account.trees.length) throw new Error("No family trees have been shared with you yet. Ask the owner to invite you.");
-        let saved = null; try { saved = localStorage.getItem("tree"); } catch {}
-        tree = (account.trees.find((t) => t.id === saved) || account.trees[0]).id;
-      } else if (me.status === 403) throw new Error(me.body.error || "Not signed in.");
-      let preview = null; try { preview = account && account.isOwner ? sessionStorage.getItem("previewView") : null; } catch {}
-      const r = await get(`api/tree${tree ? `?tree=${encodeURIComponent(tree)}` : ""}${preview ? `&preview_view=${encodeURIComponent(preview)}` : ""}`);
-      if (!r.ok) throw new Error(r.body.error || `The server answered ${r.status}.`);
-      r.body.account = account;
-      if (preview) r.body.previewView = preview;
-      return r.body;
-    })
-    .then(startFamilyApp)
-    .catch((e) => {
-      app.innerHTML = `<div class="wrap page"><h1>Can’t load the tree</h1><p>${String(e.message).replace(/[<&]/g, (c) => (c === "<" ? "&lt;" : "&amp;"))}</p>
-        <p class="muted small">Locally: run <code>python3 tools/build.py</code> then <code>python3 tools/serve.py</code>. On Cloudflare: check the D1 binding, that the seed was loaded, and that you came in through Cloudflare Access.</p></div>`;
-    });
-})();
+window.startFamilyApp = startFamilyApp;

@@ -4,6 +4,9 @@ __pycache__/
 node_modules/
 .wrangler/
 
+# The built site (npm run build:web)
+dist/
+
 # Your private family data never goes in git
 family-data/
 build/

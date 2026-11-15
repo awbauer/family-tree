@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "build": "python3 tools/build.py",
-    "preview": "python3 tools/build.py && python3 tools/serve.py",
+    "preview": "python3 tools/build.py && npm run build:web && python3 tools/serve.py",
     "db:load": "python3 tools/guard_load.py --remote --legacy && wrangler d1 execute family-tree -c wrangler.local.jsonc --remote --file build/seed.sql",
     "db:load:local": "python3 tools/guard_load.py --local --legacy && wrangler d1 execute family-tree -c wrangler.local.jsonc --local --file build/seed.sql",
-    "dev": "wrangler dev -c wrangler.local.jsonc",
-    "deploy": "wrangler deploy -c wrangler.local.jsonc",
+    "dev": "npm run build:web && wrangler dev -c wrangler.local.jsonc",
+    "deploy": "npm run build:web && wrangler deploy -c wrangler.local.jsonc",
     "db:counts": "wrangler d1 execute family-tree -c wrangler.local.jsonc --remote --command \"SELECT (SELECT COUNT(*) FROM people) AS people, (SELECT COUNT(*) FROM families) AS families, (SELECT COUNT(*) FROM findings) AS findings\"",
     "prepare": "git config core.hooksPath .githooks || true",
     "check:privacy": "python3 tools/check_privacy.py",
@@ -20,11 +20,27 @@
     "db:import": "python3 tools/guard_load.py --remote && wrangler d1 execute family-tree -c wrangler.local.jsonc --remote --file build/seed-app.sql",
     "db:import:local": "python3 tools/guard_load.py --local && wrangler d1 execute family-tree -c wrangler.local.jsonc --local --file build/seed-app.sql",
     "test": "node --test tests/",
-    "deploy:ci": "node tools/ci_config.mjs && node tools/wait_migrations.mjs && wrangler deploy -c wrangler.ci.jsonc",
-    "upload:ci": "node tools/ci_config.mjs && wrangler versions upload -c wrangler.ci.jsonc",
-    "test:gedcomx": "FT_STORAGE=gedcomx node --test tests/"
+    "deploy:ci": "node tools/ci_config.mjs && node tools/wait_migrations.mjs && npm run build:web && wrangler deploy -c wrangler.ci.jsonc",
+    "upload:ci": "node tools/ci_config.mjs && npm run build:web && wrangler versions upload -c wrangler.ci.jsonc",
+    "test:gedcomx": "FT_STORAGE=gedcomx node --test tests/",
+    "build:web": "vite build --config web/vite.config.ts",
+    "dev:web": "vite --config web/vite.config.ts",
+    "dev:example": "node tools/dev_server.mjs --site dist/site",
+    "typecheck": "tsc -p web",
+    "test:e2e": "node --test --test-concurrency=1 e2e/"
   },
   "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "playwright": "^1.65.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
     "wrangler": "^4.0.0"
+  },
+  "dependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router": "^7.18.5"
   }
 }
