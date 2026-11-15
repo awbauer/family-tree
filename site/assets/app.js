@@ -11,6 +11,7 @@ function startFamilyApp(D) {
   const ROLE = ME ? ME.role : "owner";
   const EDITOR = ROLE === "owner" || ROLE === "editor";
   const LIVE = !!ME; // the API supports writes
+  const AI = !!(ACCOUNT && ACCOUNT.ai) && EDITOR; // cloud research agents and AI profiles (editors)
   async function api(method, path, body) {
     const sep = path.includes("?") ? "&" : "?";
     const r = await fetch(`api/${path}${TREE ? `${sep}tree=${encodeURIComponent(TREE)}` : ""}`, {
@@ -23,7 +24,7 @@ function startFamilyApp(D) {
     return data;
   }
   const whoTxt = (x) => !x ? "—" : ME && x === ME.principal ? "me" : x.startsWith("service:") || x.startsWith("agent:") ? "🤖 " + x.replace(/^(service|agent):/, "") : x.split("@")[0];
-  const CTX = () => ({ P, F, S, R, D, ME, ACCOUNT, TREE, EDITOR, app, api, esc, plink, findingHtml, people, isUnknown, who: whoTxt });
+  const CTX = () => ({ P, F, S, R, D, ME, ACCOUNT, TREE, EDITOR, AI, app, api, esc, plink, findingHtml, people, isUnknown, who: whoTxt });
   if (ACCOUNT && ACCOUNT.isOwner) {
     const a = document.createElement("a"); a.href = "#/admin"; a.textContent = "Sharing";
     document.querySelector(".site-nav").appendChild(a);
@@ -476,6 +477,9 @@ function startFamilyApp(D) {
         </aside>
         <div>
           ${stories.length ? `<div class="grid g2" style="margin-bottom:20px">${stories.map(storyCard).join("")}</div>` : ""}
+          ${p.profile || (AI && !p.living) ? `<section class="card profile" style="margin-bottom:20px"><h2>Profile</h2>
+            ${p.profile ? `<p class="prose">${esc(p.profile.text)}</p><p class="small muted">Written by AI from the recorded facts on ${esc(p.profile.generated_at.slice(0, 10))}, and rewritten when they change. It can be wrong: the events and sources below are the record.</p>` : `<p class="small muted">No profile yet. Profiles are written by AI from the recorded facts.</p>`}
+            ${AI && !p.living ? `<button class="btn" id="profile-refresh">${p.profile ? "Rewrite now" : "Write one now"}</button>` : ""}</section>` : ""}
           <section class="card">
             <h2>Life events</h2>
             ${items.length ? `<ul class="timeline-list" ${bstyle(p.branch)}>${tl}</ul>` : '<p class="muted">No events recorded yet.</p>'}
@@ -500,6 +504,12 @@ function startFamilyApp(D) {
         </div>
       </div>
     </div>`;
+    const pr = document.getElementById("profile-refresh");
+    if (pr) pr.onclick = async () => {
+      pr.disabled = true;
+      try { await api("POST", `profiles/${encodeURIComponent(id)}/refresh`); pr.textContent = "Queued: reload in a minute"; }
+      catch (e) { alert(e.message); pr.disabled = false; }
+    };
     if (LIVE && window.FamilyWork) window.FamilyWork.person(CTX(), id);
   }
   function linkify(s) {
@@ -848,7 +858,7 @@ function startFamilyApp(D) {
     tab = tab || "overview";
     setTitle("Research");
     const findings = R.findings || [], todos = R.todo || [], issues = D.issues;
-    const tabs = [["overview", "Overview"], ["review", "Data problems", issues.filter((i) => i.severity !== "info").length], ["findings", "Findings", findings.length], ["todo", "To-do", todos.length], ...(LIVE ? [["queue", "Suggestions", null]] : []), ["status", "Verification", null], ["sources", "Sources", Object.keys(S).length]];
+    const tabs = [["overview", "Overview"], ["review", "Data problems", issues.filter((i) => i.severity !== "info").length], ["findings", "Findings", findings.length], ["todo", "To-do", todos.length], ...(LIVE ? [["queue", "Suggestions", null]] : []), ...(AI ? [["agents", "Agent runs", null]] : []), ["status", "Verification", null], ["sources", "Sources", Object.keys(S).length]];
     let body = "";
     if (tab === "overview") {
       const k = {}; findings.forEach((f) => (k[f.kind] = (k[f.kind] || 0) + 1));
@@ -887,6 +897,12 @@ function startFamilyApp(D) {
     } else if (tab === "queue" && LIVE) {
       body = `<p class="muted">Research from relatives and AI agents waits here until an editor approves it. Approved findings, log entries and to-dos are added to the tree; nothing is applied without review.</p>
         <div class="filters">${[["open", "Waiting"], ["approved", "Approved"], ["rejected", "Rejected"], ["all", "All"]].map(([k, l]) => `<button class="btn${k === "open" ? " primary" : ""}" data-q="${k}">${l}</button>`).join("")}</div><div id="q-out"><p class="muted">Loading…</p></div>`;
+    } else if (tab === "agents" && AI) {
+      body = `<p class="muted">Research agents run in the cloud on Claude, through Cloudflare AI Gateway. Each run works one to-do or person with the tree as the person who started it sees it, searches and reads the web, and files its results as a suggestion. Nothing changes until an editor approves it. Living people are never researched.</p>
+        <form id="ar-new" class="card filters" style="margin-bottom:16px"><input name="person" list="ar-people" placeholder="Person (optional)" style="flex:1;min-width:200px">
+          <datalist id="ar-people">${people.filter((p) => !isUnknown(p) && !p.living).map((p) => `<option value="${esc(p.name)} (${p.id})">`).join("")}</datalist>
+          <input name="instructions" placeholder="What should it look for?" style="flex:2;min-width:240px"><button class="btn primary">Start a run</button></form>
+        <div id="ar-out"><p class="muted">Loading…</p></div>`;
     } else if (tab === "todo") {
       const pr = { high: 0, medium: 1, low: 2 };
       body = todos.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Priority</th><th>Person</th><th>Task</th><th>Where to look</th></tr></thead><tbody>${todos.slice().sort((a, b) => pr[a.priority] - pr[b.priority]).map((t) => `<tr><td class="prio-${t.priority}">${esc(t.priority)}</td><td>${t.person && P[t.person] ? plink(t.person) : "—"}</td><td>${esc(t.task)}</td><td class="small">${linkify(t.where || "")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">No tasks yet.</div>`;
@@ -902,6 +918,7 @@ function startFamilyApp(D) {
     app.innerHTML = `<div class="wrap page"><h1>Research</h1><nav class="tabs">${tabs.map(([k, l, n]) => `<a href="#/research/${k}" class="${k === tab ? "on" : ""}">${l}${n != null ? `<span class="count">${n}</span>` : ""}</a>`).join("")}</nav>${body}</div>`;
     if (tab === "todo" && LIVE) wireTodos();
     if (tab === "queue" && LIVE) wireQueue();
+    if (tab === "agents" && AI) wireAgentRuns();
     if (tab === "findings") {
       const draw = () => {
         const k = document.getElementById("ff-k").value, b = document.getElementById("ff-b").value, c = document.getElementById("ff-c").value;
@@ -940,6 +957,8 @@ function startFamilyApp(D) {
       const acts = [];
       if (!t.assignee && !["done", "wont_do"].includes(t.status)) acts.push(`<button class="btn" data-act="claim" data-id="${t.id}">Take it</button>`);
       if (EDITOR) acts.push(`<button class="btn" data-act="assign" data-id="${t.id}" title="Assign to someone (an email, or agent:name)">Assign…</button>`);
+      if (AI && !["done", "wont_do", "needs_review"].includes(t.status) && (!t.assignee || mine) && !(t.person && P[t.person] && P[t.person].living))
+        acts.push(`<button class="btn" data-act="research" data-id="${t.id}" title="A cloud research agent works this to-do and files a suggestion">Research with AI</button>`);
       acts.push(`<button class="btn" data-act="history" data-id="${t.id}">History</button>`);
       return `<tr id="td-${t.id}"><td class="prio-${t.priority}">${esc(t.priority)}</td><td>${t.person && P[t.person] ? plink(t.person) : "—"}</td>
         <td>${esc(t.task)}${t.where ? `<br><span class="small muted">${linkify(t.where)}</span>` : ""}${t.outcome ? `<br><span class="small"><b>Outcome:</b> ${esc(t.outcome)}</span>` : ""}</td>
@@ -948,6 +967,12 @@ function startFamilyApp(D) {
     async function act(kind, t, el) {
       try {
         if (kind === "claim") await api("POST", `todos/${t.id}/claim`);
+        else if (kind === "research") {
+          const extra = prompt("Anything the agent should know or focus on? (optional)", "");
+          if (extra === null) return;
+          await api("POST", "agent/runs", { todo_id: t.id, instructions: extra || undefined });
+          alert("Started. Follow it under Research → Agent runs; its results arrive as a suggestion.");
+        }
         else if (kind === "assign") {
           const a = prompt("Assign to (an email, \"me\", \"agent:name\", or empty to unassign):", t.assignee || "me");
           if (a === null) return;
@@ -991,6 +1016,34 @@ function startFamilyApp(D) {
     load();
   }
 
+  // ---------------------------------------------------------------- cloud research runs (editors)
+  const RUN_TXT = { queued: "Queued", running: "Running", succeeded: "Done", failed: "Failed", cancelled: "Cancelled" };
+  function wireAgentRuns() {
+    const out = document.getElementById("ar-out");
+    let timer = null;
+    async function load() {
+      clearTimeout(timer);
+      try {
+        const { runs, today, limits } = await api("GET", "agent/runs");
+        out.innerHTML = `<p class="small muted">Today: ${today ? today.runs : 0} of ${limits.runs_per_day} runs, ${(today ? today.tokens : 0).toLocaleString()} of ${limits.tokens_per_day.toLocaleString()} tokens · ${esc(limits.model)} · up to ${limits.searches_per_run} searches and ${limits.minutes_per_run} minutes per run</p>` +
+          (runs.length ? runs.map((r) => `<section class="card" style="margin-bottom:12px"><div class="eyebrow">${esc(r.created_at.slice(0, 16).replace("T", " "))} · ${who(r.started_by)} · <span class="badge st-${r.status === "succeeded" ? "verified" : r.status === "failed" ? "disputed" : "unverified"}">${RUN_TXT[r.status]}</span></div>
+            <p>${r.todo_id ? `To-do #${r.todo_id}` : ""}${r.person && P[r.person] ? ` ${plink(r.person)}` : ""}${r.instructions ? ` · ${esc(r.instructions)}` : ""}</p>
+            <p class="small muted">${r.steps} model responses · ${(r.tokens.input + r.tokens.output).toLocaleString()} tokens${r.proposals.length ? ` · suggestion ${r.proposals.map((x) => `<a href="#/research/queue">#${x}</a>`).join(", ")}` : ""}${r.error ? ` · ${esc(r.error)}` : ""}</p>
+            ${r.log.length ? `<details><summary class="small">${r.log.length} steps</summary><ul class="small">${r.log.map((l) => `<li>${esc(l.text)}</li>`).join("")}</ul></details>` : ""}
+            ${["queued", "running"].includes(r.status) ? `<button class="btn" data-cancel="${esc(r.id)}">Stop</button>` : ""}</section>`).join("") : `<div class="empty">No runs yet.</div>`);
+        out.querySelectorAll("[data-cancel]").forEach((b) => (b.onclick = async () => { if (!confirm("Stop this run? Its to-do goes back to the list.")) return; try { await api("POST", `agent/runs/${b.dataset.cancel}/cancel`); } catch (e) { alert(e.message); } load(); }));
+        if (runs.some((r) => ["queued", "running"].includes(r.status)) && location.hash.startsWith("#/research/agents")) timer = setTimeout(load, 8000);
+      } catch (e) { out.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    }
+    document.getElementById("ar-new").onsubmit = async (ev) => {
+      ev.preventDefault();
+      const f = ev.target, person = (f.person.value.match(/\(([^)]+)\)\s*$/) || [])[1];
+      try { await api("POST", "agent/runs", { person: person || undefined, instructions: f.instructions.value || undefined }); f.reset(); load(); }
+      catch (e) { alert(e.message); }
+    };
+    load();
+  }
+
   function wireQueue() {
     const out = document.getElementById("q-out");
     let status = "open";
@@ -1008,6 +1061,7 @@ function startFamilyApp(D) {
       if (pr.kind === "edit") parts.push(`<h4>Proposed changes${b.origin ? ` <span class="small muted">(${esc(b.origin)})</span>` : ""}</h4><ol>${(b.ops || []).map((o) => `<li>${window.FamilyWork ? window.FamilyWork.opText(CTX(), o) : esc(o.op)}</li>`).join("")}</ol>${b.reason ? `<p class="small"><b>Why:</b> ${esc(b.reason)}</p>` : ""}${(b.sources || []).map((s) => `<p class="small">Source: ${s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>` : esc(s.title)}</p>`).join("")}`);
       if ((b.findings || []).length) parts.push(`<h4>Findings</h4>${b.findings.map((f) => findingHtml(Object.assign({}, f, { branch: f.branch || b.branch }))).join("")}`);
       if (Object.keys(b.people_status || {}).length) parts.push(`<h4>Status changes</h4><ul>${Object.entries(b.people_status).map(([id, s]) => `<li>${P[id] ? plink(id) : esc(id)}: <b>${esc(s.status)}</b> ${esc(s.note || "")}</li>`).join("")}</ul>`);
+      if ((b.story_updates || []).length) parts.push(`<h4>Story revisions</h4>${b.story_updates.map((u) => `<p><b>${esc(u.title)}</b>${u.reason ? ` · ${esc(u.reason)}` : ""} <a class="small" href="#/story/${esc(u.slug)}">current version</a></p><details><summary>Revised text</summary><div class="prose small">${esc(u.body).replace(/\n\n+/g, "<br><br>")}</div></details>`).join("")}`);
       if ((b.todo || []).length) parts.push(`<h4>New to-dos</h4><ul>${b.todo.map((t) => `<li>[${esc(t.priority)}] ${t.person && P[t.person] ? plink(t.person) + ": " : ""}${esc(t.task)}</li>`).join("")}</ul>`);
       if ((b.todo_done || []).length) parts.push(`<h4>Closes</h4><ul>${b.todo_done.map((t) => `<li>${esc(t.task || `to-do #${t.id}`)}: ${esc(t.outcome || "")}</li>`).join("")}</ul>`);
       if ((b.log || []).length) parts.push(`<details><summary>${b.log.length} searches logged</summary><ul>${b.log.map((l) => `<li>${esc(l.result)}: ${esc(l.searched)}${l.note ? ` <span class="muted">(${esc(l.note)})</span>` : ""}</li>`).join("")}</ul></details>`);

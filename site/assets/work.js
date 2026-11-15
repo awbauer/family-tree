@@ -78,6 +78,10 @@
         <form id="w-c-f" class="filters" style="margin-top:8px"><select name="fid"><option value="">About this person</option>${(p.events || []).filter((e) => e.fid).map((e) => `<option value="${e.fid}">${esc(e.type)} ${esc(e.dateDisplay || e.date || "")}</option>`).join("")}</select>
           <input name="body" placeholder="Add a comment, a memory, a question…" style="flex:1;min-width:200px"><button class="btn">Post</button></form></section>
       <section class="card" id="w-history"><h2>History</h2><div id="w-h-out" class="small"><p class="muted">Loading…</p></div></section>
+      ${c.AI && !p.living ? `<section class="card" id="w-ai"><h2>Research with AI</h2>
+        <p class="small muted">A cloud research agent searches and reads the web for ${esc(p.name)} and files what it finds as a suggestion for review. It never changes the tree itself.</p>
+        <form id="w-ai-f" class="filters"><input name="instructions" placeholder="What should it look for? (optional)" style="flex:1;min-width:220px"><button class="btn primary">Start</button></form>
+        <div id="w-ai-out" class="small"></div></section>` : ""}
       <datalist id="w-people">${personOptions(c)}</datalist>
     </div>`);
 
@@ -197,6 +201,24 @@
       },
     };
     document.querySelectorAll("#w-actions [data-w]").forEach((b) => (b.onclick = () => actions[b.dataset.w]()));
+
+    // cloud research runs for this person
+    const aiForm = document.getElementById("w-ai-f");
+    if (aiForm) {
+      const STATE = { queued: "queued", running: "running", succeeded: "done", failed: "failed", cancelled: "stopped" };
+      const loadRuns = async () => {
+        try {
+          const { runs } = await c.api("GET", `agent/runs?person=${encodeURIComponent(id)}`);
+          document.getElementById("w-ai-out").innerHTML = runs.length ? `<ul>${runs.slice(0, 5).map((r) => `<li>${esc(r.created_at.slice(0, 10))} · ${STATE[r.status]}${r.proposals.length ? ` · <a href="#/research/queue">suggestion #${r.proposals.join(", #")}</a>` : ""}${r.error ? ` · <span class="muted">${esc(r.error)}</span>` : ""}</li>`).join("")}</ul><a href="#/research/agents">All runs →</a>` : "";
+        } catch (e) { document.getElementById("w-ai-out").textContent = e.message; }
+      };
+      aiForm.onsubmit = async (ev) => {
+        ev.preventDefault();
+        try { await c.api("POST", "agent/runs", { person: id, instructions: ev.target.instructions.value || undefined }); ev.target.reset(); loadRuns(); }
+        catch (e) { say(e.message); }
+      };
+      loadRuns();
+    }
 
     // comments (#6)
     const loadComments = async () => {

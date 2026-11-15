@@ -86,6 +86,7 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
       Object.assign(p, { events: [], birth: null, death: null, burial: null, notes: [], media: [], citations: [], issues: [], private: true });
       if (v.living === "anonymous") Object.assign(p, { name: `Living ${p.surname || ""}`.trim(), given: "", names: [{ given: "", surname: p.surname || "" }] });
     }
+    if (!v.notes) delete p.profile; // AI-written narrative counts as notes
     if (!v.notes) { p.notes = []; p.events = (p.events || []).map((e) => { const { note, ...rest } = e; return rest; }); }
     if (!v.media) p.media = [];
     if (!v.sources) { p.citations = []; p.events = (p.events || []).map(noCites); }

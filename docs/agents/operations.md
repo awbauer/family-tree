@@ -145,6 +145,73 @@ It applies the same `grafts` and `edits` as the original import. It suggests onl
 
 To-dos live in D1 (`/api/todos`). Each has a priority, a status (`open → in_progress → needs_review → done` or `wont_do`), an assignee (a person's email, or `agent:<name>` / `service:<token>`), an outcome and a history. Anyone with a grant can add to-dos and take unassigned ones. Editors assign, close and edit them. Agents can't close their own work: submitting research moves the to-do to **needs_review**, and an editor approves the suggestion (Research → Suggestions). Approving applies the findings, log, statuses and new to-dos and closes the to-do. Rejecting sends it back to the assignee.
 
+## Cloud research agents (agents/)
+
+Editors can hand a to-do or a person to a research agent that runs in Cloudflare, not on anyone's laptop. It reads the tree, searches and reads the web, and files its results as a **suggestion**. Nothing reaches the tree until an editor approves it, exactly as with research from people. A weekly job also keeps **AI profiles** (short biographies of people who have died) and **stories** in step with the facts.
+
+**How it's built.** A second, private Worker, `family-tree-agents`, in `agents/`:
+
+- **[Flue](https://flueframework.com/)** agents on its Cloudflare target. Each run is one Flue conversation: a Durable Object on Cloudflare's **Agents SDK**, with **Pi** running the loop (model turns, tool calls, retries, compaction). If the object is evicted or crashes mid-run, Flue resumes from its durable records. It never re-runs a model call or tool call whose result was already recorded.
+- **Claude through AI Gateway.** The model is `cloudflare/<AI_MODEL>` (default `anthropic/claude-opus-5.5`): the Workers AI binding sends it through your AI Gateway. No Anthropic key sits in the Worker; billing goes to AI Gateway credits, or to an Anthropic key you store on the gateway (BYOK).
+- **Cloudflare's agent tools:** `web_search` (Cloudflare Web Search API) and `web_fetch` (pages and PDFs to Markdown) from the Agents SDK.
+- **The site's own code for everything that matters.** Scoping (`worker/bundle.js`, `worker/scope.js`), submission checks (`worker/agent/tools.js`, `worker/research.js`, the edit-ops dry run) and filing suggestions (`worker/agent/runs.js`) are the same modules the site uses, imported into the agents Worker. The Flue files (`agents/src/`) only declare tools and wiring.
+
+**Who sees what.**
+
+- An agent sees the tree **exactly as the editor who started the run sees it**. It re-checks that before every tool call, so revoking their grant or cancelling the run stops it.
+- Living people reach the model as an id and a name only, so it can walk through the family. No dates, places, notes or events.
+- Findings about living people are rejected.
+- Profiles are written only for people who have died. Their facts name a living relative only as "a living son".
+- The agents Worker has no public URL (`workers_dev` and preview URLs off, no routes). Only the site Worker reaches it, over a service binding. Set `AGENTS_TOKEN` as a secret on both Workers for a second check.
+- AI Gateway keeps **no logs** of these requests unless `AI_GATEWAY_LOGS=true`, because prompts contain family data. Token use is still recorded in D1 (`agent_runs`, `ai_usage`). Workers Traces get spans without content.
+- This does send family data (the people being researched, and their deceased relatives' facts) to Anthropic through Cloudflare. Leave the feature off if that isn't acceptable for your family.
+
+**Budgets** (dashboard variables on the agents Worker; the first two also on the site Worker, which enforces them when starting runs):
+
+| Variable | Default | |
+|---|---|---|
+| `AGENT_MAX_RUNS_PER_DAY` | 10 | research runs per day |
+| `AI_DAILY_TOKEN_BUDGET` | 4,000,000 | all AI work together; tools stop when it's used up |
+| `AGENT_MAX_SEARCHES` / `AGENT_MAX_FETCHES` | 25 / 40 | per run |
+| `AGENT_MAX_MINUTES` | 45 | per run (Flue's durability timeout); stale runs are closed on the next read |
+| `CONTENT_MAX_PER_RUN` | 50 | profiles and story checks per weekly job; for the first backfill, run it on demand a few times |
+
+Also set a **spend limit and rate limit on the AI Gateway itself** (dashboard → AI → AI Gateway → your gateway → Settings). That is the hard stop if anything here misbehaves. Other variables: `AI_MODEL`, `AI_EFFORT` (`high`), `AI_CONTENT_EFFORT` (`medium`), `AI_GATEWAY_ID` (`default`), `WEB_SEARCH_PROVIDER` (`exa`), `CONTENT_JOB_ENABLED` (`false`).
+
+**One-time setup (owner):**
+
+1. **AI Gateway:** create a gateway (or use `default`). Load AI Gateway credits, or store an Anthropic key on the gateway (Provider keys → Anthropic). Set a spend limit.
+2. **Deploy the agents Worker.** Workers & Pages → Create → connect the same repo again as a second Worker named `family-tree-agents`:
+   - Root directory: `agents`
+   - Build command: *(empty)*
+   - Deploy command: `npm run deploy:ci`
+   - Build variable: `D1_DATABASE_ID`
+   - Install: Workers Builds runs `npm ci` in `agents/`, which has its own lockfile.
+3. **Variables on `family-tree-agents`:** the budgets above if you want other values, `AI_GATEWAY_ID` if not `default`, and later `CONTENT_JOB_ENABLED=true`.
+4. **Connect the site to it.** On the `family-tree` Worker's build settings, add the build variable `AGENTS_SERVICE` = `family-tree-agents`. `tools/ci_config.mjs` then adds the `AGENTS` service binding on the next deploy. It's opt-in because a binding to a Worker that doesn't exist yet fails the deploy.
+5. Redeploy the site. Editors now see **Research with AI** on to-dos and person pages, and the **Agent runs** tab under Research.
+
+**Using it.**
+
+- **Start a run** from a to-do ("Research with AI"), a person page, or Research → Agent runs. A run started from a to-do assigns it to `agent:cloud`. On submission the to-do moves to `needs_review` with the suggestion linked. If the run fails or is stopped, the to-do goes back to the list with a note.
+- **Watch** progress in Agent runs: status, the searches and pages it read, tokens, and the resulting suggestion. **Stop** aborts the Flue conversation.
+- **Content job:** weekly, Sundays at 03:23 UTC, when `CONTENT_JOB_ENABLED=true`, or on demand (owner) with `POST /api/content/refresh`.
+  - It rewrites profiles whose facts changed, direct ancestors first. Profiles are labelled as AI-written on the page, hidden from views without notes, and editors can "Rewrite now".
+  - It re-checks stories whose people's facts changed. An out-of-date story becomes a **story revision** suggestion: the editor sees the reason and the revised text, and approving replaces the story (history keeps the old version).
+
+**Developing.**
+
+```bash
+cd agents
+npm install
+npm run check
+npm run dev
+```
+
+- `npm run check` builds against the template config. `npm run dev` runs the Worker locally in workerd, but its AI binding calls the real Cloudflare account, so model calls cost money even in development.
+- The site-side logic is tested in `tests/agents.test.mjs` against the example family, with a fake agents Worker.
+- Version pins, with their reasons in `agents/package.json`: Flue 2.3.0 needs Pi 1.4.x, and the Agents SDK web tools need `agents` ≥ 0.28, which Flue accepts as a project-level override. Remove the pins when Flue catches up.
+
 ## Restore (D1 Time Travel)
 
 D1 keeps point-in-time recovery automatically: 30 days on Workers Paid, 7 on Free. There is no other copy.

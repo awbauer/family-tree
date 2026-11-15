@@ -39,3 +39,30 @@ test("strips vars even if someone adds them back to the template", () => {
   assert.equal(cfg.keep_vars, true);
   assert.match(r.stderr, /dropping vars ACCESS_AUD, URL/);
 });
+
+test("the agents Worker binding is added only when AGENTS_SERVICE names it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ci-"));
+  const off = run({ D1_DATABASE_ID: ID, AGENTS_SERVICE: "" }, join(ROOT, "wrangler.jsonc"), join(dir, "a.json"));
+  assert.equal(off.status, 0, off.stderr);
+  assert.equal(JSON.parse(readFileSync(join(dir, "a.json"), "utf8")).services, undefined);
+  const on = run({ D1_DATABASE_ID: ID, AGENTS_SERVICE: "family-tree-agents" }, join(ROOT, "wrangler.jsonc"), join(dir, "b.json"));
+  assert.equal(on.status, 0, on.stderr);
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, "b.json"), "utf8")).services, [{ binding: "AGENTS", service: "family-tree-agents" }]);
+  assert.notEqual(run({ D1_DATABASE_ID: ID, AGENTS_SERVICE: "bad name!" }, join(ROOT, "wrangler.jsonc"), join(dir, "c.json")).status, 0);
+});
+
+test("the agents Worker template is private, keeps dashboard vars and gets the D1 id", () => {
+  const out = join(mkdtempSync(join(tmpdir(), "ci-")), "w.json");
+  const r = run({ D1_DATABASE_ID: ID, AGENTS_SERVICE: "" }, join(ROOT, "agents/wrangler.jsonc"), out);
+  assert.equal(r.status, 0, r.stderr);
+  const cfg = JSON.parse(readFileSync(out, "utf8"));
+  assert.equal(cfg.name, "family-tree-agents");
+  assert.equal(cfg.workers_dev, false);
+  assert.equal(cfg.preview_urls, false);
+  assert.equal(cfg.routes, undefined);
+  assert.equal(cfg.vars, undefined);
+  assert.equal(cfg.keep_vars, true);
+  assert.equal(cfg.d1_databases[0].database_id, ID);
+  assert.ok(cfg.compatibility_flags.includes("nodejs_compat"));
+  assert.deepEqual(cfg.migrations[0].new_sqlite_classes.sort(), ["FlueProfileWriterAgent", "FlueResearcherAgent", "FlueStoryReviewerAgent"]);
+});
