@@ -14,7 +14,7 @@ export function settings(env) {
     effort: env.AI_EFFORT || "high",                      // research runs (Flue thinkingLevel)
     contentEffort: env.AI_CONTENT_EFFORT || "medium",     // profiles and story checks
     gateway: env.AI_GATEWAY_ID || "default",
-    gatewayLogs: env.AI_GATEWAY_LOGS === "true",          // prompts hold family data: no gateway logs unless debugging
+    gatewayLogs: env.AI_GATEWAY_LOGS !== "false",         // gateway logs on (they include prompts, i.e. family data); "false" turns them off
     searchProvider: env.WEB_SEARCH_PROVIDER || "exa",     // Cloudflare Web Search API: needs AI Gateway credits…
     searchByokAlias: env.WEB_SEARCH_BYOK_ALIAS || undefined, // …or a search provider key stored on the gateway, by alias
     maxSearches: int(env.AGENT_MAX_SEARCHES, 25),          // web searches per run

@@ -167,7 +167,7 @@ Editors can hand a to-do or a person to a research agent that runs in Cloudflare
 - Findings about living people are rejected.
 - Profiles are written only for people who have died. Their facts name a living relative only as "a living son".
 - The agents Worker has no public URL (`workers_dev` and preview URLs off, no routes). Only the site Worker reaches it, over a service binding. Set `AGENTS_TOKEN` as a secret on both Workers for a second check.
-- AI Gateway keeps **no logs** of these requests unless `AI_GATEWAY_LOGS=true`, because prompts contain family data. Token use is still recorded in D1 (`agent_runs`, `ai_usage`). Workers Traces get spans without content.
+- **AI Gateway logs every request, prompts and responses included.** That means the facts sent to the model are stored in the gateway's logs, which only members of your Cloudflare account can read. Logs are kept per the gateway's retention setting; set `AI_GATEWAY_LOGS=false` to stop logging. Token use is also recorded in D1 (`agent_runs`, `ai_usage`), and Workers Traces get spans without content.
 - This does send family data (the people being researched, and their deceased relatives' facts) to Anthropic through Cloudflare. Leave the feature off if that isn't acceptable for your family.
 
 **Budgets** (dashboard variables on the agents Worker; the first two also on the site Worker, which enforces them when starting runs):
