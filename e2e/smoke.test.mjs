@@ -53,6 +53,20 @@ test("person page", async () => {
   assert.match(await title(), /Eva Novák/);
   await visit("#/person/I4", ["George Hartley", "Mentioned in"]);
 });
+test("person page: close-family events and their toggle", async () => {
+  await visit("#/person/I4", ["Life events", "Son born:", "Father died:"]);
+  const timeline = () => page.locator(".timeline-list").innerText();
+  assert.doesNotMatch(await timeline(), /Brother born/, "a brother born before him is left out");
+  await page.getByLabel("Family events").uncheck();
+  assert.doesNotMatch(await timeline(), /Son born:|Father died:/, "the toggle hides family events");
+  await page.reload();
+  await page.waitForSelector(".timeline-list");
+  assert.equal(await page.getByLabel("Family events").isChecked(), false, "the choice survives a reload");
+  assert.doesNotMatch(await timeline(), /Son born:/);
+  await page.getByLabel("Family events").check();
+  assert.match(await timeline(), /Son born:/);
+  assert.deepEqual(errors, []);
+});
 test("family tree chart", async () => {
   await visit("#/tree/I1", ["Ancestors"]);
   assert.ok(await page.locator("svg").count() > 0, "the chart draws");
