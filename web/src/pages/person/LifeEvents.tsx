@@ -10,6 +10,9 @@ import { ago, apidLink, eventLabel, spousesOf } from "../../tree";
 import { Linkify, useBranchStyle, useWho } from "../../ui";
 import type { Tree } from "../../types";
 import { usePerson } from "./context";
+import { S } from "../../../../strings/index.ts";
+
+const T = S.person.lifeEvents;
 
 interface Item { e: any; sort?: number | null; kind: "own" | "fam" | "kin" | "ctx" }
 
@@ -56,7 +59,7 @@ function FnLink({ n }: { n: number }) {
 
 export function FactBadge({ r }: { r?: any }) {
   if (!r || !r.status || r.status === "unverified") return null;
-  const tip = `${r.status} by ${r.by || "?"} on ${(r.at || "").slice(0, 10)}${r.note ? `: ${r.note}` : ""}${(r.evidence || []).length ? ` · ${r.evidence.length} source${r.evidence.length > 1 ? "s" : ""}` : ""}`;
+  const tip = T.badgeTip(r.status, r.by || "?", (r.at || "").slice(0, 10), r.note, (r.evidence || []).length);
   return <>{" "}<span className={`badge st-${r.status === "verified" ? "verified" : "disputed"}`} title={tip}>{r.status}</span></>;
 }
 
@@ -79,9 +82,9 @@ export function LifeEvents() {
   return (
     <section className="card">
       <div className="life-head">
-        <h2>Life events</h2>
+        <h2>{T.title}</h2>
         {hasKin && <label className="small muted kin-toggle"><input type="checkbox" checked={showKin}
-          onChange={(ev) => { setShowKin(ev.target.checked); store.set(KIN_KEY, ev.target.checked ? null : "0"); }} /> Family events</label>}
+          onChange={(ev) => { setShowKin(ev.target.checked); store.set(KIN_KEY, ev.target.checked ? null : "0"); }} /> {T.familyToggle}</label>}
       </div>
       {rows.length ? (
         <ul className="timeline-list" style={bstyle(p.branch)}>
@@ -89,25 +92,25 @@ export function LifeEvents() {
             const { e, kind } = it;
             if (kind === "ctx") return <li className="ctx" key={i}><div className="t-date">{String(it.sort).slice(0, 4)}</div><span className="t-dot"></span><div className="t-body">{e.text}</div></li>;
             let what: ReactNode = <><b>{eventLabel(e)}</b>{e.value && e.type !== "Residence" ? ` — ${e.value}` : ""}</>;
-            if (kind === "fam") what = <><b>{e.type === "Marriage" ? "Married" : e.type}</b>{e.withWho ? <> <PersonLink id={e.withWho} /></> : null}</>;
-            if (kind === "kin") what = <><b>{e.type}{e.who ? ":" : ""}</b>{e.who && <> <PersonLink id={e.who} /></>}{e.partner && <> to <PersonLink id={e.partner} /></>}</>;
+            if (kind === "fam") what = <><b>{e.type === "Marriage" ? T.married : e.type}</b>{e.withWho ? <> <PersonLink id={e.withWho} /></> : null}</>;
+            if (kind === "kin") what = <><b>{e.type}{e.who ? ":" : ""}</b>{e.who && <> <PersonLink id={e.who} /></>}{e.partner && <> {T.to} <PersonLink id={e.partner} /></>}</>;
             const own = kind === "own" && e.fid;
             return (
               <li key={i} className={kind === "kin" ? "kin" : e.misfiled ? "misfiled" : ""}>
-                <div className="t-date">{e.dateDisplay || "undated"}</div><span className="t-dot"></span>
+                <div className="t-date">{e.dateDisplay || T.undated}</div><span className="t-dot"></span>
                 <div className={`t-body${own && e.fid === target ? " fact-target" : ""}`} data-fid={own ? e.fid : undefined}>
                   {what}{e.place && <> <span className="t-place">· {e.place}</span></>}
                   {it.cites.length > 0 && <sup className="cite">{it.cites.map((n: number, j: number) => <span key={j}>{j > 0 && ","}<FnLink n={n} /></span>)}</sup>}
                   {e.note ? <div className="t-note">{e.note}</div> : e.address ? <div className="t-note">{e.address}</div> : null}
-                  {e.misfiled && <div className="t-note sev-warn">⚠ This is a relative’s event that Ancestry exported as this person’s own — ignore.</div>}
+                  {e.misfiled && <div className="t-note sev-warn">{T.misfiled}</div>}
                   {own && live && <FactTools fid={e.fid} />}
                 </div>
               </li>
             );
           })}
         </ul>
-      ) : <p className="muted">No events recorded yet.</p>}
-      {p.notes.length > 0 && <><h3 style={{ marginTop: 20 }}>Notes</h3>{p.notes.map((n: string, i: number) => <p className="small" key={i}><Linkify text={n} /></p>)}</>}
+      ) : <p className="muted">{T.none}</p>}
+      {p.notes.length > 0 && <><h3 style={{ marginTop: 20 }}>{T.notes}</h3>{p.notes.map((n: string, i: number) => <p className="small" key={i}><Linkify text={n} /></p>)}</>}
     </section>
   );
 }
@@ -118,7 +121,7 @@ export function FactsChip() {
   const own = (p.events || []).filter((e: any) => e.fid);
   if (!own.length) return null;
   const nV = own.filter((e: any) => e.review && e.review.status === "verified").length, nD = own.filter((e: any) => e.review && e.review.status === "disputed").length;
-  return <>{" "}<span className="chip" title="Facts reviewed against the records">{nV} of {own.length} facts verified{nD ? `, ${nD} disputed` : ""}</span></>;
+  return <>{" "}<span className="chip" title={T.factsTitle}>{T.factsVerified(nV, own.length)}{nD ? T.factsDisputed(nD) : ""}</span></>;
 }
 
 function FactTools({ fid }: { fid: string }) {
@@ -130,15 +133,15 @@ function FactTools({ fid }: { fid: string }) {
   return (
     <>
       <FactBadge r={e.review} />{" "}
-      <button className="linklike fact-verify" data-fid={fid} onClick={() => setVerify({ fid, at: "fact", preset: {} })}>{e.review && e.review.status !== "unverified" ? "review" : "verify"}</button>{" "}
-      <button className="linklike fact-prov" data-fid={fid} onClick={() => setProv((x) => !x)}>history</button>
+      <button className="linklike fact-verify" data-fid={fid} onClick={() => setVerify({ fid, at: "fact", preset: {} })}>{e.review && e.review.status !== "unverified" ? T.review : T.verify}</button>{" "}
+      <button className="linklike fact-prov" data-fid={fid} onClick={() => setProv((x) => !x)}>{T.history}</button>
       {open && <VerifyForm e={e} preset={verify!.preset} />}
       {prov && <Provenance fid={fid} />}
     </>
   );
 }
 
-const KIND: Record<string, string> = { "ft:Import": "imported", "ft:Edit": "edited", "ft:Revert": "undone", "ft:Resolution": "resolved" };
+const KIND: Record<string, string> = T.provenance.kinds;
 
 /** One fact's chain (PROV-O, from /api/prov): each change to it, who made it (and on whose behalf), why, from which sources. */
 function Provenance({ fid }: { fid: string }) {
@@ -153,7 +156,7 @@ function Provenance({ fid }: { fid: string }) {
       try {
         if (!provCache.current || provCache.current.id !== id) {
           const r = await fetch(href, { credentials: "same-origin" });
-          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `The server answered ${r.status}.`);
+          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || T.provenance.serverAnswered(r.status));
           provCache.current = { id, doc: await r.json() };
         }
         const g = provCache.current.doc["@graph"], byId = new Map<string, any>(g.map((n: any) => [n["@id"], n]));
@@ -176,19 +179,19 @@ function Provenance({ fid }: { fid: string }) {
   }, [id, fid, href, provCache]);
   return (
     <div className="card sub prov-panel small">
-      {state.error ? state.error : !state.steps ? "Loading the history…" : state.steps.length ? <>
-        <b>History of this fact</b>
+      {state.error ? state.error : !state.steps ? T.provenance.loading : state.steps.length ? <>
+        <b>{T.provenance.title}</b>
         <ol className="prov-steps">{state.steps.map((s, i) => {
           const pages = s.run ? (s.run["prov:used"] || []).length : 0;
           return (
-            <li key={i}><span className="muted">{s.at.slice(0, 16).replace("T", " ")} · {who(s.who)}{s.behalf ? ` on behalf of ${who(s.behalf)}` : ""}</span> {KIND[s.kind] || "changed"}: <b>{s.change}</b>{s.reason ? ` — ${s.reason}` : ""}
-              {s.sugg && <div>from <Link to="/research/queue">{s.sugg["rdfs:label"]}</Link> by {who(s.author)}{s.run ? `, written by a research agent on behalf of ${who(s.onBehalf)} after reading ${pages} page${pages === 1 ? "" : "s"}` : ""}</div>}
-              {s.sources.length > 0 && <div>Evidence: {s.sources.map((x: any, j: number) => <span key={j}>{j > 0 && "; "}{x["ft:url"] ? <a href={x["ft:url"]} target="_blank" rel="noopener">{x["rdfs:label"] || x["ft:url"]}</a> : x["rdfs:label"] || ""}</span>)}</div>}
+            <li key={i}><span className="muted">{s.at.slice(0, 16).replace("T", " ")} · {who(s.who)}{s.behalf ? T.provenance.onBehalfOf(who(s.behalf)) : ""}</span> {KIND[s.kind] || T.provenance.changed}: <b>{s.change}</b>{s.reason ? ` — ${s.reason}` : ""}
+              {s.sugg && <div>{T.provenance.from} <Link to="/research/queue">{s.sugg["rdfs:label"]}</Link> {T.provenance.by} {who(s.author)}{s.run ? T.provenance.byAgent(who(s.onBehalf), pages) : ""}</div>}
+              {s.sources.length > 0 && <div>{T.provenance.evidence} {s.sources.map((x: any, j: number) => <span key={j}>{j > 0 && "; "}{x["ft:url"] ? <a href={x["ft:url"]} target="_blank" rel="noopener">{x["rdfs:label"] || x["ft:url"]}</a> : x["rdfs:label"] || ""}</span>)}</div>}
             </li>
           );
         })}</ol>
-        <a className="muted" href={href} target="_blank" rel="noopener">Provenance as PROV-O (JSON-LD)</a>
-      </> : <p className="muted">No recorded changes to this fact since the tree was imported.</p>}
+        <a className="muted" href={href} target="_blank" rel="noopener">{T.provenance.asProv}</a>
+      </> : <p className="muted">{T.provenance.none}</p>}
     </div>
   );
 }
@@ -217,27 +220,27 @@ export function VerifyForm({ e, preset }: { e: any; preset: any }) {
         const nc = readCitation(form, "n");
         if (nc) evidence.push(nc);
         const note = (form.elements.namedItem("note") as HTMLTextAreaElement).value.trim();
-        if (status === "verified" && !evidence.length) throw new Error("Pick or add the source that verifies it.");
-        if (status !== "unverified" && !note) throw new Error("Write your conclusion: it is kept with the fact.");
+        if (status === "verified" && !evidence.length) throw new Error(T.verifyForm.noEvidence);
+        if (status !== "unverified" && !note) throw new Error(T.verifyForm.noNote);
         queue([{ op: "fact.review", entity: "person", id, fid: e.fid, status, note, evidence, ...(preset.finding != null ? { finding: preset.finding } : {}) }],
           { resolves: preset.resolves, reason: preset.reason || note });
         setVerify(null);
       } catch (err: any) { alert(err.message); }
     }}>
-      <div className="small"><b>Review: {[e.type, e.dateDisplay || e.date, e.place].filter(Boolean).join(", ")}</b>
-        {r.status && <span className="muted"> · currently {r.status}{r.by ? ` by ${who(r.by)} ${ago(r.at)}` : ""}</span>}</div>
-      <div className="filters" role="radiogroup" aria-label="Conclusion">
-        {[["verified", "Verified: the evidence supports it"], ["disputed", "Disputed: the evidence contradicts it"], ["unverified", "Unverified: not yet checked"]].map(([v, l]) => (
+      <div className="small"><b>{T.verifyForm.title([e.type, e.dateDisplay || e.date, e.place].filter(Boolean).join(", "))}</b>
+        {r.status && <span className="muted">{T.verifyForm.currently(r.status)}{r.by ? T.verifyForm.by(who(r.by), ago(r.at)) : ""}</span>}</div>
+      <div className="filters" role="radiogroup" aria-label={T.verifyForm.conclusion}>
+        {[["verified", T.verifyForm.conclusions.verified], ["disputed", T.verifyForm.conclusions.disputed], ["unverified", T.verifyForm.conclusions.unverified]].map(([v, l]) => (
           <label className="small" key={v}><input type="radio" name="status" value={v} defaultChecked={(preset.status || r.status || "verified") === v} /> {l}</label>
         ))}
       </div>
       {cites.length ? (
-        <div className="small"><div className="muted">Evidence already cited on this fact:</div>
+        <div className="small"><div className="muted">{T.verifyForm.evidenceCited}</div>
           {cites.map((ci: any, i: number) => <label style={{ display: "block" }} key={i}><input type="checkbox" name="ev" value={i} defaultChecked={(r.evidence || []).some((x: any) => JSON.stringify(x) === JSON.stringify(ci))} /> <Cite cit={ci} /></label>)}</div>
-      ) : <p className="small muted">No sources are cited on this fact yet. Add the record you checked:</p>}
+      ) : <p className="small muted">{T.verifyForm.noSources}</p>}
       <CitationFields prefix="n" />
-      <textarea name="note" rows={2} placeholder="Your conclusion: what you compared and why it holds (or doesn't)" style={{ width: "100%" }} defaultValue={preset.note || ""} />
-      <div className="btn-row"><button className="btn primary">{editor ? "Add to changes" : "Add to suggestion"}</button><button type="button" className="btn" onClick={() => setVerify(null)}>Cancel</button></div>
+      <textarea name="note" rows={2} placeholder={T.verifyForm.note} style={{ width: "100%" }} defaultValue={preset.note || ""} />
+      <div className="btn-row"><button className="btn primary">{editor ? T.verifyForm.addToChanges : T.verifyForm.addToSuggestion}</button><button type="button" className="btn" onClick={() => setVerify(null)}>{T.verifyForm.cancel}</button></div>
     </form>
   );
 }
@@ -247,28 +250,28 @@ export function Sources() {
   const { D } = useData();
   const { id } = usePerson();
   const { notes } = buildTimeline(D, id);
-  const S = D.sources as any;
+  const SRC = D.sources as any;
   return (
     <section className="card" style={{ marginTop: 20 }}>
-      <h2>Sources</h2>
+      <h2>{T.sources.title}</h2>
       {notes.length ? <>
         <ol className="sources-list">{notes.map((c, i) => {
-          const s = S[c.source] || {};
+          const s = SRC[c.source] || {};
           const url = apidLink(c.apid);
-          const title = s.title || c.title || c.source || c.url || "Source";
-          const ev = [c.source_type && ({ original: "original record", derivative: "derivative (index, transcript)", authored: "authored work" } as any)[c.source_type], c.information && `${c.information} information`, c.evidence && `${c.evidence} evidence`, c.quality != null && `quality ${c.quality} of 3`, c.accessed && `viewed ${c.accessed}`].filter(Boolean);
+          const title = s.title || c.title || c.source || c.url || T.sources.source;
+          const ev = [c.source_type && T.sources.types[c.source_type], c.information && T.sources.information(c.information), c.evidence && T.sources.evidence(c.evidence), c.quality != null && T.sources.quality(c.quality), c.accessed && T.sources.viewed(c.accessed)].filter(Boolean);
           return (
             <li id={`fn-${i + 1}`} key={i}>
               {s.title ? <SourceLink id={c.source}>{title}</SourceLink> : c.url ? <a href={c.url} target="_blank" rel="noopener">{title}</a> : title}{s.author ? `, ${s.author}` : ""}
-              {url && <> · <a href={url} target="_blank" rel="noopener">view record on Ancestry</a></>}
-              {c.url && s.title && <> · <a href={c.url} target="_blank" rel="noopener">view record</a></>}
+              {url && <> · <a href={url} target="_blank" rel="noopener">{T.sources.viewOnAncestry}</a></>}
+              {c.url && s.title && <> · <a href={c.url} target="_blank" rel="noopener">{T.sources.viewRecord}</a></>}
               {c.page && <span className="pg">{c.page}</span>}{c.text && <span className="pg">“{c.text}”</span>}{c.note && <span className="pg">{c.note}</span>}
               {ev.length > 0 && <span className="ev">{ev.join(" · ")}</span>}
             </li>
           );
         })}</ol>
-        <p className="small muted">Imported source titles are Ancestry collections, mostly indexes or derivative records; “view record on Ancestry” needs a login. Sources added here record what kind of source each is and how strong the evidence is.</p>
-      </> : <p className="muted small">No sources cited. Everything on this page is unsourced.</p>}
+        <p className="small muted">{T.sources.footer}</p>
+      </> : <p className="muted small">{T.sources.none}</p>}
     </section>
   );
 }

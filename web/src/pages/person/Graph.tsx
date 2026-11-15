@@ -7,6 +7,9 @@ import { useData } from "../../data";
 import { isUnknown } from "../../lib";
 import type { Tree } from "../../types";
 import { usePerson } from "./context";
+import { S } from "../../../../strings/index.ts";
+
+const T = S.person.graph;
 
 const W = 168, H = 52, GX = 14, GY = 48, PAD = 10;
 const edgeKey = (a: string, b: string) => [a, b].sort().join("~");
@@ -45,11 +48,11 @@ function Insights({ id }: { id: string }) {
   const seen = new Set([id]), q = [id];
   while (q.length) { const x = q.shift()!; for (const y of [...parents(x), ...children(x), ...spouses(x)]) if (!seen.has(y)) { seen.add(y); q.push(y); } }
   const total = Object.values(P).filter((p) => !isUnknown(p)).length;
-  const names = ["parents", "grandparents", "great-grandparents", "2×great-grandparents", "3×great-grandparents"];
+  const names = T.ancestors;
   return (
     <p className="small graph-stats">
-      {gens.filter((x) => x.possible).map((x, i) => <Fragment key={x.g}>{i > 0 && " · "}<span title={`${names[x.g - 1]} recorded`}>{x.found} of {x.possible} {names[x.g - 1]}</span></Fragment>)/* the " · " stays outside the no-wrap spans, so the line can break there */}<br />
-      Connected to {seen.size - 1} of {total - 1} other people in this tree{seen.size < total && <> <span className="muted">({total - seen.size} aren't linked to {P[id].given || P[id].name} by any parent, child or spouse link)</span></>}.
+      {gens.filter((x) => x.possible).map((x, i) => <Fragment key={x.g}>{i > 0 && " · "}<span title={T.recorded(names[x.g - 1])}>{T.found(x.found, x.possible, names[x.g - 1])}</span></Fragment>)/* the " · " stays outside the no-wrap spans, so the line can break there */}<br />
+      {T.connected(seen.size - 1, total - 1)}{seen.size < total && <> <span className="muted">{T.notLinked(total - seen.size, P[id].given || P[id].name)}</span></>}.
     </p>
   );
 }
@@ -128,17 +131,17 @@ export function Graph() {
   const opt = (n: number) => Array.from({ length: n + 1 }, (_, i) => <option key={i} value={i}>{i}</option>);
   return (
     <section className="card" id="w-graph" style={{ marginBottom: 20 }}>
-      <h2>Family graph</h2>
+      <h2>{T.title}</h2>
       <Insights id={id} />
       <div className="filters graph-ctl">
-        <label className="small">Generations up <select data-k="up" value={st.up} onChange={(e) => update("up", +e.target.value)}>{opt(4)}</select></label>
-        <label className="small">down <select data-k="down" value={st.down} onChange={(e) => update("down", +e.target.value)}>{opt(4)}</select></label>
-        <label className="small"><input type="checkbox" data-k="sibs" checked={st.sibs} onChange={(e) => update("sibs", e.target.checked)} /> siblings</label>
-        {pathSet.size > 0 && <button className="linklike" data-k="clear" onClick={() => setPath(null)}>clear the highlighted path</button>}
-        <span className="small muted g-legend"><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" className="g-edge g-pc" /></svg> parent–child <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" className="g-edge g-sp" /></svg> couple <span className="g-dot"></span> verified · labels are relative to you</span>
+        <label className="small">{T.generationsUp} <select data-k="up" value={st.up} onChange={(e) => update("up", +e.target.value)}>{opt(4)}</select></label>
+        <label className="small">{T.down} <select data-k="down" value={st.down} onChange={(e) => update("down", +e.target.value)}>{opt(4)}</select></label>
+        <label className="small"><input type="checkbox" data-k="sibs" checked={st.sibs} onChange={(e) => update("sibs", e.target.checked)} /> {T.siblings}</label>
+        {pathSet.size > 0 && <button className="linklike" data-k="clear" onClick={() => setPath(null)}>{T.clearPath}</button>}
+        <span className="small muted g-legend"><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" className="g-edge g-pc" /></svg> {T.legend.parentChild} <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" className="g-edge g-sp" /></svg> {T.legend.couple} <span className="g-dot"></span> {T.legend.verified}</span>
       </div>
       <div className="graph-wrap" ref={wrap}>
-        <svg className="family-graph" viewBox={`0 0 ${width} ${height}`} width={width} height={height} role="img" aria-label={`Family graph around ${P[id].name}`}>
+        <svg className="family-graph" viewBox={`0 0 ${width} ${height}`} width={width} height={height} role="img" aria-label={T.ariaLabel(P[id].name)}>
           {edges.map((e) => {
             const A = pos.get(e.a)!, B = pos.get(e.b)!, on = pathEdges.has(edgeKey(e.a, e.b));
             const k = `${e.kind}-${e.a}-${e.b}`;
@@ -152,7 +155,7 @@ export function Graph() {
           })}
           {[...placed].map((x) => {
             const p: any = P[x], { x: nx, y: ny } = pos.get(x)!;
-            const yrs = p.living ? "living" : [p.birth && p.birth.year, p.death && p.death.year].some(Boolean) ? `${(p.birth && p.birth.year) || "?"}–${(p.death && p.death.year) || "?"}` : "";
+            const yrs = p.living ? T.living : [p.birth && p.birth.year, p.death && p.death.year].some(Boolean) ? `${(p.birth && p.birth.year) || "?"}–${(p.death && p.death.year) || "?"}` : "";
             const cls = ["g-node", x === id ? "focus" : "", pathSet.has(x) ? "on" : "", p.status === "verified" ? "verified" : ""].filter(Boolean).join(" ");
             return (
               <Link key={x} to={`/person/${x}`} className={cls} style={{ ["--bc" as any]: `var(--b-${p.branch || "other"}, var(--muted))` }} ref={x === id ? (focus as any) : undefined}>
@@ -166,7 +169,7 @@ export function Graph() {
           })}
         </svg>
       </div>
-      {pathSet.size > 0 && [...pathSet].some((x) => !placed.has(x)) && <p className="small muted">Part of the highlighted path is outside this view; show more generations to see all of it.</p>}
+      {pathSet.size > 0 && [...pathSet].some((x) => !placed.has(x)) && <p className="small muted">{T.pathOutside}</p>}
     </section>
   );
 }
