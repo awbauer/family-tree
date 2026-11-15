@@ -8,6 +8,7 @@
 // they aren't set up. Used by the end-to-end tests (e2e/) and by `npm run dev:example`.
 import http from "node:http";
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, extname, dirname, resolve, normalize } from "node:path";
@@ -25,7 +26,8 @@ export async function startDevServer({ port = PORT, site = SITE, as = AS, quiet 
   research.trees = research.trees || [{ id: "all", name: "Everyone", definition: { branches: ["*"] } }];
   writeFileSync(join(dir, "research.json"), JSON.stringify(research));
   execFileSync("python3", ["tools/seed_app.py", "--raw", join(dir, "raw.json"), "--bundle", join(dir, "family.json"), "--research", join(dir, "research.json"), "--out", join(dir, "seed.sql"), "--owner", "owner@example.test", "--cutover"], { cwd: ROOT, stdio: quiet ? "ignore" : "inherit" });
-  const env = makeEnv({ DEV_PRINCIPAL: as });
+  // a throwaway key for research site credentials (the database is in memory and gone when the server stops)
+  const env = makeEnv({ DEV_PRINCIPAL: as, SITE_CREDENTIALS_KEY: randomBytes(32).toString("base64") });
   migrate(env.DB, ROOT);
   env.DB.execFile(join(dir, "seed.sql"));
   const worker = (await import(join(ROOT, "worker/index.js"))).default;

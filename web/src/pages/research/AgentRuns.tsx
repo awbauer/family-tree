@@ -1,5 +1,6 @@
 // Cloud research runs (editors with the agents set up): start a research run, a data quality review or a story
-// library review, and follow runs (polled every 8 s while any is queued or running).
+// library review, and follow runs (polled every 8 s while any is queued or running). Sherlock (find relatives) runs
+// start from a person page and show here with their report.
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useData } from "../../data";
@@ -104,7 +105,35 @@ function LibraryReport({ r, runs }: { r: any; runs: any[] }) {
   );
 }
 
-const KIND_TXT: Record<string, string> = { quality: "Data quality review · ", library: "Story library review · ", story: "Story · " };
+const REL_TXT: Record<string, string> = { parent: "parent", sibling: "brother or sister", spouse: "spouse", child: "child" };
+const LOOK_TXT: Record<string, string> = { any: "any relative", parents: "parents", siblings: "brothers and sisters", spouse: "spouse", children: "children" };
+
+/** Sherlock's report: the relatives it suggests (each its own suggestion), those noted as possibly living, and those
+ *  it found already in the tree. */
+function RelativesReport({ r }: { r: any }) {
+  const { D } = useData();
+  const rep = r.report || {}, o = r.options || {};
+  const pl = (id: string) => (D.people[id] ? <PersonLink id={id} /> : id);
+  const life = (c: any) => [c.born && (c.born.date || c.born.place) ? `b. ${[c.born.date, c.born.place].filter(Boolean).join(", ")}` : "", c.died && (c.died.date || c.died.place) ? `d. ${[c.died.date, c.died.place].filter(Boolean).join(", ")}` : ""].filter(Boolean).join(" · ");
+  return (
+    <div data-relatives-report={r.id}>
+      <p className="small">Looking for {o.looking_for === "named" ? o.named : LOOK_TXT[o.looking_for] || "any relative"} · {o.depth === 2 ? "two generations" : "one generation"}{o.hints ? ` · hints: ${o.hints}` : ""}</p>
+      {r.summary && <p className="small">{r.summary}</p>}
+      {r.status === "succeeded" && <>
+        <p className="small"><b>{(rep.candidates || []).length}</b> suggested · {(rep.living || []).length} possibly living (not researched) · {(rep.already_in_tree || []).length} already in the tree · {rep.searches || 0} searches logged{rep.research ? <> in <Link to="/research/queue">suggestion #{rep.research}</Link></> : ""}</p>
+        {(rep.candidates || []).length > 0 && <div className="table-wrap"><table className="data stack small"><thead><tr><th>Relative</th><th>Of</th><th>Confidence</th><th>Suggestion</th></tr></thead><tbody>
+          {rep.candidates.map((c: any, i: number) => (
+            <tr key={i}><td><b>{c.name}</b>, {REL_TXT[c.relation] || c.relation}{life(c) && <><br /><span className="muted">{life(c)}</span></>}</td><td>{pl(c.of)}</td><td>{c.confidence}</td><td><Link to="/research/queue">#{c.proposal}</Link></td></tr>
+          ))}
+        </tbody></table></div>}
+        {(rep.living || []).length > 0 && <p className="small muted">Possible living relative{rep.living.length > 1 ? "s" : ""}, not researched: {rep.living.map((x: any, i: number) => <span key={i}>{i > 0 && "; "}a {REL_TXT[x.relation] || x.relation} of {pl(x.of)}</span>)}.</p>}
+        {(rep.already_in_tree || []).length > 0 && <p className="small muted">Already in the tree: {rep.already_in_tree.map((x: any, i: number) => <span key={i}>{i > 0 && "; "}{x.name} = {pl(x.id)}</span>)}.</p>}
+      </>}
+    </div>
+  );
+}
+
+const KIND_TXT: Record<string, string> = { quality: "Data quality review · ", library: "Story library review · ", story: "Story · ", relatives: "Find relatives (Sherlock) · " };
 
 export function AgentRuns() {
   const { D, api, people } = useData();
@@ -191,13 +220,14 @@ export function AgentRuns() {
       </details>
       <div id="ar-out">
         {state.error ? <div className="empty">{state.error}</div> : !d ? <p className="muted">Loading…</p> : <>
-          <p className="small muted">Today: {d.today ? d.today.runs : 0} of {d.limits.runs_per_day} runs, ${(d.today ? d.today.usd : 0).toFixed(2)} of ${(+d.limits.usd_per_day).toFixed(2)} · up to ${(+d.limits.usd_per_run).toFixed(2)}, {d.limits.searches_per_run} searches and {d.limits.minutes_per_run} minutes per run · models: research {mdl("research")}, review {mdl("quality")}, library {mdl("library")}, stories {mdl("stories")}</p>
+          <p className="small muted">Today: {d.today ? d.today.runs : 0} of {d.limits.runs_per_day} runs, ${(d.today ? d.today.usd : 0).toFixed(2)} of ${(+d.limits.usd_per_day).toFixed(2)} · up to ${(+d.limits.usd_per_run).toFixed(2)}, {d.limits.searches_per_run} searches and {d.limits.minutes_per_run} minutes per run · models: research {mdl("research")}, review {mdl("quality")}, library {mdl("library")}, stories {mdl("stories")}, relatives {mdl("relatives")}</p>
           {d.runs.length ? d.runs.map((r: any) => (
             <section key={r.id} id={r.id} className="card" style={{ marginBottom: 12 }}>
               <div className="eyebrow">{r.created_at.slice(0, 16).replace("T", " ")} · {who(r.started_by)} · {KIND_TXT[r.kind] || ""}{r.options && r.options.parent ? <><RunLink id={r.options.parent}>started by a library review</RunLink> · </> : ""}<span className={`badge st-${r.status === "succeeded" ? "verified" : r.status === "failed" ? "disputed" : "unverified"}`}>{RUN_TXT[r.status]}</span></div>
               <p>{r.todo_id ? `To-do #${r.todo_id}` : ""}{r.person && D.people[r.person] && <> <PersonLink id={r.person} /></>}{r.instructions ? ` · ${r.instructions}` : ""}</p>
               {r.kind === "quality" && <QualityReport r={r} onApply={apply} />}
               {r.kind === "library" && <LibraryReport r={r} runs={d.runs} />}
+              {r.kind === "relatives" && <RelativesReport r={r} />}
               <p className="small muted">{r.steps} model responses · {(r.tokens.input + r.tokens.output).toLocaleString()} tokens{r.usd ? ` · $${r.usd.toFixed(2)}` : ""}{r.model ? ` · ${model(r.model)}` : ""}
                 {r.proposals.length > 0 && <> · suggestion {r.proposals.map((x: any, i: number) => <span key={x}>{i > 0 && ", "}<Link to="/research/queue">#{x}</Link></span>)}</>}{r.error ? ` · ${r.error}` : ""}</p>
               {r.log.length > 0 && <details><summary className="small">{r.log.length} steps</summary><ul className="small">{r.log.map((l: any, i: number) => <li key={i}>{l.text}</li>)}</ul></details>}

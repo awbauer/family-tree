@@ -9,6 +9,7 @@
     python3 tools/agent_api.py release 42                  # give it back (unassign, status open)
     python3 tools/agent_api.py todos [--status active] [--assignee me]
     python3 tools/agent_api.py proposals [--status open]
+    python3 tools/agent_api.py sites [--type census] [--access open] [--all] [--json]   # the research sites list
 
 Configuration (environment variables; never put these in the repo):
   FT_URL                  the site, e.g. https://family.example.com   (default http://localhost:8787 for `npm run dev`)
@@ -117,6 +118,29 @@ def main(argv):
             b = p["payload"]
             print(f"#{p['id']:<4} {p['status']:<9} {p['author']:<28} to-do {p.get('todo_id') or '-':<5} "
                   f"{len(b.get('findings', []))} findings, {len(b.get('log', []))} log, {len(b.get('todo', []))} new to-dos")
+    elif cmd == "sites":
+        # The owner's research sites (docs/agents/research-protocol.md → Sources): prefer these and follow their notes.
+        # Credentials are never returned; "credential: yes" means the cloud agents can sign in there, not you.
+        sites = call("GET", "research-sites")["sites"]
+        if "--all" not in args:
+            sites = [s for s in sites if s["enabled"]]
+        if opt(args, "--type"):
+            sites = [s for s in sites if opt(args, "--type") in s.get("record_types", [])]
+        if opt(args, "--access"):
+            sites = [s for s in sites if s["access"] == opt(args, "--access")]
+        if "--json" in args:
+            print(json.dumps(sites, indent=2, ensure_ascii=False))
+            return
+        for s in sites:
+            flags = [s["access"], s["source_quality"]] + (["credential: yes"] if s.get("has_credential") else []) + ([] if s["enabled"] else ["disabled"])
+            print(f"{s['name']}  <{s['url']}>  [{', '.join(flags)}]")
+            if s.get("search_url"):
+                print(f"    search: {s['search_url']}")
+            print(f"    covers: {s['coverage']}")
+            if s.get("record_types"):
+                print(f"    records: {', '.join(s['record_types'])}")
+            if s.get("agent_notes"):
+                print(f"    notes: {s['agent_notes']}")
     else:
         sys.exit(__doc__)
 

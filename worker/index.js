@@ -16,6 +16,7 @@
  *   /api/chat…                           the page assistant: chat, drafted changes, apply/undo (worker/agent/chat-routes.js)
  *   GET  /api/admin, PUT /api/admin/{trees,views,members}/:id, PUT|DELETE /api/admin/grants   (owner only)
  *   GET  /api/admin/audit, /api/admin/audit/:key   the audit history of every change (owner only; worker/audit.js)
+ *   /api/research-sites…                 the research sites list and its credentials (worker/sites.js)
  *   GET  /media/<key>                    photos/documents from R2, only if attached to someone you can see
  *   everything else                      static app from ./site (contains no family data)
  *
@@ -37,6 +38,7 @@ import * as GedcomX from "./gedcomx.js";
 import * as Storage from "./storage.js";
 import { exportGedcom } from "./gedcom_export.js";
 import * as Audit from "./audit.js";
+import * as Sites from "./sites.js";
 
 const TODO_STATUSES = ["open", "in_progress", "needs_review", "done", "wont_do"];
 const PRIORITY = ["high", "medium", "low"];
@@ -119,6 +121,7 @@ async function route(c) {
   if ((r = p.match(/^\/api\/admin\/audit\/([\w-]+)$/)) && m === "GET") return Audit.auditDetail(c, r[1]);
   if ((r = p.match(/^\/api\/admin\/(trees|views|members)\/([^/]+)$/)) && m === "PUT") return adminPut(c, r[1], decodeURIComponent(r[2]));
   if (p === "/api/admin/grants" && (m === "PUT" || m === "DELETE")) return adminGrant(c, m);
+  if (p.startsWith("/api/research-sites") && (r = await Sites.route(c, p, m, body))) return r;
   fail(404, "Not found");
 }
 
@@ -366,8 +369,13 @@ async function reviewProposal(c, id, action) {
       extra.push(...await todoCloseStatements(c, row, payload, d, t, id));
       const batchId = newBatchId();
       extra.push(...await resolveStatements(c, g, payload.resolves, { batch: batchId, note: payload.reason || row.rationale, proposal: id }));
+      // An agent run's suggestion (Sherlock's candidates) is applied as the agent, on behalf of the approving editor,
+      // and the finding it carries is recorded as resolved by this change.
+      const byAgent = row.author_kind === "agent" && /^run-[\w-]+$/.test(String(payload.run || ""));
+      extra.push(...findingStatements(c, payload, { status: "resolved", batch: batchId, proposal: id, note: d.note }));
       try {
-        const res = await applyAndCommit(c.env, payload.ops, { actor: self(c), actorKind: "person", reason: payload.reason || row.rationale || `suggestion #${id} by ${row.author}`, sources: payload.sources, proposalId: id, op: "edit", extra, batchId });
+        const res = await applyAndCommit(c.env, payload.ops, { actor: byAgent ? row.author : self(c), actorKind: byAgent ? "agent" : "person", onBehalfOf: byAgent ? self(c) : null, via: byAgent ? payload.run : null,
+          reason: payload.reason || row.rationale || `suggestion #${id} by ${row.author}`, sources: payload.sources, proposalId: id, op: "edit", extra, batchId });
         return json({ ok: true, status: "approved", batch: res.batchId, created: res.created });
       } catch (e) {
         if (e instanceof OpError) fail(422, `This suggestion no longer applies: ${e.message}`);
@@ -379,7 +387,11 @@ async function reviewProposal(c, id, action) {
     if (errs.length) fail(422, "The batch no longer validates.", { errors: errs });
     st.push(...await researchStatements(c.env, payload, { actor: self(c), actorKind: "person", proposalId: id, treeId: row.tree_id }));
     st.push(...await todoCloseStatements(c, row, payload, d, t, id));
-  } else if (row.todo_id) {
+  } else {
+    // a rejected candidate's finding is kept, dismissed with the reviewer's note, so the search isn't repeated blindly
+    if (row.kind === "edit") st.push(...findingStatements(c, parse(row.payload, {}), { status: "dismissed", proposal: id, note: d.note || "suggestion rejected" }));
+  }
+  if (action !== "approve" && row.todo_id) {
     const td = await c.env.DB.prepare("SELECT * FROM todos WHERE id = ?").bind(row.todo_id).first();
     if (td && td.status === "needs_review") {
       st.push(c.env.DB.prepare("UPDATE todos SET status = 'in_progress', updated_at = ?, updated_by = ?, version = version + 1 WHERE id = ?").bind(t, self(c), td.id));
@@ -391,6 +403,15 @@ async function reviewProposal(c, id, action) {
   st.push(audit(c.env, { actor: self(c), actorKind: "person", entityType: "proposal", entityId: id, op: action, reason: d.note || null, proposalId: id }));
   await write(c.env, st);
   return json({ ok: true, status: action === "approve" ? "approved" : "rejected" });
+}
+
+/** The findings an edit suggestion carries (Sherlock's new-person findings), recorded with the editor's decision. */
+function findingStatements(c, payload, { status, batch, proposal, note }) {
+  const t = now();
+  return (Array.isArray(payload.findings) ? payload.findings : []).filter((f) => f && f.finding).map((f) => {
+    const data = { ...f, date: f.date || t.slice(0, 10), resolution: { status, by: self(c), at: t, note: note || undefined, batch: batch || undefined, proposal } };
+    return c.env.DB.prepare("INSERT INTO findings (person_id, data, created_at, created_by, proposal_id) VALUES (?, ?, ?, ?, ?)").bind(f.person || null, J(data), t, f.agent ? `agent:${f.agent}` : self(c), proposal);
+  });
 }
 
 async function todoCloseStatements(c, row, payload, d, t, id) {

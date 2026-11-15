@@ -81,16 +81,15 @@ Stories are short narratives built **only** from findings that are already cited
 
 ## Sources
 
-Prefer free, image-backed sources you can actually read. Typical starting points:
+The sites to search are a **managed list**: Admin → Research sites in the app (owner only), seeded by migration `0010_research_sites.sql` with about 40 broadly useful, international resources. Each site has its coverage, record types, access (`open`, `free-account`, `subscription`, `institution`), source quality (`original-images`, `indexes`, `compiled`), whether it has an official API, and notes on how to search it well. Read it with `python3 tools/agent_api.py sites` (filter with `--type census`, `--access open`); the cloud agents get a summary in their first message and the full list from their `research_sites` tool.
 
-| Need | Where |
-|---|---|
-| Census, draft and military, passenger lists, many civil and church records worldwide | FamilySearch (free account; many images need sign-in), national archives catalogs (e.g. NARA, The National Archives UK, Library and Archives Canada) |
-| Civil birth, marriage and death records | The relevant city, county or state/provincial archive; some publish digitized indexes and images online. Volunteer indexes are derivative; cite them as such |
-| European civil and parish records | National portals such as Antenati (Italy), PARES (Spain), Archion and Matricula (German-speaking church books), regional archive portals |
-| Immigration | Passenger manifests (FamilySearch, port-of-arrival archives), naturalization files, emigration registers at the port of departure |
-| Obituaries and newspapers | Legacy.com, funeral home sites, Chronicling America and other free newspaper archives; paid archives get logged as `inconclusive` with the exact paper and date range for the owner |
-| Graves | FindAGrave, BillionGraves (derivative; a photo of the stone is better than a transcription) |
+How to use it:
+
+- **Prefer listed sites**, and follow each site's notes. Where a site has a search URL template, fill in its `{given}`, `{surname}`, `{birth_year}` and `{place}` placeholders.
+- **Prefer free, image-backed sources** you can actually read (`original-images`). An `indexes` site gives you an index or transcription: cite it as such (`medium` at most) and add a to-do for the image. A `compiled` site (user trees, directories, published genealogies) is a lead, not a source.
+- **`subscription` and `institution` sites:** if the site has no credential (the cloud agents' `web_fetch` signs in automatically where the owner saved an API key or HTTP sign-in), log the search as `inconclusive` and add a to-do for the owner naming the exact collection and search. Never try to sign in through a form.
+- **A nil result is only as good as the site's coverage.** Say which collection, place and years you searched.
+- **Not on the list?** Use it if it's the right source, and suggest it to the owner in your report so it can be added.
 
 If you can only reach the index, record it as an index (`medium` at most) and add a to-do for the image.
 

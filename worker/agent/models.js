@@ -37,6 +37,7 @@ export const AGENTS = {
   quality: { model: "@cf/deepseek-ai/deepseek-v4.1-flash-1017", effort: "high", legacy: "AI_CONTENT_EFFORT" },
   stories: { model: "@cf/zai-org/glm-5.3", effort: "high", legacy: "AI_CONTENT_EFFORT" },
   library: { model: "@cf/deepseek-ai/deepseek-v4.1-flash-1017", effort: "high", legacy: "AI_CONTENT_EFFORT" }, // the quality reviewer's model
+  relatives: { model: "@cf/deepseek-ai/deepseek-v4.1-flash-1017", effort: "high", legacy: "AI_EFFORT" }, // Sherlock: the researcher's model
   profiles: { model: "@cf/qwen/qwen3.8-27b", effort: "low", legacy: "AI_CONTENT_EFFORT" },
   story_checks: { model: "@cf/qwen/qwen3.8-27b", effort: "medium", legacy: "AI_CONTENT_EFFORT" },
 };

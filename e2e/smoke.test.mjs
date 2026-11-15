@@ -104,6 +104,7 @@ test("sources list and a source page", async () => {
 });
 test("admin and audit history (owner)", async () => {
   await visit("#/admin", ["People and access", "Views"]);
+  await visit("#/admin/sites", ["Research sites", "FamilySearch", "Subscription"]);
   await visit("#/admin/audit", ["Audit history"]);
   await page.locator(".audit-row").first().click();
   await page.locator(".audit-detail").first().waitFor({ timeout: 5000 });

@@ -16,6 +16,7 @@ const LABEL = `CASE entity_type
   WHEN 'todo' THEN json_extract(coalesce(after, before), '$.task')
   WHEN 'story' THEN json_extract(coalesce(after, before), '$.title')
   WHEN 'finding' THEN json_extract(coalesce(after, before), '$.note')
+  WHEN 'research_site' THEN json_extract(coalesce(after, before), '$.name')
   ELSE NULL END`;
 const SUMMARY_COLS = `id, at, actor, actor_kind, entity_type, entity_id, op, reason, proposal_id, batch_id, on_behalf_of, via,
   CASE WHEN before IS NULL THEN 'created' WHEN after IS NULL THEN 'deleted' ELSE 'updated' END AS change, ${LABEL} AS label`;
