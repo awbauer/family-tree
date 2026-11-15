@@ -4,7 +4,7 @@ Each agent runs on its own model, set in the agents Worker's dashboard variables
 
 - `AI_MODEL_<AGENT>`: which model the agent uses.
 - `AI_EFFORT_<AGENT>`: how hard it reasons.
-- `<AGENT>` is one of `RESEARCH`, `CHAT`, `QUALITY`, `STORIES`, `PROFILES`, `STORY_CHECKS`.
+- `<AGENT>` is one of `RESEARCH`, `CHAT`, `QUALITY`, `STORIES`, `LIBRARY`, `PROFILES`, `STORY_CHECKS`.
 - `AI_MODEL` (all agents) and the older `AI_EFFORT`, `AI_CHAT_EFFORT` and `AI_CONTENT_EFFORT` still work as fallbacks.
 
 The defaults, prices and context windows are in [`worker/agent/models.js`](../../worker/agent/models.js). This page explains the choices. It was written in November 2026; the Workers AI catalog changes every few months, so re-check before relying on it.
@@ -43,6 +43,7 @@ The defaults, prices and context windows are in [`worker/agent/models.js`](../..
 | **Page assistant** (`CHAT`) | Exact edit ops (fact ids, family ids, valid JSON), reading the right record, knowing when to ask instead of guessing. Interactive, small context | DeepSeek V4.1 Flash | high | Drafting precise edits needs reasoning, and DeepSeek has no level between off and high. One reply costs a fraction of a cent. | `AI_EFFORT_CHAT=off` for faster replies; Qwen 3.8 27B at `low` for lighter reasoning |
 | **Data quality review** (`QUALITY`) | Cross-checking many items against the tree, conservative judgment, structured decisions. No web. Up to 100 items | DeepSeek V4.1 Flash | high | Same strengths as research. A 100-item review re-reads many records, which the cache discount makes cheap. | GLM-5.3 for subtler judgment; Qwen 3.8 27B to save money |
 | **Stories** (`STORIES`) | The best prose and the most faithful use of facts; low volume, highly visible | GLM-5.3 | high | The task where quality matters most and volume least. A story uses tens of thousands of tokens, so even the flagship costs about five cents. | Claude Sonnet 5.5 (`AI_MODEL_STORIES=anthropic/claude-sonnet-5-5`), likely the best writer, if you add gateway credits |
+| **Stories librarian** (`LIBRARY`) | Audit every story against the records, minimal revisions, rank candidates, write briefs. No web. Re-reads many records | DeepSeek V4.1 Flash | high | The quality reviewer's model: the same cross-checking job, made cheap by the cache discount. The new stories it commissions run on the stories agent's own model. | GLM-5.3 if its revisions read poorly |
 | **Profiles** (`PROFILES`, weekly job) | A short bio from facts given in the prompt, one tool call. Bulk and parallel (up to 50 per run) | Qwen 3.8 27B | low | Short, constrained writing that a smaller model does well. Staying off DeepSeek keeps the weekly burst away from the 20/min limit that research and chat share. | Gemma 4 26B (cheaper, free-plan); DeepSeek V4.1 Flash for better prose |
 | **Story checks** (`STORY_CHECKS`, weekly job) | Compare a story with the current facts, say whether it is still right, minimal revision if not | Qwen 3.8 27B | medium | Mostly a comparison with an occasional small edit, which suits a mid-size model. Bulk, so the same rate-limit reasoning applies. | DeepSeek V4.1 Flash if it misses contradictions |
 

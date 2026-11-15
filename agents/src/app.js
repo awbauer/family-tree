@@ -11,10 +11,12 @@ import { RESEARCHER_PATH } from "../../worker/agent/runs.js";
 import { CHAT_PATH } from "../../worker/agent/chat.js";
 import { QUALITY_PATH } from "../../worker/agent/quality.js";
 import { STORY_PATH } from "../../worker/agent/stories.js";
+import { LIBRARY_PATH } from "../../worker/agent/library.js";
 import { Researcher } from "./agents/researcher.js";
 import { Assistant } from "./agents/assistant.js";
 import { QualityReviewer } from "./agents/quality.js";
 import { StoryWriter } from "./agents/stories.js";
+import { StoryLibrarian } from "./agents/library.js";
 import { queueProfile, runContentJob } from "./content-jobs.js";
 
 const S = settings(env);
@@ -38,6 +40,7 @@ app.route(RESEARCHER_PATH, createAgentRouter(Researcher));
 app.route(CHAT_PATH, createAgentRouter(Assistant));
 app.route(QUALITY_PATH, createAgentRouter(QualityReviewer));
 app.route(STORY_PATH, createAgentRouter(StoryWriter));
+app.route(LIBRARY_PATH, createAgentRouter(StoryLibrarian));
 app.post("/internal/profiles", async (c) => {
   const d = await c.req.json();
   return c.json(await queueProfile(String(d.person || ""), { force: !!d.force }), 202);

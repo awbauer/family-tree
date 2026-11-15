@@ -202,7 +202,7 @@ Spend is priced per model from published rates (`worker/agent/models.js`), so th
 
 Each model call logs a `[turn]` line with its model, tokens and cost (no content) to Workers Logs.
 
-**Models:** each agent's model and effort are set separately: `AI_MODEL_<AGENT>` and `AI_EFFORT_<AGENT>`, for `RESEARCH`, `CHAT`, `QUALITY`, `STORIES`, `PROFILES` and `STORY_CHECKS`. [models.md](models.md) has the defaults and why each was chosen.
+**Models:** each agent's model and effort are set separately: `AI_MODEL_<AGENT>` and `AI_EFFORT_<AGENT>`, for `RESEARCH`, `CHAT`, `QUALITY`, `STORIES`, `LIBRARY`, `PROFILES` and `STORY_CHECKS`. [models.md](models.md) has the defaults and why each was chosen.
 
 Also set a **spend limit and rate limit on the AI Gateway itself** (dashboard → AI → AI Gateway → your gateway → Settings). That is the hard stop if anything here misbehaves. Other variables: `AI_MODEL` (overrides every agent's default model; prefer the per-agent ones), `WEB_SEARCH_BYOK_ALIAS`, `AI_GATEWAY_ID` (`default`), `WEB_SEARCH_PROVIDER` (`exa`), `CONTENT_JOB_ENABLED` (`false`).
 
@@ -290,6 +290,27 @@ Editors can have an agent (`agents/src/agents/stories.js`, Flue, one Durable Obj
   - living people are never a subject, and come to the agent as a name only.
 - **No web access**, so nothing in a story can come from outside the tree.
 - **Budget:** one run against `AGENT_MAX_RUNS_PER_DAY`, spend against `AI_DAILY_BUDGET_USD` and `AGENT_MAX_RUN_USD`; model `AI_MODEL_STORIES` (default GLM-5.3), effort `AI_EFFORT_STORIES`. Durable Object migration `v4` (`FlueStoryWriterAgent`). The weekly content job's story check (`StoryReviewer`) is separate and unchanged.
+
+## Stories librarian (agent)
+
+Research → Agent runs → **Review the story library** starts an agent (`agents/src/agents/library.js`, Flue, one Durable Object per run; shared logic in `worker/agent/library.js`) that looks after the whole library of stories, where the stories agent works on one at a time. Editors only; started by hand, no schedule.
+
+- **Options:** how many new stories it may start, N (0–5, default 2), and optional instructions.
+- **Audit:** every published story (up to 50, flagged ones first) is checked against the tree as it is now, when the run starts and again whenever the agent reads it:
+  - links to people who are no longer in the tree, and people who were merged into someone else (followed through the merge);
+  - dated claims ("born in 1897", "died in 1950") about the person linked just before them: flagged when the person's records give a different year (two years' leeway for "abt" dates) or record no such event;
+  - dated claims about someone living.
+
+  The flags are leads. The agent reads the story and the records, then gives each story a verdict: up to date, revised, or needs an editor.
+- **Fix:** a revision is checked with the stories agent's own checks (`checkStory`: links, sources, the story's citations kept) and filed as a story revision suggestion, shown as a diff in Research → Suggestions. **Nothing published changes until an editor approves it.** A story that already has a revision waiting gets no second one.
+- **Gaps:** candidate subjects for new stories, best first:
+  - people who have died with at least one sourced fact or source, scored by sourced facts, distinct sources, facts, notes and findings;
+  - events several such people share: the same migration (type, place, decade), war service (place, decade) or trade.
+
+  Anyone covered by a story sorts after everyone who isn't. Anyone who is or could be living (no death or burial recorded and born within 110 years) is skipped.
+- **Commission:** up to N story-writer runs for the best candidates, each with a brief from the librarian. Each is an ordinary stories-agent draft run (`kind: "story"`, the stories agent's model, its own suggestion), started as the editor who started the librarian. Its `options.parent` names the librarian run; the librarian's report (`agent_runs.report.children`) lists it. No migration was needed for the link.
+- **Report:** each story's flags and verdict, with links to the suggested revisions; the candidates; and the story runs started, with their status.
+- **Budget:** the librarian is one run against `AGENT_MAX_RUNS_PER_DAY`; its own spend is capped by `AGENT_MAX_RUN_USD`. Each child run counts against the daily run and spend budgets as usual, and isn't started once they're used up. Model `AI_MODEL_LIBRARY` (default DeepSeek V4.1 Flash, the quality reviewer's model), effort `AI_EFFORT_LIBRARY`. Durable Object migration `v5` (`FlueStoryLibrarianAgent`). Stopping a librarian run doesn't stop story runs it already started; stop those separately.
 
 ## GEDCOM X storage, export and import
 

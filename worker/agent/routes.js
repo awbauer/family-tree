@@ -10,6 +10,7 @@
 //   POST /api/agent/runs/:id/apply     apply a finished dry-run review's decisions (editors)
 //   POST /api/agent/runs               {tree, kind: "story", mode: "review", slug, instructions?}
 //                                      {tree, kind: "story", mode: "draft", people: [ids], instructions?, length?}
+//   POST /api/agent/runs               {tree, kind: "library", n?, instructions?}  review the story library (#36)
 //   POST /api/profiles/:id/refresh     queue a rewrite of one person's AI profile (editors)
 //   POST /api/content/refresh          run the content job now (owner)
 import { J, now, parse, write } from "../db.js";
@@ -19,9 +20,10 @@ import { settings, agentsEnabled, checkDaily, recordUsage, usageToday, BudgetErr
 import { AGENT, RESEARCHER_PATH, firstMessage, endRun } from "./runs.js";
 import * as Quality from "./quality.js";
 import * as Stories from "./stories.js";
+import * as Library from "./library.js";
 
 /** Where each kind of run's agent is mounted in the agents Worker. */
-const PATHS = { research: RESEARCHER_PATH, quality: Quality.QUALITY_PATH, story: Stories.STORY_PATH };
+const PATHS = { research: RESEARCHER_PATH, quality: Quality.QUALITY_PATH, story: Stories.STORY_PATH, library: Library.LIBRARY_PATH };
 
 export const enabled = agentsEnabled;
 
@@ -43,12 +45,15 @@ function needAgents(c) {
   if (!agentsEnabled(c.env)) fail(503, "Research agents aren't set up yet: deploy the agents Worker and add the AGENTS service binding. See docs/agents/operations.md → Cloud research agents.");
 }
 
+// a library run's children carry the first message sent to them; the page doesn't need it
+const reportOut = (kind, rep) => (kind === "library" && rep && Array.isArray(rep.children) ? { ...rep, children: rep.children.map(({ message, ...ch }) => ch) } : rep);
+
 const runOut = (r) => {
   const opts = parse(r.options, null);
   return {
   id: r.id, kind: r.kind || "research", tree: r.tree_id, todo_id: r.todo_id, person: r.person_id, started_by: r.started_by, instructions: r.instructions,
   options: opts ? { ...opts, items: undefined, count: (opts.items || []).length } : undefined,
-  report: r.report ? parse(r.report, []) : undefined, summary: (parse(r.result, {}) || {}).summary,
+  report: r.report ? reportOut(r.kind, parse(r.report, [])) : undefined, summary: (parse(r.result, {}) || {}).summary,
   status: r.status, steps: r.steps, tokens: { input: r.input_tokens, output: r.output_tokens }, usd: r.cost_usd || 0, model: r.model,
   log: parse(r.log, []), proposals: parse(r.proposal_ids, []), error: r.error,
   created_at: r.created_at, started_at: r.started_at, finished_at: r.finished_at,
@@ -61,7 +66,8 @@ export async function startRun(c, d, { grantOrFail, scoped, loadTodo }) {
   needAgents(c);
   if (d.kind === "quality") return startQuality(c, d, g, { scoped });
   if (d.kind === "story") return startStory(c, d, g, { scoped });
-  if (d.kind && d.kind !== "research") fail(400, "kind must be research, quality or story");
+  if (d.kind === "library") return startLibrary(c, d, g, { scoped });
+  if (d.kind && d.kind !== "research") fail(400, "kind must be research, quality, story or library");
   const env = c.env, s = settings(env), b = await scoped(c, g);
   let todo = null;
   if (d.todo_id) {
@@ -241,6 +247,31 @@ async function startStory(c, d, g, { scoped }) {
   } catch (e) {
     await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
     fail(502, `Couldn't start the run: ${e.message}`);
+  }
+  return json({ run: runOut(await env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) }, 201);
+}
+
+// ---------------------------------------------------------------- the stories librarian (#36)
+async function startLibrary(c, d, g, { scoped }) {
+  const env = c.env, s = settings(env), b = await scoped(c, g);
+  const raw = d.n === undefined || d.n === null || d.n === "" ? Library.DEFAULT_N : parseInt(d.n, 10);
+  if (!Number.isFinite(raw) || raw < 0 || raw > Library.MAX_N) fail(400, `n must be 0 to ${Library.MAX_N}`);
+  const instructions = String(d.instructions || "").trim().slice(0, 2000) || null;
+  const plan = Library.planLibrary(b, { pending: await Library.pendingRevisions(env, g.tree_id), n: raw });
+  if (!plan.stories.length && !(raw && plan.candidates.length)) fail(400, "There are no stories to review and no candidates for new ones.");
+  try { await checkDaily(env, s, { runs: true }); } catch (e) { if (e instanceof BudgetError) fail(429, e.message); throw e; }
+  const id = `run-${now().slice(0, 10).replace(/-/g, "")}-${crypto.randomUUID().slice(0, 8)}`;
+  const label = `Review the story library: ${plan.stories.length} stor${plan.stories.length === 1 ? "y" : "ies"}, up to ${raw} new`;
+  await write(env, [
+    env.DB.prepare("INSERT INTO agent_runs (id, kind, tree_id, started_by, instructions, options, report, created_at) VALUES (?, 'library', ?, ?, ?, ?, ?, ?)")
+      .bind(id, g.tree_id, c.access.principal, `${label}${instructions ? `: ${instructions}` : ""}`, J({ ...plan, instructions }), J({ checked: [], children: [] }), now()),
+    recordUsage(env, { runs: 1 }),
+  ]);
+  try {
+    await agentsFetch(env, `${Library.LIBRARY_PATH}/${id}`, { kind: "user", body: Library.firstMessage(b, plan, instructions), initialData: { runId: id } });
+  } catch (e) {
+    await endRun(env, id, `the agents Worker didn't accept the run: ${e.message}`);
+    fail(502, `Couldn't start the review: ${e.message}`);
   }
   return json({ run: runOut(await env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first()) }, 201);
 }
