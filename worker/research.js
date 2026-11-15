@@ -29,6 +29,12 @@ export function validateBatch(b, visible) {
     if (!KINDS.has(f.kind)) errs.push(`${w}: kind must be one of ${[...KINDS].join(", ")}`);
     if (!LEVELS.has(f.confidence)) errs.push(`${w}: confidence must be high, medium or low`);
     if (!String(f.finding || "").trim()) errs.push(`${w}: empty finding`);
+    if (f.fact != null && !/^[en]\d+$/.test(String(f.fact))) errs.push(`${w}: fact must be a fact id like e3 (an event) or n1 (a name)`);
+    if (f.proposed_ops != null) {
+      if (!Array.isArray(f.proposed_ops) || !f.proposed_ops.length || f.proposed_ops.some((o) => !o || typeof o.op !== "string")) errs.push(`${w}: proposed_ops must be a list of edit ops`);
+      else if (f.proposed_ops.some((o) => o.op === "person.delete")) errs.push(`${w}: proposed_ops may not delete people`);
+    }
+    if (f.resolution) errs.push(`${w}: resolution is set by editors, not in research`);
     sources(f.sources, w);
   });
   for (const [pid, st] of Object.entries(b.people_status || {})) {

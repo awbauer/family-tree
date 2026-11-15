@@ -85,7 +85,7 @@ export async function applyAndCommit(env, ops, meta) {
   const { state, versions } = await loadEditable(env);
   const res = applyOps(state, ops, { actor: meta.actor });
   if (!res.touched.length) return { batchId: null, touched: [], created: res.created };
-  const batchId = newBatchId();
+  const batchId = meta.batchId || newBatchId();
   const st = commitStatements(env, { ...meta, touched: res.touched, versions, state: res.state, batchId });
   if (meta.extra) st.push(...meta.extra);
   await env.DB.batch(st);
@@ -114,6 +114,18 @@ export async function revertBatch(env, batchId, { actor, actorKind, reason }) {
       st.push(env.DB.prepare("UPDATE config SET value = ?, version = version + 1, updated_at = ?, updated_by = ? WHERE key = ?").bind(J(val), t, actor, r.entity_id));
       st.push(env.DB.prepare("INSERT INTO changes (at, actor, actor_kind, entity_type, entity_id, op, before, after, reason, batch_id, version_after) VALUES (?, ?, ?, 'config', ?, 'revert', ?, ?, ?, ?, ?)")
         .bind(t, actor, actorKind, r.entity_id, r.after, r.before, reason || `revert ${batchId}`, nb, (cur ? cur.version : 0) + 1));
+      continue;
+    }
+    if (r.entity_type === "finding") {
+      // a finding resolved by this batch's edit is reopened (or restored to its earlier resolution) by undoing it
+      const cur = await env.DB.prepare("SELECT data FROM findings WHERE id = ?").bind(+r.entity_id).first();
+      if (!cur) continue;
+      const data = parse(cur.data, {});
+      if (JSON.stringify(data.resolution ?? null) !== JSON.stringify(after ?? null)) continue; // decided again since: leave it
+      if (before == null) delete data.resolution; else data.resolution = before;
+      st.push(env.DB.prepare("UPDATE findings SET data = ?, version = version + 1 WHERE id = ?").bind(J(data), +r.entity_id));
+      st.push(env.DB.prepare("INSERT INTO changes (at, actor, actor_kind, entity_type, entity_id, op, before, after, reason, batch_id) VALUES (?, ?, ?, 'finding', ?, 'revert', ?, ?, ?, ?)")
+        .bind(t, actor, actorKind, r.entity_id, r.after, r.before, reason || `revert ${batchId}`, nb));
       continue;
     }
     const tbl = TABLE[r.entity_type];

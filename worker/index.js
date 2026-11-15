@@ -27,7 +27,7 @@ import * as Agent from "./agent/routes.js";
 import { validateBatch, researchStatements } from "./research.js";
 import { J, now, parse, loadState, todoOut, write, audit, meta } from "./db.js";
 import { OpError, referencedIds, applyOps } from "./ops.js";
-import { loadEditable, applyAndCommit, revertBatch, isConflict } from "./store.js";
+import { loadEditable, applyAndCommit, revertBatch, isConflict, newBatchId } from "./store.js";
 import * as Graph from "./graph.js";
 import { exportGedcom } from "./gedcom_export.js";
 
@@ -80,6 +80,8 @@ async function route(c) {
   if (p === "/api/export.ged" && m === "GET") return exportGed(c);
   if (p === "/api/export.json" && m === "GET") return exportJson(c);
   if (p === "/api/edit" && m === "POST") return edit(c);
+  if (p === "/api/edit/preview" && m === "POST") return previewEdit(c);
+  if ((r = p.match(/^\/api\/findings\/(\d+)$/)) && m === "PATCH") return updateFinding(c, +r[1]);
   if (p === "/api/history" && m === "GET") return history(c);
   if ((r = p.match(/^\/api\/changes\/([\w-]+)\/revert$/)) && m === "POST") return revert(c, r[1]);
   if (p === "/api/comments" && m === "GET") return listComments(c);
@@ -342,8 +344,10 @@ async function reviewProposal(c, id, action) {
       const extra = [];
       extra.push(c.env.DB.prepare("UPDATE proposals SET status = 'approved', reviewed_by = ?, reviewed_at = ?, review_note = ? WHERE id = ? AND status = 'open'").bind(self(c), t, d.note || null, id));
       extra.push(...await todoCloseStatements(c, row, payload, d, t, id));
+      const batchId = newBatchId();
+      extra.push(...await resolveStatements(c, g, payload.resolves, { batch: batchId, note: payload.reason || row.rationale, proposal: id }));
       try {
-        const res = await applyAndCommit(c.env, payload.ops, { actor: self(c), actorKind: "person", reason: payload.reason || row.rationale || `suggestion #${id} by ${row.author}`, sources: payload.sources, proposalId: id, op: "edit", extra });
+        const res = await applyAndCommit(c.env, payload.ops, { actor: self(c), actorKind: "person", reason: payload.reason || row.rationale || `suggestion #${id} by ${row.author}`, sources: payload.sources, proposalId: id, op: "edit", extra, batchId });
         return json({ ok: true, status: "approved", batch: res.batchId, created: res.created });
       } catch (e) {
         if (e instanceof OpError) fail(422, `This suggestion no longer applies: ${e.message}`);
@@ -406,14 +410,75 @@ async function edit(c) {
   if (!can.review(g)) fail(403, "Only editors can change the tree directly. Use \"Suggest a change\" instead.");
   if (!String(d.reason || "").trim()) fail(400, "Say why (reason) — it's kept in the history.");
   await checkEdit(c, g, d, { dryRun: false });
+  const batchId = newBatchId();
+  const extra = await resolveStatements(c, g, d.resolves, { batch: batchId, note: d.reason });
   try {
-    const res = await applyAndCommit(c.env, d.ops, { actor: self(c), actorKind: "person", reason: d.reason, sources: d.sources });
-    return json({ ok: true, batch: res.batchId, touched: res.touched, created: res.created });
+    const res = await applyAndCommit(c.env, d.ops, { actor: self(c), actorKind: "person", reason: d.reason, sources: d.sources, batchId, extra });
+    return json({ ok: true, batch: res.batchId, touched: res.touched, created: res.created, resolved: (d.resolves || []).map(Number) });
   } catch (e) {
     if (e instanceof OpError) fail(422, e.message);
     if (isConflict(e)) fail(409, "Someone changed this while you were editing. Reload and try again.");
     throw e;
   }
+}
+
+/** What an edit would change, without saving it: before/after snapshots of each record it touches (for diffs). */
+async function previewEdit(c) {
+  const d = await body(c);
+  const g = grantOrFail(c, d.tree);
+  if (!can.propose(g)) fail(403, "You can't change or suggest changes in this tree.");
+  await checkEdit(c, g, d, { dryRun: false });
+  const { state } = await loadEditable(c.env);
+  try {
+    const res = applyOps(state, d.ops, { actor: self(c) });
+    return json({ touched: res.touched.filter((x) => ["person", "family", "media_map", "source"].includes(x.type)) });
+  } catch (e) { if (e instanceof OpError) fail(422, e.message); throw e; }
+}
+
+// ---------------------------------------------------------------- findings: resolve, dismiss, reopen
+const FINDING_STATES = ["open", "resolved", "dismissed"];
+
+async function findingFor(c, g, id) {
+  const b = await scoped(c, g);
+  if (!b.scope.view.research || !(b.research.findings || []).some((f) => f.id === id)) fail(404, "No such finding.");
+  const row = await c.env.DB.prepare("SELECT * FROM findings WHERE id = ?").bind(id).first();
+  if (!row) fail(404, "No such finding.");
+  return row;
+}
+
+/** Statements that mark findings resolved by an edit (same batch, so undoing the edit is one step away). */
+async function resolveStatements(c, g, ids, { batch, note, proposal }) {
+  const st = [], t = now();
+  for (const id of [...new Set((ids || []).map(Number))].slice(0, 50)) {
+    const row = await findingFor(c, g, id);
+    const data = parse(row.data, {});
+    const resolution = { status: "resolved", by: self(c), at: t, note: String(note || "").slice(0, 2000), batch, ...(proposal ? { proposal } : {}) };
+    st.push(c.env.DB.prepare("UPDATE findings SET data = ?, version = version + 1 WHERE id = ?").bind(J({ ...data, resolution }), id));
+    // logged in the edit's batch, so undoing the edit also reopens the finding
+    st.push(c.env.DB.prepare("INSERT INTO changes (at, actor, actor_kind, entity_type, entity_id, op, before, after, reason, proposal_id, batch_id) VALUES (?, ?, ?, 'finding', ?, 'resolve', ?, ?, ?, ?, ?)")
+      .bind(t, self(c), actorKind(c), String(id), J(data.resolution || null), J(resolution), note || null, proposal || null, batch));
+  }
+  return st;
+}
+
+async function updateFinding(c, id) {
+  const d = await body(c);
+  const g = grantOrFail(c, d.tree);
+  if (!can.review(g) || c.access.kind === "agent") fail(403, "Only editors can resolve findings.");
+  const row = await findingFor(c, g, id);
+  if (d.version != null && d.version !== row.version) fail(409, "Someone changed this finding. Reload and try again.");
+  if (!FINDING_STATES.includes(d.status)) fail(400, `status must be one of ${FINDING_STATES.join(", ")}`);
+  const note = String(d.note || "").trim();
+  if (d.status === "dismissed" && !note) fail(400, "Say why the tree stays as it is; the reason is kept with the finding.");
+  const data = parse(row.data, {});
+  const resolution = d.status === "open" ? undefined : { status: d.status, by: self(c), at: now(), note: note.slice(0, 2000), ...(d.batch ? { batch: String(d.batch) } : {}) };
+  const after = { ...data };
+  if (resolution) after.resolution = resolution; else delete after.resolution;
+  await write(c.env, [
+    c.env.DB.prepare("UPDATE findings SET data = ?, version = version + 1 WHERE id = ? AND version = ?").bind(J(after), id, row.version),
+    audit(c.env, { actor: self(c), actorKind: "person", entityType: "finding", entityId: id, op: d.status === "open" ? "reopen" : d.status, before: data.resolution || null, after: resolution || null, reason: note || null }),
+  ]);
+  return json({ ok: true, finding: { id, ...after } });
 }
 
 async function history(c) {
@@ -425,20 +490,33 @@ async function history(c) {
     if (!b.people[id] && !b.families[id]) fail(404, "Not found.");
     const fams = b.people[id] ? [...(b.people[id].famc || []), ...(b.people[id].fams || [])] : [];
     const ids = [id, ...fams];
-    rows = (await c.env.DB.prepare(`SELECT * FROM changes WHERE entity_id IN (${ids.map(() => "?").join(",")}) ORDER BY id DESC LIMIT 200`).bind(...ids).all()).results;
+    const fids = (b.research.findings || []).filter((f) => f.person === id).map((f) => String(f.id));
+    rows = (await c.env.DB.prepare(`SELECT * FROM changes WHERE (entity_id IN (${ids.map(() => "?").join(",")}) AND entity_type IN ('person','family','status'))${fids.length ? ` OR (entity_type = 'finding' AND entity_id IN (${fids.map(() => "?").join(",")}))` : ""} ORDER BY id DESC LIMIT 200`).bind(...ids, ...fids).all()).results;
+    // photo changes live in one config record keyed by person: keep this person's slice
+    if (b.people[id]) {
+      const media = (await c.env.DB.prepare("SELECT * FROM changes WHERE entity_type = 'config' AND entity_id = 'media_map' ORDER BY id DESC LIMIT 200").all()).results;
+      for (const r of media) {
+        const bf = parse(r.before, {}) || {}, af = parse(r.after, {}) || {};
+        if (!(id in bf) && !(id in af)) continue;
+        rows.push({ ...r, entity_type: "media", entity_id: id, before: J(bf[id] ?? null), after: J(af[id] ?? null) });
+      }
+      rows.sort((x, y) => y.id - x.id);
+    }
   } else {
     if (!can.review(g)) fail(403, "Only editors can see the full history.");
     rows = (await c.env.DB.prepare("SELECT * FROM changes WHERE entity_type IN ('person','family','source','config') ORDER BY id DESC LIMIT 200").all()).results;
   }
   // never show snapshots of entities outside the caller's scope
-  const visible = (r) => r.entity_type === "person" ? !!b.people[r.entity_id] || c.access.isOwner
+  const visible = (r) => ["person", "media", "status"].includes(r.entity_type) ? !!b.people[r.entity_id] || c.access.isOwner
     : r.entity_type === "family" ? !!b.families[r.entity_id] || c.access.isOwner
+    : r.entity_type === "finding" ? (b.research.findings || []).some((f) => String(f.id) === r.entity_id)
     : c.access.isOwner || can.review(g);
   const batches = {};
   for (const r of rows.filter(visible)) {
     const k = r.batch_id || `c${r.id}`;
-    (batches[k] = batches[k] || { batch: r.batch_id, at: r.at, actor: r.actor, op: r.op, reason: r.reason, proposal: r.proposal_id, entities: [] })
-      .entities.push({ type: r.entity_type, id: r.entity_id, change: r.before == null ? "created" : r.after == null ? "deleted" : "updated", before: c.access.isOwner || can.review(g) ? parse(r.before) : undefined, after: c.access.isOwner || can.review(g) ? parse(r.after) : undefined });
+    const g0 = (batches[k] = batches[k] || { batch: r.batch_id, at: r.at, actor: r.actor, op: r.op, reason: r.reason, proposal: r.proposal_id, entities: [] });
+    if (r.op === "edit" || r.op === "revert") g0.op = r.op; // an edit that also resolved a finding is still an edit
+    g0.entities.push({ type: r.entity_type, id: r.entity_id, change: r.before == null ? "created" : r.after == null ? "deleted" : "updated", before: c.access.isOwner || can.review(g) ? parse(r.before) : undefined, after: c.access.isOwner || can.review(g) ? parse(r.after) : undefined });
   }
   return json({ history: Object.values(batches) });
 }

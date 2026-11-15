@@ -11,6 +11,16 @@ const SEX = new Set(["M", "F", "U", ""]);
 const EVENT_FIELDS = ["type", "date", "place", "note", "value", "age", "subtype", "address"];
 const NAME_FIELDS = ["given", "surname", "suffix", "type"];
 const REVIEW = new Set(["unverified", "verified", "disputed"]);
+// Evidence analysis vocabulary (Mills, Evidence Explained; the Genealogical Proof Standard) and GEDCOM's QUAY.
+export const CITATION_ENUMS = {
+  source_type: ["original", "derivative", "authored"],          // what the source is
+  information: ["primary", "secondary", "undetermined"],        // who supplied the information, and when
+  evidence: ["direct", "indirect", "negative"],                  // how it answers the question
+  quality: ["0", "1", "2", "3"],                                 // GEDCOM QUAY: 0 unreliable … 3 direct primary evidence
+};
+// GEDCOM 7 MEDI enumeration, lower-cased.
+export const MEDIA_TYPES = ["audio", "book", "card", "electronic", "fiche", "film", "magazine", "manuscript", "map", "newspaper", "photo", "tombstone", "video", "other"];
+const MEDIA_FIELDS = ["caption", "date", "place", "source", "note"];
 
 /** Give every event and name a stable fact id (used at import and for anything created without one). */
 export function assignFids(entity) {
@@ -70,12 +80,30 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
     return out;
   };
   const cleanCitation = (c, i) => {
-    if (!c || (!c.source && !c.url && !c.note)) throw new OpError("citation needs a source id, url or note", i);
+    if (!c || (!c.source && !c.url && !c.note && !c.title)) throw new OpError("citation needs a source id, title, url or note", i);
     if (c.source && !S.sources[c.source]) throw new OpError(`no source ${JSON.stringify(c.source)}`, i);
+    if (c.url && !/^https?:\/\//i.test(String(c.url))) throw new OpError("citation url must start with http(s)://", i);
     const out = {};
-    for (const k of ["source", "page", "url", "note", "text", "apid"]) if (c[k]) out[k] = String(c[k]).slice(0, 4000);
+    // page = GEDCOM PAGE ("where within the source"); text = a transcription of the record; accessed = date viewed
+    for (const k of ["source", "title", "page", "url", "note", "text", "apid", "repository", "accessed"]) if (c[k]) out[k] = String(c[k]).slice(0, 4000);
+    for (const [k, allowed] of Object.entries(CITATION_ENUMS)) {
+      if (c[k] == null || c[k] === "") continue;
+      const v = String(c[k]);
+      if (!allowed.includes(v)) throw new OpError(`citation ${k} must be one of ${allowed.join(", ")}`, i);
+      out[k] = v;
+    }
     return out;
   };
+  const cleanMedia = (o, m, i) => {
+    for (const k of MEDIA_FIELDS) if (k in o) { if (o[k] == null || o[k] === "") delete m[k]; else m[k] = String(o[k]).slice(0, 1000); }
+    if ("type" in o && o.type != null && o.type !== "") {
+      if (!MEDIA_TYPES.includes(o.type)) throw new OpError(`media type must be one of ${MEDIA_TYPES.join(", ")}`, i);
+      m.type = o.type;
+    }
+    return m;
+  };
+  /** A fact is an event (e1, e2, …) or, on a person, a name (n1, n2, …). */
+  const factList = (x, fid) => (String(fid).startsWith("n") && x.names ? x.names : x.events);
   const cleanName = (n, i) => {
     if (!n || (!String(n.given || "").trim() && !String(n.surname || "").trim())) throw new OpError("a name needs a given name or surname", i);
     const out = {};
@@ -162,20 +190,38 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
       }
       case "event.remove": { const [t, id] = entityOf(o, i), x = touch(t, id); x.events.splice(findFact(x.events, o.fid, i, "event"), 1); break; }
       case "fact.review": {
-        const [t, id] = entityOf(o, i), x = touch(t, id), j = findFact(x.events, o.fid, i, "event");
+        // A reviewer's conclusion about one fact, with the evidence it rests on (GPS: cite, analyse, resolve, conclude).
+        // `evidence` lists citations already on the fact ({index}) and/or new ones, which are also added to the fact.
+        const [t, id] = entityOf(o, i), x = touch(t, id), list = factList(x, o.fid), j = findFact(list, o.fid, i);
         if (!REVIEW.has(o.status)) throw new OpError("status must be unverified, verified or disputed", i);
-        x.events[j].review = { status: o.status, by: actor, at: now, note: String(o.note || "").slice(0, 2000), sources: (o.sources || []).slice(0, 20) };
+        const fact = list[j];
+        const evidence = [];
+        for (const ev of (o.evidence || []).slice(0, 20)) {
+          if (ev && Number.isInteger(ev.index)) {
+            const c = (fact.citations || [])[ev.index];
+            if (!c) throw new OpError(`no citation ${ev.index} on ${o.fid}`, i);
+            evidence.push(c);
+          } else {
+            const c = cleanCitation(ev, i);
+            (fact.citations = fact.citations || []).push(c);
+            evidence.push(c);
+          }
+        }
+        if (o.status === "verified" && !evidence.length && !(fact.citations || []).length) throw new OpError("verifying a fact needs at least one cited source", i);
+        fact.review = { status: o.status, by: actor, at: now, note: String(o.note || "").slice(0, 2000) };
+        if (evidence.length) fact.review.evidence = evidence;
+        if (o.finding != null) fact.review.finding = o.finding;
         break;
       }
       case "citation.add": {
         const [t, id] = entityOf(o, i), x = touch(t, id), c = cleanCitation(o.citation, i);
-        if (o.fid) { const j = findFact(x.events, o.fid, i, "event"); (x.events[j].citations = x.events[j].citations || []).push(c); }
+        if (o.fid) { const list = factList(x, o.fid), j = findFact(list, o.fid, i); (list[j].citations = list[j].citations || []).push(c); }
         else (x.citations = x.citations || []).push(c);
         break;
       }
       case "citation.remove": {
         const [t, id] = entityOf(o, i), x = touch(t, id);
-        const list = o.fid ? x.events[findFact(x.events, o.fid, i, "event")].citations : x.citations;
+        const list = o.fid ? factList(x, o.fid)[findFact(factList(x, o.fid), o.fid, i)].citations : x.citations;
         if (!list || !(o.index >= 0 && o.index < list.length)) throw new OpError("no citation at that index", i);
         list.splice(o.index, 1);
         break;
@@ -261,11 +307,28 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
         touch("media_map", pid);
         const list = S.media_map[pid] = [...(S.media_map[pid] || [])];
         if (!list.some((m) => m.file === o.file)) {
-          const m = { file: o.file };
-          for (const k of ["caption", "date", "source"]) if (o[k]) m[k] = String(o[k]).slice(0, 1000);
-          if (o.portrait) m.portrait = true;
+          const m = cleanMedia(o, { file: o.file }, i);
+          if (o.portrait) { for (const x of list) delete x.portrait; m.portrait = true; }
           list.push(m);
         }
+        break;
+      }
+      case "media.update": {
+        const pid = P(o.person, i);
+        touch("media_map", pid);
+        const list = S.media_map[pid] = (S.media_map[pid] || []).map((m) => ({ ...m }));
+        const m = list.find((x) => x.file === o.file);
+        if (!m) throw new OpError(`no photo or document ${JSON.stringify(o.file)} on this person`, i);
+        cleanMedia(o.set || {}, m, i);
+        break;
+      }
+      case "media.set_primary": {
+        // the person's main photo (their icon); exported as GEDCOM _PRIM Y
+        const pid = P(o.person, i);
+        touch("media_map", pid);
+        const list = S.media_map[pid] = (S.media_map[pid] || []).map((m) => ({ ...m }));
+        if (!list.some((x) => x.file === o.file)) throw new OpError(`no photo or document ${JSON.stringify(o.file)} on this person`, i);
+        for (const m of list) { if (m.file === o.file) m.portrait = true; else delete m.portrait; }
         break;
       }
       case "media.detach": {

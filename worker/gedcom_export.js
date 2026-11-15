@@ -157,10 +157,20 @@ export function exportGedcom(bundle, { title, now } = {}) {
       const ptr = sourcePtr(c.source);
       if (ptr) g.ptr(level, "SOUR", ptr);
       else if (nonEmpty(c.source)) g.text(level, "SOUR", c.source); // source not in this bundle: unlinked citation
+      else if (nonEmpty(c.title) || nonEmpty(c.url)) g.text(level, "SOUR", str(c.title || c.url)); // ad hoc citation
       else continue;
       g.opt(level + 1, "PAGE", c.page);
-      if (nonEmpty(c.text)) { g.raw(level + 1, "DATA"); g.text(level + 2, "TEXT", c.text); }
+      if (nonEmpty(c.text) || nonEmpty(c.accessed)) {
+        g.raw(level + 1, "DATA");
+        g.opt(level + 2, "DATE", c.accessed);
+        g.opt(level + 2, "TEXT", c.text);
+      }
+      g.opt(level + 1, "QUAY", c.quality); // GEDCOM certainty assessment, 0–3
       g.opt(level + 1, "NOTE", c.note);
+      // evidence analysis (Evidence Explained): source / information / evidence
+      g.opt(level + 1, "_SRCTYPE", c.source_type);
+      g.opt(level + 1, "_INFO", c.information);
+      g.opt(level + 1, "_EVID", c.evidence);
       g.opt(level + 1, "_APID", c.apid);
       g.opt(level + 1, "_LINK", c.url);
     }
@@ -182,6 +192,13 @@ export function exportGedcom(bundle, { title, now } = {}) {
     g.opt(level + 1, "AGE", e.age);
     g.opt(level + 1, "NOTE", e.note);
     writeCitations(level + 1, e.citations);
+    writeReview(level + 1, e.review);
+  };
+  // a reviewer's conclusion about a fact: a plain NOTE any program can read, plus a machine-readable _STAT
+  const writeReview = (level, r) => {
+    if (!r || !nonEmpty(r.status) || r.status === "unverified") return;
+    g.text(level, "NOTE", `${r.status === "verified" ? "Verified" : "Disputed"} by ${str(r.by).split("@")[0]} on ${str(r.at).slice(0, 10)}${nonEmpty(r.note) ? `: ${r.note}` : ""}`);
+    g.text(level, "_STAT", r.status.toUpperCase());
   };
 
   const writeName = (n) => {
@@ -194,6 +211,8 @@ export function exportGedcom(bundle, { title, now } = {}) {
     g.opt(2, "SURN", surname);
     g.opt(2, "NSFX", suffix);
     g.opt(2, "TYPE", n.type);
+    writeCitations(2, n.citations);
+    writeReview(2, n.review);
   };
 
   // ---- HEAD, SUBM
@@ -272,10 +291,14 @@ export function exportGedcom(bundle, { title, now } = {}) {
     g.ptr(0, "OBJE", null, xref);
     g.text(1, "FILE", str(item.file));
     const f = form(item.file);
-    if (f) g.raw(2, "FORM", escapeAt(f));
+    if (f || nonEmpty(item.type)) {
+      g.raw(2, "FORM", escapeAt(f));
+      g.opt(3, "TYPE", item.type); // photo, tombstone, newspaper, … (GEDCOM media types)
+    }
     g.opt(2, "TITL", item.caption);
     if (item.portrait) g.raw(1, "_PRIM", "Y");
     g.opt(1, "DATE", item.date);
+    g.opt(1, "NOTE", [item.place && `Place: ${item.place}`, item.note].filter(nonEmpty).join(". "));
     if (nonEmpty(item.source)) {
       const ptr = sourcePtr(item.source);
       if (ptr) g.ptr(1, "SOUR", ptr); else g.text(1, "SOUR", item.source);
