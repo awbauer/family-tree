@@ -1,9 +1,12 @@
 // The edit engine: apply a list of ops (docs/design/edit-ops.md) to the raw tree, in memory, atomically.
 // Returns the touched entities with before/after snapshots, so the caller can write them with version checks
 // and record an audit trail that can be reverted.
+import { S as Strings } from "../strings/index.ts";
+
+const M = Strings.api.ops; // `S` below is the working state
 
 export class OpError extends Error {
-  constructor(message, index) { super(index != null ? `op ${index + 1}: ${message}` : message); this.index = index; }
+  constructor(message, index) { super(index != null ? M.atOp(index + 1, message) : message); this.index = index; }
 }
 
 const clone = (x) => (x === undefined ? undefined : structuredClone(x));
@@ -62,8 +65,8 @@ function maxFid(list, p) {
  * Returns {state: newState, touched: [{type, id, before, after}], created: {tempId: realId}}.
  */
 export function applyOps(state, ops, { actor = "unknown", now = new Date().toISOString(), newId } = {}) {
-  if (!Array.isArray(ops) || !ops.length) throw new OpError("ops must be a non-empty list");
-  if (ops.length > 500) throw new OpError("too many ops in one edit (max 500)");
+  if (!Array.isArray(ops) || !ops.length) throw new OpError(M.opsRequired);
+  if (ops.length > 500) throw new OpError(M.tooMany);
   const S = { people: { ...state.people }, families: { ...state.families }, sources: { ...state.sources }, media_map: { ...(state.media_map || {}) }, aliases: { ...(state.aliases || {}) } };
   const before = new Map(); // key -> snapshot before first touch
   const key = (t, id) => `${t}:${id}`;
@@ -82,36 +85,36 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
     return id;
   };
   const alias = (id) => S.aliases[id] || id;
-  const P = (id, i) => { const x = S.people[alias(id)]; if (!x) throw new OpError(`no person ${JSON.stringify(id)}`, i); return alias(id); };
-  const F = (id, i) => { if (!S.families[id]) throw new OpError(`no family ${JSON.stringify(id)}`, i); return id; };
+  const P = (id, i) => { const x = S.people[alias(id)]; if (!x) throw new OpError(M.noPerson(id), i); return alias(id); };
+  const F = (id, i) => { if (!S.families[id]) throw new OpError(M.noFamily(id), i); return id; };
   const entityOf = (o, i) => {
     if (o.entity === "person") return ["person", P(o.id, i)];
     if (o.entity === "family") return ["family", F(o.id, i)];
-    throw new OpError('entity must be "person" or "family"', i);
+    throw new OpError(M.entityInvalid, i);
   };
   const findFact = (list, fid, i, what = "fact") => {
     const idx = (list || []).findIndex((x) => x.fid === fid);
-    if (idx < 0) throw new OpError(`no ${what} ${JSON.stringify(fid)}`, i);
+    if (idx < 0) throw new OpError(M.noFact(what, fid), i);
     return idx;
   };
   const cleanEvent = (ev, i) => {
-    if (!ev || typeof ev !== "object" || !String(ev.type || "").trim()) throw new OpError("event needs a type", i);
+    if (!ev || typeof ev !== "object" || !String(ev.type || "").trim()) throw new OpError(M.eventNeedsType, i);
     const out = {};
     for (const k of EVENT_FIELDS) if (ev[k] != null && ev[k] !== "") out[k] = String(ev[k]).slice(0, 2000);
     if (ev.citations) out.citations = ev.citations.map((c) => cleanCitation(c, i));
     return out;
   };
   const cleanCitation = (c, i) => {
-    if (!c || (!c.source && !c.url && !c.note && !c.title)) throw new OpError("citation needs a source id, title, url or note", i);
-    if (c.source && !S.sources[c.source]) throw new OpError(`no source ${JSON.stringify(c.source)}`, i);
-    if (c.url && !/^https?:\/\//i.test(String(c.url))) throw new OpError("citation url must start with http(s)://", i);
+    if (!c || (!c.source && !c.url && !c.note && !c.title)) throw new OpError(M.citationEmpty, i);
+    if (c.source && !S.sources[c.source]) throw new OpError(M.noSource(c.source), i);
+    if (c.url && !/^https?:\/\//i.test(String(c.url))) throw new OpError(M.citationUrl, i);
     const out = {};
     // page = GEDCOM PAGE ("where within the source"); text = a transcription of the record; accessed = date viewed
     for (const k of ["source", "title", "page", "url", "note", "text", "apid", "repository", "accessed"]) if (c[k]) out[k] = String(c[k]).slice(0, 4000);
     for (const [k, allowed] of Object.entries(CITATION_ENUMS)) {
       if (c[k] == null || c[k] === "") continue;
       const v = String(c[k]);
-      if (!allowed.includes(v)) throw new OpError(`citation ${k} must be one of ${allowed.join(", ")}`, i);
+      if (!allowed.includes(v)) throw new OpError(M.citationEnum(k, allowed), i);
       out[k] = v;
     }
     return out;
@@ -119,7 +122,7 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
   const cleanMedia = (o, m, i) => {
     for (const k of MEDIA_FIELDS) if (k in o) { if (o[k] == null || o[k] === "") delete m[k]; else m[k] = String(o[k]).slice(0, 1000); }
     if ("type" in o && o.type != null && o.type !== "") {
-      if (!MEDIA_TYPES.includes(o.type)) throw new OpError(`media type must be one of ${MEDIA_TYPES.join(", ")}`, i);
+      if (!MEDIA_TYPES.includes(o.type)) throw new OpError(M.mediaType(MEDIA_TYPES), i);
       m.type = o.type;
     }
     return m;
@@ -127,7 +130,7 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
   /** A fact is an event (e1, e2, …) or, on a person, a name (n1, n2, …). */
   const factList = (x, fid) => (String(fid).startsWith("n") && x.names ? x.names : x.events);
   const cleanName = (n, i) => {
-    if (!n || (!String(n.given || "").trim() && !String(n.surname || "").trim())) throw new OpError("a name needs a given name or surname", i);
+    if (!n || (!String(n.given || "").trim() && !String(n.surname || "").trim())) throw new OpError(M.nameEmpty, i);
     const out = {};
     for (const k of NAME_FIELDS) out[k] = String(n[k] || "").trim().slice(0, 200);
     return out;
@@ -140,11 +143,11 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
     switch (o.op) {
       case "person.create": {
         const id = o.id && !o.id.startsWith("$") ? o.id : mkId("I", S.people);
-        if (S.people[id]) throw new OpError(`person ${id} already exists`, i);
+        if (S.people[id]) throw new OpError(M.personExists(id), i);
         if (o.id && o.id.startsWith("$")) created[o.id] = id;
         const names = (o.names || []).map((n) => cleanName(n, i));
-        if (!names.length) throw new OpError("person.create needs at least one name", i);
-        if (o.sex != null && !SEX.has(o.sex)) throw new OpError("sex must be M, F or U", i);
+        if (!names.length) throw new OpError(M.personNeedsName, i);
+        if (o.sex != null && !SEX.has(o.sex)) throw new OpError(M.sexInvalid, i);
         touch("person", id);
         S.people[id] = assignFids({ id, names, sex: o.sex || "", famc: [], fams: [], events: (o.events || []).map((e) => cleanEvent(e, i)), notes: [], citations: [], media: [], created: { by: actor, at: now } });
         break;
@@ -152,13 +155,13 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
       case "person.update": {
         const id = P(o.id, i), p = touch("person", id);
         const set = o.set || {};
-        if ("sex" in set) { if (!SEX.has(set.sex)) throw new OpError("sex must be M, F or U", i); p.sex = set.sex; }
+        if ("sex" in set) { if (!SEX.has(set.sex)) throw new OpError(M.sexInvalid, i); p.sex = set.sex; }
         if ("notes" in set) p.notes = [].concat(set.notes || []).map((x) => String(x).slice(0, 8000));
         break;
       }
       case "person.delete": {
         const id = P(o.id, i), p = S.people[id];
-        if ((p.famc || []).length || (p.fams || []).length) throw new OpError("unlink this person from their families first", i);
+        if ((p.famc || []).length || (p.fams || []).length) throw new OpError(M.unlinkFirst, i);
         touch("person", id);
         delete S.people[id];
         if (S.media_map[id]) { touch("media_map", id); delete S.media_map[id]; }
@@ -166,7 +169,7 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
       }
       case "person.merge": {
         const keep = P(o.keep, i), drop = P(o.drop, i);
-        if (keep === drop) throw new OpError("keep and drop are the same person", i);
+        if (keep === drop) throw new OpError(M.samePerson, i);
         const k = touch("person", keep), d = touch("person", drop);
         const have = new Set(k.names.map((n) => `${n.given}|${n.surname}`));
         for (const n of d.names) if (!have.has(`${n.given}|${n.surname}`)) k.names.push({ ...n, fid: undefined, type: n.type || "alternate" });
@@ -197,7 +200,7 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
       }
       case "name.remove": {
         const id = P(o.person, i), p = touch("person", id), j = findFact(p.names, o.fid, i, "name");
-        if (p.names.length < 2) throw new OpError("a person keeps at least one name", i);
+        if (p.names.length < 2) throw new OpError(M.keepOneName, i);
         p.names.splice(j, 1);
         break;
       }
@@ -215,13 +218,13 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
         // A reviewer's conclusion about one fact, with the evidence it rests on (GPS: cite, analyse, resolve, conclude).
         // `evidence` lists citations already on the fact ({index}) and/or new ones, which are also added to the fact.
         const [t, id] = entityOf(o, i), x = touch(t, id), list = factList(x, o.fid), j = findFact(list, o.fid, i);
-        if (!REVIEW.has(o.status)) throw new OpError("status must be unverified, verified or disputed", i);
+        if (!REVIEW.has(o.status)) throw new OpError(M.reviewStatus, i);
         const fact = list[j];
         const evidence = [];
         for (const ev of (o.evidence || []).slice(0, 20)) {
           if (ev && Number.isInteger(ev.index)) {
             const c = (fact.citations || [])[ev.index];
-            if (!c) throw new OpError(`no citation ${ev.index} on ${o.fid}`, i);
+            if (!c) throw new OpError(M.noCitation(ev.index, o.fid), i);
             evidence.push(c);
           } else {
             const c = cleanCitation(ev, i);
@@ -229,7 +232,7 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
             evidence.push(c);
           }
         }
-        if (o.status === "verified" && !evidence.length && !(fact.citations || []).length) throw new OpError("verifying a fact needs at least one cited source", i);
+        if (o.status === "verified" && !evidence.length && !(fact.citations || []).length) throw new OpError(M.verifyNeedsSource, i);
         fact.review = { status: o.status, by: actor, at: now, note: String(o.note || "").slice(0, 2000) };
         if (evidence.length) fact.review.evidence = evidence;
         if (o.finding != null) fact.review.finding = o.finding;
@@ -244,17 +247,17 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
       case "citation.remove": {
         const [t, id] = entityOf(o, i), x = touch(t, id);
         const list = o.fid ? factList(x, o.fid)[findFact(factList(x, o.fid), o.fid, i)].citations : x.citations;
-        if (!list || !(o.index >= 0 && o.index < list.length)) throw new OpError("no citation at that index", i);
+        if (!list || !(o.index >= 0 && o.index < list.length)) throw new OpError(M.noCitationAtIndex, i);
         list.splice(o.index, 1);
         break;
       }
       case "family.create": {
         const id = o.id && !o.id.startsWith("$") ? o.id : mkId("F", S.families);
-        if (S.families[id]) throw new OpError(`family ${id} already exists`, i);
+        if (S.families[id]) throw new OpError(M.familyExists(id), i);
         if (o.id && o.id.startsWith("$")) created[o.id] = id;
         const h = o.husband ? P(ref(o.husband), i) : null, w = o.wife ? P(ref(o.wife), i) : null;
         const kids = (o.children || []).map((c) => P(ref(c), i));
-        if (!h && !w && kids.length < 1) throw new OpError("a family needs at least one member", i);
+        if (!h && !w && kids.length < 1) throw new OpError(M.familyNeedsMember, i);
         touch("family", id);
         S.families[id] = assignFids({ id, husband: h, wife: w, children: kids, events: (o.events || []).map((e) => cleanEvent(e, i)) });
         for (const s of [h, w].filter(Boolean)) { const p = touch("person", s); if (!p.fams.includes(id)) p.fams.push(id); }
@@ -263,7 +266,7 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
       }
       case "family.set_spouse": {
         const fid = F(o.family, i), f = touch("family", fid);
-        if (!["husband", "wife"].includes(o.role)) throw new OpError('role must be "husband" or "wife"', i);
+        if (!["husband", "wife"].includes(o.role)) throw new OpError(M.roleInvalid, i);
         const old = f[o.role], nu = o.person ? P(ref(o.person), i) : null;
         if (old && old !== f[o.role === "husband" ? "wife" : "husband"]) { const p = touch("person", old); p.fams = p.fams.filter((x) => x !== fid); }
         f[o.role] = nu;
@@ -295,10 +298,10 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
       }
       case "family.merge": {
         const keep = F(o.keep, i), drop = F(o.drop, i);
-        if (keep === drop) throw new OpError("keep and drop are the same family", i);
+        if (keep === drop) throw new OpError(M.sameFamily, i);
         const fk = touch("family", keep), fd = touch("family", drop);
         for (const r of ["husband", "wife"]) {
-          if (fk[r] && fd[r] && fk[r] !== fd[r]) throw new OpError(`the ${r}s differ; merge those people first`, i);
+          if (fk[r] && fd[r] && fk[r] !== fd[r]) throw new OpError(M.spousesDiffer(r), i);
           fk[r] = fk[r] || fd[r];
         }
         fk.children = [...new Set([...fk.children, ...fd.children])];
@@ -316,7 +319,7 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
       }
       case "source.upsert": {
         const id = o.id || mkId("S", S.sources);
-        if (!o.data || typeof o.data !== "object") throw new OpError("source.upsert needs data", i);
+        if (!o.data || typeof o.data !== "object") throw new OpError(M.sourceNeedsData, i);
         const d = { ...(S.sources[id] || {}) };
         for (const k of SOURCE_FIELDS) {
           if (!(k in o.data)) continue;
@@ -324,9 +327,9 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
           if (v === "") delete d[k]; // an empty value removes the field
           else d[k] = v.slice(0, k === "text" ? 20000 : 2000);
         }
-        if (!d.title) throw new OpError("a source needs a title", i);
-        if (d.type && !SOURCE_KINDS.includes(d.type)) throw new OpError(`source type must be one of ${SOURCE_KINDS.join(", ")}`, i);
-        if (d.url && !/^https?:\/\//i.test(d.url)) throw new OpError("source url must start with http(s)://", i);
+        if (!d.title) throw new OpError(M.sourceNeedsTitle, i);
+        if (d.type && !SOURCE_KINDS.includes(d.type)) throw new OpError(M.sourceType(SOURCE_KINDS), i);
+        if (d.url && !/^https?:\/\//i.test(d.url)) throw new OpError(M.sourceUrl, i);
         touch("source", id);
         S.sources[id] = { ...d, id };
         break;
@@ -334,9 +337,9 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
       case "source.merge": {
         // re-point every use of `drop` to `keep`, fill keep's empty fields from drop, then remove drop
         const { keep, drop } = o;
-        if (!S.sources[keep]) throw new OpError(`no source ${JSON.stringify(keep)}`, i);
-        if (!S.sources[drop]) throw new OpError(`no source ${JSON.stringify(drop)}`, i);
-        if (keep === drop) throw new OpError("keep and drop are the same source", i);
+        if (!S.sources[keep]) throw new OpError(M.noSource(keep), i);
+        if (!S.sources[drop]) throw new OpError(M.noSource(drop), i);
+        if (keep === drop) throw new OpError(M.sameSource, i);
         const owners = [];
         forEachSourceUse(S, drop, (kind, owner) => owners.push([kind, owner]));
         for (const [kind, owner] of owners) touch(kind, owner); // copy-on-write, then change the copies
@@ -348,16 +351,16 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
         break;
       }
       case "source.delete": {
-        if (!S.sources[o.id]) throw new OpError(`no source ${JSON.stringify(o.id)}`, i);
+        if (!S.sources[o.id]) throw new OpError(M.noSource(o.id), i);
         const n = forEachSourceUse(S, o.id);
-        if (n) throw new OpError(`source ${o.id} is still cited ${n} time${n > 1 ? "s" : ""}; merge it into another source instead`, i);
+        if (n) throw new OpError(M.sourceStillCited(o.id, n), i);
         touch("source", o.id);
         delete S.sources[o.id];
         break;
       }
       case "media.attach": {
         const pid = P(o.person, i);
-        if (!o.file || o.file.startsWith("/") || o.file.includes("..")) throw new OpError("file must be an R2 key like uploads/…", i);
+        if (!o.file || o.file.startsWith("/") || o.file.includes("..")) throw new OpError(M.fileKey, i);
         touch("media_map", pid);
         const list = S.media_map[pid] = [...(S.media_map[pid] || [])];
         if (!list.some((m) => m.file === o.file)) {
@@ -372,7 +375,7 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
         touch("media_map", pid);
         const list = S.media_map[pid] = (S.media_map[pid] || []).map((m) => ({ ...m }));
         const m = list.find((x) => x.file === o.file);
-        if (!m) throw new OpError(`no photo or document ${JSON.stringify(o.file)} on this person`, i);
+        if (!m) throw new OpError(M.noMedia(o.file), i);
         cleanMedia(o.set || {}, m, i);
         break;
       }
@@ -381,7 +384,7 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
         const pid = P(o.person, i);
         touch("media_map", pid);
         const list = S.media_map[pid] = (S.media_map[pid] || []).map((m) => ({ ...m }));
-        if (!list.some((x) => x.file === o.file)) throw new OpError(`no photo or document ${JSON.stringify(o.file)} on this person`, i);
+        if (!list.some((x) => x.file === o.file)) throw new OpError(M.noMedia(o.file), i);
         for (const m of list) { if (m.file === o.file) m.portrait = true; else delete m.portrait; }
         break;
       }
@@ -393,13 +396,13 @@ export function applyOps(state, ops, { actor = "unknown", now = new Date().toISO
         break;
       }
       default:
-        throw new OpError(`unknown op ${JSON.stringify(o.op)}`, i);
+        throw new OpError(M.unknownOp(o.op), i);
     }
   });
 
   // integrity: every link points at something that exists, both directions agree
   for (const [fid, f] of Object.entries(S.families)) {
-    for (const pid of [f.husband, f.wife, ...f.children].filter(Boolean)) if (!S.people[pid]) throw new OpError(`family ${fid} points at missing person ${pid}`);
+    for (const pid of [f.husband, f.wife, ...f.children].filter(Boolean)) if (!S.people[pid]) throw new OpError(M.missingMember(fid, pid));
   }
   const touched = [];
   for (const [k, b] of before) {

@@ -7,8 +7,9 @@ import { can } from "./auth.js";
 import { fail, json } from "./http.js";
 import { parse } from "./db.js";
 import { fullBundle } from "./bundle.js";
+import { S } from "../strings/index.ts";
 
-const owner = (c) => { if (!can.admin(c.access)) fail(403, "Owner only."); };
+const owner = (c) => { if (!can.admin(c.access)) fail(403, S.api.auth.ownerOnly); };
 const keyOf = (r) => r.batch_id || `c${r.id}`;
 // a short label for a record from its own snapshot (the record may since have been deleted)
 const LABEL = `CASE entity_type
@@ -79,7 +80,7 @@ export async function auditDetail(c, key) {
   const DB = c.env.DB;
   const m = /^c(\d+)$/.exec(key);
   const rows = (await (m ? DB.prepare("SELECT * FROM changes WHERE id = ?").bind(+m[1]) : DB.prepare("SELECT * FROM changes WHERE batch_id = ? ORDER BY id").bind(key)).all()).results;
-  if (!rows.length) fail(404, "No such change.");
+  if (!rows.length) fail(404, S.api.history.noSuchChange);
   const proposalIds = [...new Set(rows.map((r) => r.proposal_id).filter(Boolean))];
   const proposals = proposalIds.length ? (await DB.prepare(`SELECT id, kind, author, author_kind, status, rationale, created_at, reviewed_by, reviewed_at FROM proposals WHERE id IN (${proposalIds.map(() => "?").join(",")})`).bind(...proposalIds).all()).results : [];
   const runIds = [...new Set(rows.map((r) => r.via).filter((v) => /^run-/.test(v || "")))];

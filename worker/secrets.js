@@ -2,16 +2,13 @@
 // SITE_CREDENTIALS_KEY (32 random bytes, base64), set on both the site Worker (which encrypts on save) and the agents
 // Worker (which decrypts at fetch time). Each value is bound to what it belongs to (the AAD), so a ciphertext copied
 // onto another row doesn't decrypt. Plain WebCrypto: runs in Workers and in Node's tests alike.
+import { S } from "../strings/index.ts";
 
 /** The Worker names in the tracked wrangler configs, for the setup message. */
-export const KEY_HELP = "Set SITE_CREDENTIALS_KEY (32 random bytes, base64) on both Workers, then try again:\n"
-  + "  openssl rand -base64 32\n"
-  + "  npx wrangler secret put SITE_CREDENTIALS_KEY --name family-tree\n"
-  + "  npx wrangler secret put SITE_CREDENTIALS_KEY --name family-tree-agents\n"
-  + "Paste the same value into both.";
+export const KEY_HELP = S.api.secrets.keyHelp;
 
 export class KeyMissingError extends Error {
-  constructor(msg = `Credentials can't be saved: SITE_CREDENTIALS_KEY isn't set. ${KEY_HELP}`) { super(msg); }
+  constructor(msg = S.api.secrets.keyMissing) { super(msg); }
 }
 
 const b64 = (bytes) => { let s = ""; for (const x of bytes) s += String.fromCharCode(x); return btoa(s); };
@@ -28,7 +25,7 @@ export const keyConfigured = (env) => !!rawKey(env);
 
 async function key(env, usage) {
   const raw = rawKey(env);
-  if (!raw) throw new KeyMissingError(env && env.SITE_CREDENTIALS_KEY ? `SITE_CREDENTIALS_KEY must be 32 bytes, base64-encoded. ${KEY_HELP}` : undefined);
+  if (!raw) throw new KeyMissingError(env && env.SITE_CREDENTIALS_KEY ? S.api.secrets.keyInvalid : undefined);
   return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, [usage]);
 }
 

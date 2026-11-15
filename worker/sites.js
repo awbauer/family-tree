@@ -17,9 +17,10 @@ import { fail, json } from "./http.js";
 import { J, now, audit } from "./db.js";
 import { encryptSecret, keyConfigured, KeyMissingError, KEY_HELP } from "./secrets.js";
 import { ACCESS, QUALITY, CRED_KINDS, listSites, normDomain } from "./agent/sites.js";
+import { S } from "../strings/index.ts";
 
 const NO_STORE = { "Cache-Control": "private, no-store" };
-const owner = (c) => { if (!can.admin(c.access)) fail(403, "Only the owner can change the research sites."); };
+const owner = (c) => { if (!can.admin(c.access)) fail(403, S.api.sites.ownerOnly); };
 const actorKind = (c) => (c.access.kind === "agent" ? "agent" : "person");
 const mayRead = (a) => a.isOwner || a.grants.some((g) => can.review(g)) || (a.kind === "agent" && a.grants.length > 0);
 const isUrl = (s) => /^https?:\/\/[^\s/]+\.[^\s]+$/i.test(String(s || ""));
@@ -32,29 +33,29 @@ const snapshot = ({ has_credential, credential, ...s }) => s;
 export function cleanSite(d, cur = null) {
   const v = { ...(cur || {}) };
   const has = (k) => d[k] !== undefined;
-  if (!cur || has("name")) { v.name = text(d.name, 120); if (!v.name) fail(400, "name is required"); }
-  if (!cur || has("url")) { v.url = text(d.url, 500); if (!isUrl(v.url)) fail(400, "url must be the site's address, starting with https:// (or http://)"); }
+  if (!cur || has("name")) { v.name = text(d.name, 120); if (!v.name) fail(400, S.api.sites.nameRequired); }
+  if (!cur || has("url")) { v.url = text(d.url, 500); if (!isUrl(v.url)) fail(400, S.api.sites.urlInvalid); }
   if (has("search_url")) {
     v.search_url = text(d.search_url, 1000);
-    if (v.search_url && !isUrl(v.search_url)) fail(400, "search_url must start with https:// (or http://)");
-    if (v.search_url && !/\{(given|surname|birth_year|place)\}/.test(v.search_url)) fail(400, "search_url needs at least one placeholder: {given}, {surname}, {birth_year} or {place}");
+    if (v.search_url && !isUrl(v.search_url)) fail(400, S.api.sites.searchUrlInvalid);
+    if (v.search_url && !/\{(given|surname|birth_year|place)\}/.test(v.search_url)) fail(400, S.api.sites.searchUrlPlaceholder);
   }
   if (!cur || has("domains") || has("url")) {
     let doms = has("domains") ? list(d.domains).map(normDomain) : (cur ? cur.domains : []);
     if (!doms.length) doms = [normDomain(new URL(v.url).hostname).replace(/^www\./, "")];
     doms = [...new Set(doms)].slice(0, 20);
     const bad = doms.find((x) => !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(x));
-    if (bad) fail(400, `domains: ${JSON.stringify(bad)} isn't a hostname (e.g. example.org)`);
+    if (bad) fail(400, S.api.sites.domainInvalid(bad));
     v.domains = doms;
   }
   if (!cur || has("coverage")) v.coverage = text(d.coverage, 1000);
   if (!cur || has("record_types")) v.record_types = [...new Set(list(d.record_types).map((x) => x.toLowerCase().replace(/\s+/g, "-").slice(0, 40)))].slice(0, 20);
-  if (!cur || has("access")) { v.access = d.access || "open"; if (!ACCESS.includes(v.access)) fail(400, `access must be one of ${ACCESS.join(", ")}`); }
-  if (!cur || has("source_quality")) { v.source_quality = d.source_quality || "indexes"; if (!QUALITY.includes(v.source_quality)) fail(400, `source_quality must be one of ${QUALITY.join(", ")}`); }
+  if (!cur || has("access")) { v.access = d.access || "open"; if (!ACCESS.includes(v.access)) fail(400, S.api.sites.accessInvalid(ACCESS)); }
+  if (!cur || has("source_quality")) { v.source_quality = d.source_quality || "indexes"; if (!QUALITY.includes(v.source_quality)) fail(400, S.api.sites.qualityInvalid(QUALITY)); }
   if (!cur || has("api")) v.api = text(d.api, 500);
   if (!cur || has("agent_notes")) v.agent_notes = text(d.agent_notes, 1500);
   if (!cur || has("enabled")) v.enabled = d.enabled === undefined ? true : !!d.enabled;
-  if (has("sort")) { const n = parseInt(d.sort, 10); if (!Number.isFinite(n)) fail(400, "sort must be a number"); v.sort = n; }
+  if (has("sort")) { const n = parseInt(d.sort, 10); if (!Number.isFinite(n)) fail(400, S.api.sites.sortNumber); v.sort = n; }
   return v;
 }
 
@@ -65,7 +66,7 @@ async function one(env, id) {
 }
 
 export async function listRoute(c) {
-  if (!mayRead(c.access)) fail(403, "Only editors and research agents can see the research sites.");
+  if (!mayRead(c.access)) fail(403, S.api.sites.readersOnly);
   const sites = await listSites(c.env);
   const out = { sites };
   if (c.access.isOwner) { out.key_configured = keyConfigured(c.env); if (!out.key_configured) out.key_help = KEY_HELP; }
@@ -76,8 +77,8 @@ export async function createRoute(c, d) {
   owner(c);
   const v = cleanSite(d || {});
   const id = d.id ? String(d.id) : slug(v.name);
-  if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(id)) fail(400, "id must be lowercase letters, digits and dashes");
-  if (await one(c.env, id)) fail(409, `There's already a site with the id ${id}.`);
+  if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(id)) fail(400, S.api.sites.idInvalid);
+  if (await one(c.env, id)) fail(409, S.api.sites.idTaken(id));
   const max = await c.env.DB.prepare("SELECT COALESCE(MAX(sort), 0) AS m FROM research_sites").first();
   const t = now(), by = c.access.principal;
   const sort = v.sort ?? (max.m + 10);
@@ -92,7 +93,7 @@ export async function createRoute(c, d) {
 export async function updateRoute(c, id, d) {
   owner(c);
   const cur = await one(c.env, id);
-  if (!cur) fail(404, "No such research site.");
+  if (!cur) fail(404, S.api.sites.noSuch);
   const v = cleanSite(d || {}, cur);
   const before = snapshot(cur), after = snapshot({ ...cur, ...v });
   const changed = Object.keys(after).filter((k) => !["updated_at", "updated_by"].includes(k) && JSON.stringify(after[k]) !== JSON.stringify(before[k]));
@@ -110,7 +111,7 @@ export async function updateRoute(c, id, d) {
 export async function deleteRoute(c, id) {
   owner(c);
   const cur = await one(c.env, id);
-  if (!cur) fail(404, "No such research site.");
+  if (!cur) fail(404, S.api.sites.noSuch);
   const by = c.access.principal;
   await c.env.DB.batch([
     c.env.DB.prepare("DELETE FROM research_site_credentials WHERE site_id = ?").bind(id),
@@ -126,31 +127,31 @@ const oneLine = (s) => !/[\r\n\0]/.test(s);
 /** The secret to encrypt for a credential body; throws on anything malformed. */
 export function cleanCredential(d) {
   const kind = d && d.kind;
-  if (!CRED_KINDS.includes(kind)) fail(400, `kind must be one of ${CRED_KINDS.join(", ")}. Agents use API keys or HTTP sign-in only; for sites you sign in to in a browser, agents leave you a to-do instead.`);
+  if (!CRED_KINDS.includes(kind)) fail(400, S.api.sites.credentialKind(CRED_KINDS));
   const s = (k) => String((d && d[k]) ?? "");
   if (kind === "header") {
     const name = s("name").trim(), value = s("value");
-    if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/.test(name)) fail(400, "name must be an HTTP header name, e.g. X-Api-Key or Authorization");
-    if (FORBIDDEN_HEADERS.has(name.toLowerCase())) fail(400, `${name} can't be used: cookies and connection headers aren't credentials agents may send.`);
-    if (!value || value.length > 4000 || !oneLine(value)) fail(400, "value is required (one line, up to 4,000 characters)");
+    if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/.test(name)) fail(400, S.api.sites.headerName);
+    if (FORBIDDEN_HEADERS.has(name.toLowerCase())) fail(400, S.api.sites.headerForbidden(name));
+    if (!value || value.length > 4000 || !oneLine(value)) fail(400, S.api.sites.headerValue);
     return { kind, secret: { name, value } };
   }
   if (kind === "query") {
     const name = s("name").trim(), value = s("value");
-    if (!/^[A-Za-z0-9_.~-]{1,64}$/.test(name)) fail(400, "name must be a URL parameter name, e.g. api_key");
-    if (!value || value.length > 2000 || !oneLine(value)) fail(400, "value is required (one line, up to 2,000 characters)");
+    if (!/^[A-Za-z0-9_.~-]{1,64}$/.test(name)) fail(400, S.api.sites.queryName);
+    if (!value || value.length > 2000 || !oneLine(value)) fail(400, S.api.sites.queryValue);
     return { kind, secret: { name, value } };
   }
   const username = s("username"), password = s("password");
-  if (!username || username.includes(":") || !oneLine(username) || username.length > 200) fail(400, "username is required (no colons)");
-  if (!password || !oneLine(password) || password.length > 1000) fail(400, "password is required");
+  if (!username || username.includes(":") || !oneLine(username) || username.length > 200) fail(400, S.api.sites.usernameRequired);
+  if (!password || !oneLine(password) || password.length > 1000) fail(400, S.api.sites.passwordRequired);
   return { kind, secret: { username, password } };
 }
 
 export async function setCredentialRoute(c, id, d) {
   owner(c);
   const cur = await one(c.env, id);
-  if (!cur) fail(404, "No such research site.");
+  if (!cur) fail(404, S.api.sites.noSuch);
   const { kind, secret } = cleanCredential(d);
   if (!keyConfigured(c.env)) fail(503, new KeyMissingError().message, { setup: KEY_HELP });
   let blob;
@@ -169,8 +170,8 @@ export async function setCredentialRoute(c, id, d) {
 export async function removeCredentialRoute(c, id) {
   owner(c);
   const cur = await one(c.env, id);
-  if (!cur) fail(404, "No such research site.");
-  if (!cur.credential) fail(404, "This site has no credential.");
+  if (!cur) fail(404, S.api.sites.noSuch);
+  if (!cur.credential) fail(404, S.api.sites.noCredential);
   const by = c.access.principal;
   await c.env.DB.batch([
     c.env.DB.prepare("DELETE FROM research_site_credentials WHERE site_id = ?").bind(id),

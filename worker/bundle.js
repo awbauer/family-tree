@@ -6,6 +6,7 @@ import { resolveAccess, grantFor } from "./auth.js";
 import { scopeBundle } from "./scope.js";
 import { now, parse, dataVersion, loadState } from "./db.js";
 import { fail } from "./http.js";
+import { S } from "../strings/index.ts";
 
 let derivedCache = { version: -1, full: null, db: null };
 const scopedCache = new Map();
@@ -14,7 +15,7 @@ export async function fullBundle(env) {
   const v = await dataVersion(env);
   if (derivedCache.version !== v || derivedCache.db !== env.DB) { // per database too (one Worker, one DB; tests use many)
     const state = await loadState(env);
-    if (!state.research.home_person && !Object.keys(state.raw.people).length) fail(404, "The database is empty. Run the one-time import (README → Deploy).");
+    if (!state.research.home_person && !Object.keys(state.raw.people).length) fail(404, S.api.http.emptyDatabase);
     const full = Derive.derive({ raw: state.raw, research: state.research, places: state.places }, { today: now().slice(0, 10) });
     full.aliases = state.aliases;
     // AI-written profiles: only ever for people who have died; scope.js drops them for name-only views

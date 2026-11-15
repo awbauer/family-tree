@@ -15,28 +15,29 @@ import { fail, json } from "../http.js";
 import { applyAndCommit, revertBatch, isConflict, newBatchId } from "../store.js";
 import { settings, agentsEnabled, checkDaily, BudgetError } from "./config.js";
 import { agentsFetch } from "./routes.js";
+import { S } from "../../strings/index.ts";
 import { CHAT_PATH, ASSISTANT, chatOut, changeOut, loadChat, chatScope, checkChange, pageSnapshot, pageContext, composeMessage, stripContext } from "./chat.js";
 
 const MAX_TEXT = 4000;
 
 function editor(c, g) {
-  if (!g || !can.review(g) || c.access.kind !== "person") fail(403, "The assistant is for editors.");
+  if (!g || !can.review(g) || c.access.kind !== "person") fail(403, S.api.chat.editorsOnly);
 }
 function needAgents(c) {
-  if (!agentsEnabled(c.env)) fail(503, "The assistant isn't set up yet: it runs in the agents Worker. See docs/agents/operations.md → Page assistant.");
+  if (!agentsEnabled(c.env)) fail(503, S.api.chat.notSetUp);
 }
 
 /** The chat, if it is the caller's and they still edit its tree; 404 otherwise (never reveal other people's chats). */
 async function ownChat(c, id) {
   const chat = await loadChat(c.env, id);
-  if (!chat || chat.principal !== c.access.principal) fail(404, "No such chat.");
+  if (!chat || chat.principal !== c.access.principal) fail(404, S.api.chat.noSuchChat);
   editor(c, grantFor(c.access, chat.tree_id));
   return chat;
 }
 
 async function ownChange(c, cid) {
   const row = await c.env.DB.prepare("SELECT * FROM chat_changes WHERE id = ?").bind(cid).first();
-  if (!row || row.principal !== c.access.principal) fail(404, "No such change.");
+  if (!row || row.principal !== c.access.principal) fail(404, S.api.chat.noSuchChange);
   editor(c, grantFor(c.access, row.tree_id));
   return row;
 }
@@ -62,7 +63,7 @@ export async function createChat(c, d, { grantOrFail }) {
 function viewMessages(snap) {
   const out = [];
   for (const m of snap.messages || []) {
-    if (m.settlement) { out.push({ id: m.id, role: "notice", text: m.settlement.outcome === "aborted" ? "Stopped." : "The assistant couldn't reply to that. Try again; if it keeps happening, check the agents Worker's logs." }); continue; }
+    if (m.settlement) { out.push({ id: m.id, role: "notice", text: m.settlement.outcome === "aborted" ? S.api.chat.stopped : S.api.chat.replyFailed }); continue; }
     if (m.display !== "visible") continue;
     const text = (m.parts || []).filter((p) => p.type === "text").map((p) => p.text).join("");
     if (m.role === "user") out.push({ id: m.id, role: "user", text: stripContext(text), at: m.timestamp });
@@ -101,8 +102,8 @@ export async function sendMessage(c, id, d, { scoped }) {
   const chat = await ownChat(c, id);
   needAgents(c);
   const text = String(d.text || "").trim();
-  if (!text) fail(400, "Say something.");
-  if (text.length > MAX_TEXT) fail(400, `Keep messages under ${MAX_TEXT} characters.`);
+  if (!text) fail(400, S.api.chat.saySomething);
+  if (text.length > MAX_TEXT) fail(400, S.api.chat.tooLong(MAX_TEXT));
   try { await checkDaily(c.env, settings(c.env), { chat: true }); } catch (e) { if (e instanceof BudgetError) fail(429, e.message); throw e; }
   const b = await scoped(c, grantFor(c.access, chat.tree_id));
   // The page pointer goes with a message only when the editor has moved to another page; the page's text is kept on
@@ -134,19 +135,19 @@ export async function decideChange(c, cid, action) {
   const env = c.env, t = now(), who = c.access.principal;
   const label = `change #${row.id} ("${row.summary}")`;
   if (action === "undo") {
-    if (row.status !== "applied" || !row.batch_id) fail(409, "Only an applied change can be undone.");
+    if (row.status !== "applied" || !row.batch_id) fail(409, S.api.chat.undoAppliedOnly);
     try {
       const r = await revertBatch(env, row.batch_id, { actor: who, actorKind: "person", reason: `Undid ${label} from the page assistant` });
-      if (!r) fail(404, "That edit is no longer in the history.");
+      if (!r) fail(404, S.api.chat.editGone);
     } catch (e) {
-      if (isConflict(e) || e.conflict) fail(409, "Those records have changed since; undo the later changes first.");
+      if (isConflict(e) || e.conflict) fail(409, S.api.chat.undoConflict);
       throw e;
     }
     await env.DB.prepare("UPDATE chat_changes SET status = 'undone', decided_at = ?, decided_by = ? WHERE id = ?").bind(t, who, row.id).run();
     await tell(c, row.chat_id, `The editor undid ${label}. The tree is back as it was before it.`);
     return json({ ok: true, change: changeOut(await ownChange(c, cid)) });
   }
-  if (row.status !== "pending") fail(409, `That change is already ${row.status}.`);
+  if (row.status !== "pending") fail(409, S.api.chat.alreadyDecided(row.status));
   if (action === "dismiss") {
     await env.DB.prepare("UPDATE chat_changes SET status = 'dismissed', decided_at = ?, decided_by = ? WHERE id = ? AND status = 'pending'").bind(t, who, row.id).run();
     await tell(c, row.chat_id, `The editor dismissed ${label}. Nothing was changed.`);
@@ -154,13 +155,13 @@ export async function decideChange(c, cid, action) {
   }
   // apply: re-check against the tree as it is now, as the editor, then commit like a hand edit
   const sc = await chatScope(env, { principal: who, tree_id: row.tree_id });
-  if (!sc) fail(403, "The assistant is for editors.");
+  if (!sc) fail(403, S.api.chat.editorsOnly);
   const ops = JSON.parse(row.ops);
   const check = await checkChange(env, sc, ops);
   const failed = async (msg) => {
     await env.DB.prepare("UPDATE chat_changes SET status = 'failed', error = ?, decided_at = ?, decided_by = ? WHERE id = ?").bind(msg, t, who, row.id).run();
     await tell(c, row.chat_id, `Applying ${label} failed: ${msg}. Nothing was changed.`);
-    fail(409, `This change can't be applied any more: ${msg}`);
+    fail(409, S.api.chat.cantApply(msg));
   };
   if (check.errors) return failed(check.errors.join("; "));
   const batchId = newBatchId();
@@ -168,11 +169,11 @@ export async function decideChange(c, cid, action) {
   try {
     // logged as the assistant acting on the editor's behalf, with the chat and draft it came from
     const res = await applyAndCommit(env, ops, { actor: ASSISTANT, actorKind: "agent", onBehalfOf: who, via: `${row.chat_id}#${row.id}`, reason: row.reason, sources: row.sources ? JSON.parse(row.sources) : undefined, batchId, extra: [mark] });
-    if (!res.batchId) return failed("the tree already says this");
+    if (!res.batchId) return failed(S.api.chat.alreadyInTree);
     await tell(c, row.chat_id, `The editor applied ${label}. It is saved in the tree's history as edit ${res.batchId}, made by you on their behalf, and can be undone from there.`);
     return json({ ok: true, change: changeOut(await ownChange(c, cid)), touched: res.touched, created: res.created });
   } catch (e) {
-    if (isConflict(e)) fail(409, "Someone changed these records meanwhile. Ask the assistant to look again.");
+    if (isConflict(e)) fail(409, S.api.chat.changedMeanwhile);
     throw e;
   }
 }
