@@ -216,6 +216,30 @@ npm run dev
 - The site-side logic is tested in `tests/agents.test.mjs` against the example family, with a fake agents Worker.
 - Version pins, with their reasons in `agents/package.json`: Flue 2.3.0 needs Pi 1.4.x, and the Agents SDK web tools need `agents` ≥ 0.28, which Flue accepts as a project-level override. Remove the pins when Flue catches up.
 
+## GEDCOM X storage, export and import
+
+The tree is stored as GEDCOM X (docs/design/standards.md):
+- `people` rows hold Persons, and `sources` / `media` rows hold SourceDescriptions;
+- families are Couple and ParentChild rows in `relationships`, plus an `ft:FamilyGroup` for a family with one or no known spouse.
+
+**Moving an existing database (one time, owner):**
+1. Apply migration 0005.
+2. Open **Sharing → Data storage → Check**. That's a dry run: it converts every record, proves each converts back exactly, and reports the counts.
+3. Then **Move to GEDCOM X storage**, which runs as one transaction. `meta.storage` becomes `gedcomx`.
+4. Undo: D1 Time Travel to just before the move. The old `families` rows are cleared by the move.
+
+The code reads both layouts, so deploying it before the move is safe.
+
+**Export:**
+- Research → Overview → **Download GEDCOM X**, or `GET /api/export.gedcomx` (editors).
+- It contains what the caller can see. Living people are marked private, findings are record personas linked as evidence with an analysis document, and reviewers appear by local part only.
+- **Download GEDCOM 5.5.1** stays for Ancestry and older software.
+
+**Import:**
+- `POST /api/admin/import.gedcomx` (owner) loads a GEDCOM X JSON document into an **empty** database: another GEDCOM X app, FamilySearch, or our own export.
+- Families are rebuilt from Couple and ParentChild relationships.
+- The old one-time import (`npm run db:import`) refuses to run against GEDCOM X storage.
+
 ## Restore (D1 Time Travel)
 
 D1 keeps point-in-time recovery automatically: 30 days on Workers Paid, 7 on Free. There is no other copy.

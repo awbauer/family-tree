@@ -15,7 +15,7 @@ import sys
 def main(argv):
     where = "--local" if "--local" in argv else "--remote"
     cmd = ["npx", "wrangler", "d1", "execute", "family-tree", "-c", "wrangler.local.jsonc", where, "--json",
-           "--command", "SELECT value FROM meta WHERE key = 'source_of_truth'"]
+           "--command", "SELECT key, value FROM meta WHERE key IN ('source_of_truth', 'storage')"]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     except Exception as e:  # noqa: BLE001
@@ -30,7 +30,11 @@ def main(argv):
         # Legacy schema (no source_of_truth row, or the meta table has the old layout): loading is allowed.
         print("guard: legacy database, no source-of-truth marker; load allowed")
         return
-    value = rows[0]["value"] if rows else None
+    vals = {r.get("key", "source_of_truth"): r["value"] for r in rows}
+    value = vals.get("source_of_truth")
+    if vals.get("storage") == "gedcomx":
+        sys.exit("guard: REFUSED. This database stores the tree as GEDCOM X (meta.storage = 'gedcomx'); the import "
+                 "writes the old layout. To start a tree from a file, use POST /api/admin/import.gedcomx on an empty database.")
     if "--legacy" in argv:
         sys.exit("guard: REFUSED. This database uses the app schema; the legacy snapshot (build/seed.sql) no longer "
                  "fits. Use `npm run db:import` for the one-time import.")

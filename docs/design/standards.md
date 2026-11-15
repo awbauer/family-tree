@@ -1,6 +1,9 @@
 # Standards: GEDCOM X model and interchange, PROV-O provenance
 
-**Status:** proposal. Nothing here is built yet beyond what "Today" notes.
+**Status:** built.
+- Phase 1, provenance: `worker/prov.js`, `/api/prov`.
+- Phases 2–4: `worker/gedcomx.js` (lossless conversion, export and import) and `worker/storage.js` (GEDCOM X storage, with Couple/ParentChild relationships instead of families).
+- An existing database moves over with **Sharing → Data storage** (`POST /api/admin/storage`).
 
 ## Decision
 
@@ -68,6 +71,17 @@ Deliverables: a `prov` view of the existing log (no schema change), `GET /api/pr
 - **FamilySearch** later: its API speaks GEDCOM X, so reading or contributing records needs no second mapping.
 - **Validation**: round-trip tests (export → import → identical), and checks against the GEDCOM X JSON spec's required fields and URIs in CI.
 - **Legacy 5.5.1** export stays for Ancestry, generated from the same model (families rebuilt from relationships).
+
+## How "family" works now
+
+GEDCOM X has no family object, and storage has none either: families are relationship rows (`relationships`). The app's working model, which derive, scope, ops, the views and the 5.5.1 export use, still offers "families". These are rebuilt from the relationships on read, the way FamilySearch groups a couple with their children. `family.*` edit ops are translated into relationship changes on write.
+
+The conversion is proved lossless:
+- on the example data and on synthetic edge cases, in tests;
+- on the owner's real tree, locally;
+- and again by the upgrade itself, which refuses to write if any record would not convert back exactly.
+
+The whole test suite also runs on GEDCOM X storage: `npm run test:gedcomx`.
 
 ## Phases (each its own PR, each reversible)
 
