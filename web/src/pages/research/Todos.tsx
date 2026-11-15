@@ -4,9 +4,11 @@ import { Fragment, useCallback, useEffect, useRef, useState, type ChangeEvent, t
 import { useData } from "../../data";
 import { isUnknown, PersonLink } from "../../lib";
 import { Linkify, useWho } from "../../ui";
+import { S } from "../../../../strings/index.ts";
 
-export const STATUS_TXT: Record<string, string> = { open: "Open", in_progress: "In progress", needs_review: "Needs review", done: "Done", wont_do: "Won’t do" };
-const FILTERS: [string, string][] = [["active", "Active"], ["mine", "Assigned to me"], ["unassigned", "Unassigned"], ["needs_review", "Needs review"], ["done", "Done"], ["all", "All"]];
+const T = S.research.todos;
+export const STATUS_TXT: Record<string, string> = T.status;
+const FILTERS: [string, string][] = (["active", "mine", "unassigned", "needs_review", "done", "all"] as const).map((k) => [k, T.filters[k]]);
 const QUERY: Record<string, string> = { active: "status=active", mine: "assignee=me&status=active", unassigned: "assignee=unassigned&status=open", needs_review: "status=needs_review", done: "status=done,wont_do", all: "" };
 /** The id in "Name (I12)", as the person pickers fill it. */
 export const pickId = (v: string) => (String(v || "").match(/\(([^)]+)\)\s*$/) || [])[1];
@@ -17,11 +19,11 @@ function History({ t, events, onComment }: { t: any; events: any[]; onComment: (
   return (
     <tr className="td-hist"><td colSpan={6} className="small">
       {events.map((e, i) => (
-        <div key={i}>{e.at.slice(0, 16).replace("T", " ")} · {who(e.actor)} · {e.kind} {e.data.text || e.data.outcome || (e.data.to !== undefined ? `→ ${e.data.to || "unassigned"}` : "") || (e.data.proposal ? `suggestion #${e.data.proposal}` : "")}</div>
+        <div key={i}>{e.at.slice(0, 16).replace("T", " ")} · {who(e.actor)} · {e.kind} {e.data.text || e.data.outcome || (e.data.to !== undefined ? T.history.assignedTo(e.data.to || T.history.unassigned) : "") || (e.data.proposal ? T.history.suggestion(e.data.proposal) : "")}</div>
       ))}
       <form className="filters" style={{ marginTop: 6 }} onSubmit={(ev) => { ev.preventDefault(); onComment(c); }} data-todo={t.id}>
-        <input name="c" placeholder="Add a comment" style={{ flex: 1 }} value={c} onChange={(e) => setC(e.target.value)} />
-        <button className="btn">Comment</button>
+        <input name="c" placeholder={T.history.commentPlaceholder} style={{ flex: 1 }} value={c} onChange={(e) => setC(e.target.value)} />
+        <button className="btn">{T.history.comment}</button>
       </form>
     </td></tr>
   );
@@ -52,18 +54,18 @@ export function Todos() {
     try {
       if (kind === "claim") await api("POST", `todos/${t.id}/claim`);
       else if (kind === "research") {
-        const extra = prompt("Anything the agent should know or focus on? (optional)", "");
+        const extra = prompt(T.researchPrompt, "");
         if (extra === null) return;
         await api("POST", "agent/runs", { todo_id: t.id, instructions: extra || undefined });
-        alert("Started. Follow it under Research → Agent runs; its results arrive as a suggestion.");
+        alert(T.researchStarted);
       } else if (kind === "assign") {
-        const a = prompt("Assign to (an email, \"me\", \"agent:name\", or empty to unassign):", t.assignee || "me");
+        const a = prompt(T.assignPrompt,t.assignee || "me");
         if (a === null) return;
         await api("PATCH", `todos/${t.id}`, { version: t.version, assignee: a.trim() || null });
       } else if (kind === "status" && el) {
         const body: any = { version: t.version, status: el.value };
         if (["done", "wont_do", "needs_review"].includes(el.value)) {
-          const o = prompt("Outcome (what was found, or why it was dropped):", t.outcome || "");
+          const o = prompt(T.outcomePrompt,t.outcome || "");
           if (o === null) { el.value = t.status; return; }
           body.outcome = o;
         }
@@ -75,7 +77,7 @@ export function Todos() {
         return;
       }
       load();
-    } catch (e: any) { alert(e.status === 409 ? "Someone else changed this to-do; the list will refresh." : e.message); load(); }
+    } catch (e: any) { alert(e.status === 409 ? T.conflict : e.message); load(); }
   }
   async function comment(t: any, text: string) {
     try { await api("PATCH", `todos/${t.id}`, { comment: text }); }
@@ -101,14 +103,14 @@ export function Todos() {
     const living = t.person && D.people[t.person] && D.people[t.person].living;
     return (
       <tr id={`td-${t.id}`}><td className={`prio-${t.priority}`}>{t.priority}</td><td>{t.person && D.people[t.person] ? <PersonLink id={t.person} /> : "—"}</td>
-        <td>{t.task}{t.where && <><br /><span className="small muted"><Linkify text={t.where} /></span></>}{t.outcome && <><br /><span className="small"><b>Outcome:</b> {t.outcome}</span></>}</td>
+        <td>{t.task}{t.where && <><br /><span className="small muted"><Linkify text={t.where} /></span></>}{t.outcome && <><br /><span className="small"><b>{T.outcome}</b> {t.outcome}</span></>}</td>
         <td>{status}</td><td className="small">{who(t.assignee)}</td>
         <td><div className="btn-row">
-          {!t.assignee && !["done", "wont_do"].includes(t.status) && <button className="btn" data-act="claim" onClick={() => act("claim", t)}>Take it</button>}
-          {editor && <button className="btn" data-act="assign" title="Assign to someone (an email, or agent:name)" onClick={() => act("assign", t)}>Assign…</button>}
+          {!t.assignee && !["done", "wont_do"].includes(t.status) && <button className="btn" data-act="claim" onClick={() => act("claim", t)}>{T.takeIt}</button>}
+          {editor && <button className="btn" data-act="assign" title={T.assignTitle} onClick={() => act("assign", t)}>{T.assign}</button>}
           {ai && !["done", "wont_do", "needs_review"].includes(t.status) && (!t.assignee || mine) && !living &&
-            <button className="btn" data-act="research" title="A cloud research agent works this to-do and files a suggestion" onClick={() => act("research", t)}>Research with AI</button>}
-          <button className="btn" data-act="history" onClick={() => act("history", t)}>History</button>
+            <button className="btn" data-act="research" title={T.researchTitle} onClick={() => act("research", t)}>{T.research}</button>}
+          <button className="btn" data-act="history" onClick={() => act("history", t)}>{T.historyButton}</button>
         </div></td></tr>
     );
   }
@@ -117,23 +119,23 @@ export function Todos() {
     <>
       <div className="filters" id="td-filters">
         {FILTERS.map(([k, l]) => <button key={k} className={`btn${k === filter ? " primary" : ""}`} data-f={k} onClick={() => (k === filter ? load() : setFilter(k))}>{l}</button>)}
-        <button className="btn" id="td-new" style={{ marginLeft: "auto" }} onClick={() => setFormOpen((x) => !x)}>+ New to-do</button>
+        <button className="btn" id="td-new" style={{ marginLeft: "auto" }} onClick={() => setFormOpen((x) => !x)}>{T.newTodo}</button>
       </div>
       <form id="td-form" className="card" hidden={!formOpen} style={{ marginBottom: 16 }} onSubmit={add}><div className="filters">
-        <input name="task" placeholder="What needs doing?" required style={{ flex: 2, minWidth: 240 }} />
-        <input name="person" list="td-people" placeholder="Person (optional)" style={{ flex: 1, minWidth: 180 }} />
+        <input name="task" placeholder={T.form.task} required style={{ flex: 2, minWidth: 240 }} />
+        <input name="person" list="td-people" placeholder={T.form.person} style={{ flex: 1, minWidth: 180 }} />
         <datalist id="td-people">{people.filter((p) => !isUnknown(p)).map((p) => <option key={p.id} value={`${p.name} (${p.id})`} />)}</datalist>
-        <input name="where" placeholder="Where to look" style={{ flex: 1, minWidth: 180 }} />
-        <select name="priority" defaultValue="medium"><option>high</option><option>medium</option><option>low</option></select>
-        <label className="small"><input type="checkbox" name="mine" defaultChecked /> assign to me</label>
-        <button className="btn primary">Add</button></div></form>
+        <input name="where" placeholder={T.form.where} style={{ flex: 1, minWidth: 180 }} />
+        <select name="priority" defaultValue="medium"><option value="high">{T.form.priority.high}</option><option value="medium">{T.form.priority.medium}</option><option value="low">{T.form.priority.low}</option></select>
+        <label className="small"><input type="checkbox" name="mine" defaultChecked /> {T.form.assignToMe}</label>
+        <button className="btn primary">{T.form.add}</button></div></form>
       <div id="td-out">
-        {state.loading ? <p className="muted">Loading…</p>
+        {state.loading ? <p className="muted">{T.loading}</p>
           : state.error ? <div className="empty">{state.error}</div>
           : state.todos!.length ? (
-            <div className="table-wrap"><table className="data stack"><thead><tr><th>Priority</th><th>Person</th><th>Task</th><th>Status</th><th>Assigned</th><th></th></tr></thead>
+            <div className="table-wrap"><table className="data stack"><thead><tr><th>{T.head.priority}</th><th>{T.head.person}</th><th>{T.head.task}</th><th>{T.head.status}</th><th>{T.head.assigned}</th><th></th></tr></thead>
               <tbody>{state.todos!.map((t) => <Fragment key={t.id}>{Row({ t })}{hist[t.id] && <History t={t} events={hist[t.id]} onComment={(text) => comment(t, text)} />}</Fragment>)}</tbody></table></div>
-          ) : <div className="empty">Nothing here.</div>}
+          ) : <div className="empty">{T.empty}</div>}
       </div>
     </>
   );
