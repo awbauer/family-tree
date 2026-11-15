@@ -1,7 +1,6 @@
 'use agent';
 // The page assistant. One conversation (one Durable Object) per chat; the conversation id is the chat id. The site
-// Worker sends the editor's messages with the page they're on attached; the chat's row (title, drafts) lives in the
-// editor's ChatStore Durable Object. Everything the agent reads is the tree as
+// Worker sends the editor's messages with the page they're on attached. Everything the agent reads is the tree as
 // that editor sees it, re-checked on every tool call, and its only write is propose_change: a pending change the
 // editor applies or dismisses in the chat panel. It has no web access.
 import { env } from "cloudflare:workers";
@@ -9,7 +8,7 @@ import { useAgentStart, useInitialData, useModel, usePersistentState, useTool } 
 import * as v from "valibot";
 import { settings } from "../../../worker/agent/config.js";
 import { searchPeople, relationship } from "../../../worker/agent/tools.js";
-import { CHAT_SYSTEM, chatStore, chatScope, chatPersonView, proposeChange, recordChatUsage } from "../../../worker/agent/chat.js";
+import { CHAT_SYSTEM, loadChat, chatScope, chatPersonView, proposeChange, recordChatUsage } from "../../../worker/agent/chat.js";
 import { useUsage } from "./usage.js";
 
 const S = settings(env);
@@ -17,21 +16,24 @@ const str = (d) => v.pipe(v.string(), v.description(d));
 
 export function Assistant({ id }) {
   useModel(`cloudflare/${S.model}`, { thinkingLevel: S.chatEffort, compaction: { keepRecentTokens: 12000 } });
-  // Set by the site Worker when it creates the conversation: whose chat this is and which tree it's about.
-  const chat = { ...useInitialData(), id };
-  const store = chatStore(env, chat.principal);
+  const data = useInitialData();
+  const chatId = (data && data.chatId) || id;
   const [, setSeen] = usePersistentState("usage_recorded", { input: 0, output: 0 });
 
+  async function chat() {
+    const c = await loadChat(env, chatId);
+    if (!c) throw new Error("This chat no longer exists.");
+    return c;
+  }
   async function tree() {
-    if (!(await store.getChat(id))) throw new Error("This chat no longer exists. Stop.");
-    const sc = await chatScope(env, chat);
+    const sc = await chatScope(env, await chat());
     if (!sc) throw new Error("This editor no longer has editor access to the tree. Stop.");
     return sc.bundle;
   }
 
   // Each delivered message starts a new response, whose usage counts from zero: reset the high-water mark useUsage keeps.
   useAgentStart(async () => { setSeen({ input: 0, output: 0 }); });
-  useUsage((u) => recordChatUsage(env, store, id, u));
+  useUsage((u) => recordChatUsage(env, chatId, u));
 
   useTool({
     name: "get_person",
@@ -72,7 +74,7 @@ export function Assistant({ id }) {
       ops: v.pipe(v.array(v.looseObject({ op: v.string() })), v.minLength(1), v.description("Edit ops, applied in order as one change")),
     }),
     async run({ data }) {
-      const r = await proposeChange(env, store, chat, data);
+      const r = await proposeChange(env, await chat(), data);
       if (!r.ok) throw new Error(`Not proposed. Fix these and call propose_change again:\n- ${r.errors.join("\n- ")}`);
       return { output: { change: r.id, records: r.records, note: "Shown to the editor with Apply and Dismiss buttons. It is not applied yet: ask them to check it and press Apply." } };
     },
@@ -81,5 +83,5 @@ export function Assistant({ id }) {
   return CHAT_SYSTEM;
 }
 Assistant.agentName = "assistant";
-Assistant.initialData = v.object({ principal: v.pipe(v.string(), v.minLength(3)), tree: v.pipe(v.string(), v.minLength(1)) });
+Assistant.initialData = v.object({ chatId: v.pipe(v.string(), v.regex(/^chat-[\w-]+$/)) });
 Assistant.durability = { maxAttempts: 2, timeoutMs: 10 * 60_000 };

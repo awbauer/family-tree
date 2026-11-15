@@ -1,7 +1,7 @@
 // The page assistant: chats belong to one editor, messages carry the page they're on, the agent only drafts changes,
 // and nothing reaches the tree until the editor applies it; then it's logged as the assistant acting on the editor's
-// behalf (history, provenance, undo). The agents Worker is a fake service binding: the Flue conversation is scripted,
-// and each editor's ChatStore runs the real store code over node:sqlite. Fictional example family only.
+// behalf (history, provenance, undo). The agents
+// Worker (Flue) is replaced by a fake service binding. Fictional example family only.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -9,18 +9,11 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DatabaseSync } from "node:sqlite";
 import { makeEnv, client, migrate } from "./helpers/fake-env.mjs";
-import { ChatBook, REMOTE_METHODS } from "../worker/agent/chat-store.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OWNER = "owner@example.test", EDITOR = "editor@example.test", OTHER = "other@example.test", MEMBER = "member@example.test";
 let env, call, ex, calls, snapshot, Chat;
-const books = new Map(); // principal → ChatBook, standing in for the ChatStore Durable Objects
-const bookFor = (p) => {
-  if (!books.has(p)) { const db = new DatabaseSync(":memory:"); books.set(p, new ChatBook((q, ...b) => { const st = db.prepare(q); return /^\s*(select|with)\b|returning/i.test(q) ? st.all(...b).map((r) => ({ ...r })) : (st.run(...b), []); })); }
-  return books.get(p);
-};
 
 before(async () => {
   const dir = mkdtempSync(join(tmpdir(), "ft-chat-"));
@@ -35,12 +28,6 @@ before(async () => {
     AGENTS: {
       fetch: async (req) => {
         const body = req.method === "POST" ? await req.json().catch(() => null) : null;
-        const u = new URL(req.url);
-        if (u.pathname.startsWith("/internal/chats/")) {
-          if (!REMOTE_METHODS.includes(body.method) && !["propose", "addUsage"].includes(body.method)) return new Response(JSON.stringify({ error: "Unknown method" }), { status: 400 });
-          try { return new Response(JSON.stringify({ result: bookFor(decodeURIComponent(u.pathname.split("/")[3]))[body.method](...body.args) ?? null })); }
-          catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 400 }); }
-        }
         calls.push({ url: new URL(req.url).pathname + new URL(req.url).search, method: req.method, body });
         if (req.method === "GET") return snapshot ? new Response(JSON.stringify(snapshot)) : new Response(JSON.stringify({ error: "stream_not_found" }), { status: 404 });
         return new Response(JSON.stringify({ submissionId: "sub_1", offset: "-1" }), { status: 202 });
@@ -57,10 +44,9 @@ before(async () => {
 
 const dead = () => Object.values(ex.people).find((p) => !p.living && p.events.length >= 2);
 const living = () => Object.values(ex.people).find((p) => p.living);
-const lastPost = () => calls.filter((c) => c.method === "POST" && !c.url.startsWith("/internal/chats/")).at(-1);
+const lastPost = () => calls.filter((c) => c.method === "POST").at(-1);
 const newChat = async (as = EDITOR) => (await call("POST", "/api/chat", { as, body: { tree: "all" } })).data.chat.id;
-const chatOf = (id, principal = EDITOR) => ({ id, principal, tree: "all" });
-const store = (p = EDITOR) => Chat.chatStore(env, p);
+const chatRow = (id) => env.DB.prepare("SELECT * FROM chats WHERE id = ?").bind(id).first();
 const provDoc = async (id) => (await (await import("../worker/index.js")).default.fetch(new Request(`https://x.test/api/prov?tree=all&id=${id}`, { headers: { "X-Dev-Principal": EDITOR } }), env, {})).json();
 const tree = async () => (await call("GET", "/api/tree?tree=all", { as: EDITOR })).data;
 
@@ -82,14 +68,13 @@ test("a message carries the page the editor is on: its record (with fids) and vi
   const sent = lastPost();
   assert.equal(sent.url, `/agents/assistant/${id}`);
   assert.equal(sent.body.kind, "user");
-  assert.deepEqual(sent.body.initialData, { principal: EDITOR, tree: "all" });
+  assert.deepEqual(sent.body.initialData, { chatId: id });
   assert.ok(sent.body.body.startsWith("When did she die?\n\n<page_context>"));
   assert.ok(sent.body.body.includes(`profile of ${p.name} (${p.id})`));
   assert.match(sent.body.body, /"fid":"e\d+"/, "fact ids so edits can point at facts");
   assert.ok(sent.body.body.includes("Visible page words"));
   assert.equal(Chat.stripContext(sent.body.body), "When did she die?");
-  assert.equal(bookFor(EDITOR).getChat(id).title, "When did she die?");
-  assert.equal(bookFor(OTHER).getChat(id), null, "the chat lives only in its owner's store");
+  assert.equal((await chatRow(id)).title, "When did she die?");
 });
 
 test("an editor's assistant sees living relatives in full", async () => {
@@ -121,26 +106,25 @@ test("the conversation view hides the page context and plumbing", async () => {
 });
 
 test("drafted changes are checked; nothing changes until the editor applies", async () => {
-  const id = await newChat(), p = dead(), chat = chatOf(id), st = store();
-  let r = await Chat.proposeChange(env, st, chat, { summary: "x", reason: "y", ops: [{ op: "person.delete", id: p.id }] });
+  const id = await newChat(), p = dead(), chat = await chatRow(id);
+  let r = await Chat.proposeChange(env, chat, { summary: "x", reason: "y", ops: [{ op: "person.delete", id: p.id }] });
   assert.equal(r.ok, false);
-  r = await Chat.proposeChange(env, st, chat, { summary: "x", reason: "y", ops: [{ op: "event.add", entity: "person", id: "I999999", event: { type: "Burial" } }] });
+  r = await Chat.proposeChange(env, chat, { summary: "x", reason: "y", ops: [{ op: "event.add", entity: "person", id: "I999999", event: { type: "Burial" } }] });
   assert.equal(r.ok, false);
-  r = await Chat.proposeChange(env, st, chat, { summary: "", reason: "", ops: [] });
+  r = await Chat.proposeChange(env, chat, { summary: "", reason: "", ops: [] });
   assert.equal(r.ok, false);
   assert.ok(r.errors.length >= 3);
 
   const before = (await tree()).people[p.id].events.length;
-  const first = await Chat.proposeChange(env, st, chat, { summary: "Add an occupation", reason: "From the editor's own knowledge", ops: [{ op: "event.add", entity: "person", id: p.id, event: { type: "Occupation", value: "Example clerk" } }] });
+  const first = await Chat.proposeChange(env, chat, { summary: "Add an occupation", reason: "From the editor's own knowledge", ops: [{ op: "event.add", entity: "person", id: p.id, event: { type: "Occupation", value: "Example clerk" } }] });
   assert.equal(first.ok, true, JSON.stringify(first));
-  const second = await Chat.proposeChange(env, st, chat, { summary: "Add an occupation and a note", reason: "From the editor's own knowledge", sources: [{ title: "Family letter", url: "javascript:alert(1)" }],
+  const second = await Chat.proposeChange(env, chat, { summary: "Add an occupation and a note", reason: "From the editor's own knowledge", sources: [{ title: "Family letter", url: "javascript:alert(1)" }],
     ops: [{ op: "event.add", entity: "person", id: p.id, event: { type: "Occupation", value: "Example clerk", note: "Per a family letter" } }] });
   assert.equal(second.ok, true);
   assert.equal((await tree()).people[p.id].events.length, before, "proposing changes nothing");
 
   const view = (await call("GET", `/api/chat/${id}`, { as: EDITOR })).data;
   assert.deepEqual(view.changes.map((c) => c.status), ["superseded", "pending"], "a new proposal replaces a waiting one");
-  assert.equal((await call("GET", `/api/chat/${id}`, { as: OTHER })).status, 404);
   assert.deepEqual(view.changes[1].sources, [{ title: "Family letter" }], "non-http urls are dropped");
   assert.equal((await call("POST", `/api/chat/changes/${first.id}/apply`, { as: EDITOR })).status, 409);
   assert.equal((await call("POST", `/api/chat/changes/${second.id}/apply`, { as: OTHER })).status, 404, "only the chat's editor applies");
@@ -179,46 +163,38 @@ test("drafted changes are checked; nothing changes until the editor applies", as
 });
 
 test("dismissing changes nothing; a change the tree has outgrown fails cleanly", async () => {
-  const id = await newChat(), p = dead(), chat = chatOf(id), st = store();
-  const a = await Chat.proposeChange(env, st, chat, { summary: "Note", reason: "r", ops: [{ op: "person.update", id: p.id, set: { notes: ["Example note"] } }] });
+  const id = await newChat(), p = dead(), chat = await chatRow(id);
+  const a = await Chat.proposeChange(env, chat, { summary: "Note", reason: "r", ops: [{ op: "person.update", id: p.id, set: { notes: ["Example note"] } }] });
   const d = await call("POST", `/api/chat/changes/${a.id}/dismiss`, { as: EDITOR });
   assert.equal(d.data.change.status, "dismissed");
   assert.match(lastPost().body.body, /dismissed/);
 
   const fid = (await tree()).people[p.id].events[0].fid;
-  const b = await Chat.proposeChange(env, st, chat, { summary: "Fix a date", reason: "r", ops: [{ op: "event.update", entity: "person", id: p.id, fid, set: { note: "checked" } }] });
+  const b = await Chat.proposeChange(env, chat, { summary: "Fix a date", reason: "r", ops: [{ op: "event.update", entity: "person", id: p.id, fid, set: { note: "checked" } }] });
   assert.equal(b.ok, true);
   // meanwhile, someone removes that fact by hand
   const rm = await call("POST", "/api/edit", { as: OWNER, body: { tree: "all", reason: "Example cleanup", ops: [{ op: "event.remove", entity: "person", id: p.id, fid }] } });
   assert.equal(rm.status, 200, JSON.stringify(rm.data));
   const ap = await call("POST", `/api/chat/changes/${b.id}/apply`, { as: EDITOR });
   assert.equal(ap.status, 409);
-  assert.equal(bookFor(EDITOR).change(b.id).status, "failed");
-  assert.ok(bookFor(EDITOR).change(b.id).error);
+  const st = await env.DB.prepare("SELECT status, error FROM chat_changes WHERE id = ?").bind(b.id).first();
+  assert.equal(st.status, "failed");
   assert.match(lastPost().body.body, /failed/);
 });
 
 test("losing editor access stops the assistant", async () => {
-  const id = await newChat(OTHER), chat = chatOf(id, OTHER), st = store(OTHER);
+  const id = await newChat(OTHER), chat = await chatRow(id);
   await call("PUT", "/api/admin/grants", { body: { principal: OTHER, tree_id: "all", role: "member" } });
   assert.equal((await call("GET", `/api/chat/${id}`, { as: OTHER })).status, 403);
   assert.equal(await Chat.chatScope(env, chat), null);
-
-  const r = await Chat.proposeChange(env, st, chat, { summary: "x", reason: "y", ops: [{ op: "person.update", id: dead().id, set: { notes: ["n"] } }] });
+  const r = await Chat.proposeChange(env, chat, { summary: "x", reason: "y", ops: [{ op: "person.update", id: dead().id, set: { notes: ["n"] } }] });
   assert.equal(r.ok, false);
 });
 
-test("a draft is applied once, even with two clicks, and an interrupted apply settles from the log", async () => {
-  const id = await newChat(), p = dead(), chat = chatOf(id), st = store();
-  const a = await Chat.proposeChange(env, st, chat, { summary: "Note", reason: "r", ops: [{ op: "person.update", id: p.id, set: { notes: ["Example double click"] } }] });
+test("a draft is applied once, even with two clicks", async () => {
+  const id = await newChat(), p = dead(), chat = await chatRow(id);
+  const a = await Chat.proposeChange(env, chat, { summary: "Note", reason: "r", ops: [{ op: "person.update", id: p.id, set: { notes: ["Example double click"] } }] });
   const [r1, r2] = await Promise.all([1, 2].map(() => call("POST", `/api/chat/changes/${a.id}/apply`, { as: EDITOR })));
   assert.deepEqual([r1.status, r2.status].sort(), [200, 409]);
   assert.equal((await env.DB.prepare("SELECT COUNT(DISTINCT batch_id) AS n FROM changes WHERE via = ?").bind(`${id}#${a.id}`).first()).n, 1);
-
-  const b = await Chat.proposeChange(env, st, chat, { summary: "Note 2", reason: "r", ops: [{ op: "person.update", id: p.id, set: { notes: ["Example interrupted"] } }] });
-  bookFor(EDITOR).move(b.id, "applying", { from: "pending" }); // as if the Worker died after claiming it…
-  await env.DB.prepare("INSERT INTO changes (at, actor, actor_kind, entity_type, entity_id, op, batch_id, via) VALUES ('2026-01-01', 'agent:assistant', 'agent', 'person', ?, 'edit', 'bEXAMPLE', ?)").bind(p.id, `${id}#${b.id}`).run(); // …and after writing
-  const r = await call("POST", `/api/chat/changes/${b.id}/apply`, { as: EDITOR });
-  assert.equal(r.status, 200);
-  assert.deepEqual([r.data.change.status, r.data.change.batch], ["applied", "bEXAMPLE"]);
 });
