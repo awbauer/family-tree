@@ -28,7 +28,7 @@ import { HttpError, fail, json } from "./http.js";
 import { scopeFor } from "./bundle.js";
 import * as Agent from "./agent/routes.js";
 import * as Chat from "./agent/chat-routes.js";
-import { validateBatch, researchStatements } from "./research.js";
+import { validateBatch, researchStatements, followMerges, dropMissing } from "./research.js";
 import { J, now, parse, loadState, todoOut, write, audit, meta } from "./db.js";
 import { OpError, referencedIds, sourceIds, applyOps, assignFids } from "./ops.js";
 import { loadEditable, applyAndCommit, revertBatch, isConflict, newBatchId } from "./store.js";
@@ -359,8 +359,9 @@ async function reviewProposal(c, id, action) {
   if (!can.review(g) || c.access.kind === "agent") fail(403, "Only editors can review suggestions.");
   const st = [];
   if (action === "approve") {
-    const payload = parse(row.payload, {});
     const b = await scoped(c, g);
+    // people merged since the suggestion was written: point it at who they became
+    let payload = followMerges(parse(row.payload, {}), b.aliases);
     if (row.kind === "edit") {
       await checkEdit(c, g, payload, { dryRun: true });
       // the tree edit is applied together with closing the proposal (and its to-do) in one batch
@@ -383,8 +384,17 @@ async function reviewProposal(c, id, action) {
         throw e;
       }
     }
-    const errs = validateBatch(payload, (pid) => !!b.people[pid]); // re-check: the tree may have changed
-    if (errs.length) fail(422, "The batch no longer validates.", { errors: errs });
+    const visible = (pid) => !!b.people[pid];
+    let errs = validateBatch(payload, visible); // re-check: the tree may have changed
+    const trim = dropMissing(payload, visible);
+    if (errs.length && d.skip_missing && trim.dropped) { payload = trim.batch; errs = validateBatch(payload, visible); }
+    if (errs.length) {
+      const n = trim.missing.length;
+      fail(422, n && !d.skip_missing
+        ? `${trim.dropped} item${trim.dropped === 1 ? " is" : "s are"} about ${n === 1 ? "a person" : `${n} people`} no longer in the tree (${trim.missing.join(", ")}). Approve without them, or reject the suggestion.`
+        : `The batch no longer validates: ${errs.slice(0, 3).join("; ")}${errs.length > 3 ? ` (and ${errs.length - 3} more)` : ""}`,
+        { errors: errs, missing: trim.missing, dropped: trim.dropped, can_skip: !!n && !d.skip_missing && validateBatch(trim.batch, visible).length === 0 });
+    }
     st.push(...await researchStatements(c.env, payload, { actor: self(c), actorKind: "person", proposalId: id, treeId: row.tree_id }));
     st.push(...await todoCloseStatements(c, row, payload, d, t, id));
   } else {
