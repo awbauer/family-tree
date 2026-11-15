@@ -5,6 +5,7 @@ import { Link } from "react-router";
 import { useData } from "./data";
 import { PersonLink } from "./lib";
 import type { Tree } from "./types";
+import { whoText } from "./tree";
 import { S } from "../../strings/index.ts";
 
 const C = S.common.citations, O = S.common.ops, X = S.common.diff;
@@ -25,6 +26,7 @@ export function Options({ map, blank }: { map: Record<string, string>; blank?: s
 // ---------------------------------------------------------------- citations
 export function citeLabel(D: Tree, cit: any) {
   if (!cit) return "";
+  if (cit.personal) return C.personal(whoText(D.me ? D.me.principal : null, cit.by), cit.accessed);
   const s = cit.source && (D.sources as any)[cit.source];
   const title = (s && s.title) || cit.title || cit.url || cit.note || cit.source || C.untitled;
   return cit.page ? C.page(title, cit.page) : title;
@@ -49,6 +51,7 @@ export function SourceList({ id, except }: { id: string; except?: string }) {
 export function CitationFields({ prefix = "c" }: { prefix?: string }) {
   return (
     <fieldset className="cite-fields"><legend className="small">{C.fields.legend}</legend>
+      <label className="small cite-personal"><input type="checkbox" name={`${prefix}_personal`} /> {C.fields.personal}</label>
       <input name={`${prefix}_source`} list={`${prefix}-sources`} placeholder={C.fields.source.placeholder} title={C.fields.source.title} style={{ flex: 2, minWidth: 220 }} />
       <SourceList id={`${prefix}-sources`} />
       <input name={`${prefix}_title`} placeholder={C.fields.title} style={{ flex: 2, minWidth: 220 }} />
@@ -65,6 +68,12 @@ export function CitationFields({ prefix = "c" }: { prefix?: string }) {
 /** The citation typed into <CitationFields>, or null when it was left empty. Throws on a bad link. */
 export function readCitation(form: HTMLFormElement, prefix = "c") {
   const v = (k: string) => String(((form.elements.namedItem(`${prefix}_${k}`) as HTMLInputElement | null)?.value) || "").trim();
+  // personal knowledge needs no document; the server records who and when
+  if ((form.elements.namedItem(`${prefix}_personal`) as HTMLInputElement | null)?.checked) {
+    const cit: any = { personal: true, note: v("text") || undefined };
+    if (v("information")) cit.information = v("information");
+    return cit;
+  }
   // a picked catalogued source cites it by id; text typed into the search that matches none is taken as a title
   const source = pickedSource(v("source")) || undefined;
   const title = v("title") || (!source && v("source")) || "";

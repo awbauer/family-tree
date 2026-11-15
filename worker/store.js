@@ -72,7 +72,7 @@ export const newBatchId = () => `b${Date.now().toString(36)}${Math.random().toSt
 /** Apply ops and write them. Throws OpError for bad ops, or a D1 error (guard) on a version conflict. */
 export async function applyAndCommit(env, ops, meta) {
   const { state, versions, mode } = await loadEditable(env);
-  const res = applyOps(state, ops, { actor: meta.actor });
+  const res = applyOps(state, ops, { actor: meta.actor, knower: meta.onBehalfOf || meta.actor });
   if (!res.touched.length) return { batchId: null, touched: [], created: res.created };
   const batchId = meta.batchId || newBatchId();
   const st = commitStatements(env, { ...meta, touched: res.touched, versions, state: res.state, batchId, mode });

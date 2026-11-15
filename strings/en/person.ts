@@ -349,6 +349,7 @@ export const person = {
       detail: "Detail (occupation, etc.)",
       note: "Note",
       removeFact: "remove this fact",
+      knowIt: "I know this myself (recorded as your personal knowledge)",
       nameKind: "Kind",
       nameKinds: { birth: "birth", married: "married", aka: "also known as", immigrant: "immigrant" },
       orNew: "or new:",

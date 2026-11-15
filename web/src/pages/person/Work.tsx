@@ -110,13 +110,21 @@ function EditForm({ kind }: { kind: string }) {
     case "event":
       fields = <>
         <select name="fid" defaultValue=""><option value="">{T.form.newFact}</option>{facts.map((e: any) => <option key={e.fid} value={e.fid}>{T.form.correct} {e.type} {e.date || ""} {e.place || ""}</option>)}</select>
-        <select name="type">{EVENT_TYPES.map((t) => <option key={t}>{t}</option>)}</select><input name="date" placeholder={T.form.date} /><input name="place" placeholder={T.form.place} /><input name="value" placeholder={T.form.detail} /><input name="note" placeholder={T.form.note} /><label className="small"><input type="checkbox" name="remove" /> {T.form.removeFact}</label>
+        <select name="type">{EVENT_TYPES.map((t) => <option key={t}>{t}</option>)}</select><input name="date" placeholder={T.form.date} /><input name="place" placeholder={T.form.place} /><input name="value" placeholder={T.form.detail} /><input name="note" placeholder={T.form.note} /><label className="small"><input type="checkbox" name="personal" /> {T.form.knowIt}</label><label className="small"><input type="checkbox" name="remove" /> {T.form.removeFact}</label>
       </>;
       submit = (f) => {
         const fid = val(f, "fid");
         if (fid && el(f, "remove")!.checked) return add({ op: "event.remove", entity: "person", id, fid });
-        const ev = { type: val(f, "type"), date: val(f, "date") || undefined, place: val(f, "place") || undefined, value: val(f, "value") || undefined, note: val(f, "note") || undefined };
-        if (fid) { const set = Object.fromEntries(Object.entries(ev).filter(([, v]) => v)); return add({ op: "event.update", entity: "person", id, fid, set }); }
+        const ev: any = { type: val(f, "type"), date: val(f, "date") || undefined, place: val(f, "place") || undefined, value: val(f, "value") || undefined, note: val(f, "note") || undefined };
+        // "I know this myself": the fact cites the editor's own knowledge (the server records who and when)
+        const known = el(f, "personal")!.checked ? { personal: true } : null;
+        if (fid) {
+          const set = Object.fromEntries(Object.entries(ev).filter(([, v]) => v));
+          const ops: any[] = Object.keys(set).length ? [{ op: "event.update", entity: "person", id, fid, set }] : [];
+          if (known) ops.push({ op: "citation.add", entity: "person", id, fid, citation: known });
+          return ops.length ? add(...ops) : undefined;
+        }
+        if (known) ev.citations = [known];
         add({ op: "event.add", entity: "person", id, event: ev });
       };
       break;

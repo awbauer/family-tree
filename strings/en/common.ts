@@ -75,12 +75,15 @@ export const common = {
     sourceKinds: { original: "Original record", derivative: "Index or transcript", tree: "Compiled tree", book: "Book", website: "Website" },
     mediaTypes: { photo: "Photo", tombstone: "Headstone", newspaper: "Newspaper", manuscript: "Document or letter", card: "Card", map: "Map", book: "Book page", electronic: "Digital record", film: "Film", fiche: "Microfiche", magazine: "Magazine", audio: "Audio", video: "Video", other: "Other" },
     untitled: "source",
+    /** A personal-knowledge citation: who knew it, and when they entered it. */
+    personal: (who: string, date?: string) => `Personal knowledge (${who}${date ? `, ${date}` : ""})`,
     page: (title: string, page: string) => `${title}, ${page}`,
     meta: { information: (v: string) => `${v} info`, evidence: (v: string) => `${v} evidence`, quality: (q: string | number) => `QUAY ${q}` },
     /** A catalogued source's title, quoted. */
     quoted: (title: string) => `“${title}”`,
     fields: {
       legend: "Source",
+      personal: "I know this myself (personal knowledge): no document needed",
       source: { placeholder: "Search the catalogued sources…", title: "Pick a source already in the tree, or leave empty and describe a new one" },
       title: "…or a record or collection not listed (e.g. Exampleton parish burials)",
       url: "Link to the record (https://…)",
