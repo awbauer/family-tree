@@ -378,6 +378,147 @@
     form.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
+  // ---------------------------------------------------------------- family graph (the parent/child/spouse graph around a person)
+  // The same graph worker/graph.js queries (and GEDCOM X models as Couple and ParentChild relationships), drawn for
+  // one person's neighbourhood. Built from the scoped bundle already in the page, so it shows exactly what this viewer
+  // may see. Solid lines: parent → child. Dashed: couples.
+  X.graph = function (c, id) {
+    const host = document.getElementById("w-graph");
+    if (!host) return;
+    const P = c.P, F = c.F;
+    const st = { up: 2, down: 2, sibs: true, path: new Set(), pathEdges: new Set() };
+    try { Object.assign(st, JSON.parse(sessionStorage.getItem("graphView") || "{}"), { path: new Set(), pathEdges: new Set() }); } catch { /* defaults */ }
+    const uniq = (xs) => [...new Set(xs.filter((x) => x && P[x]))];
+    const birth = (x) => (P[x] && P[x].birth && P[x].birth.sort) || 99999999;
+    const parents = (x) => uniq((P[x].famc || []).flatMap((f) => (F[f] ? [F[f].husband, F[f].wife] : [])));
+    const couples = (x) => (P[x].fams || []).map((f) => F[f]).filter(Boolean);
+    const spouses = (x) => uniq(couples(x).map((f) => (f.husband === x ? f.wife : f.husband)));
+    const children = (x) => uniq(couples(x).flatMap((f) => f.children || []).sort((a, b) => birth(a) - birth(b)));
+    const siblings = (x) => uniq((P[x].famc || []).flatMap((f) => (F[f] ? F[f].children || [] : []))).filter((y) => y !== x).sort((a, b) => birth(a) - birth(b));
+    const edgeKey = (a, b) => [a, b].sort().join("~");
+    const clip = (t, n) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
+
+    /** Pedigree completeness and connectedness: graph facts worth seeing at a glance. */
+    function insights() {
+      const gens = [];
+      let row = [id];
+      for (let g = 1; g <= 5; g++) {
+        row = row.flatMap(parents);
+        gens.push({ g, found: new Set(row).size, possible: 2 ** g });
+        if (!row.length) break;
+      }
+      const seen = new Set([id]), q = [id];
+      while (q.length) { const x = q.shift(); for (const y of [...parents(x), ...children(x), ...spouses(x)]) if (!seen.has(y)) { seen.add(y); q.push(y); } }
+      const total = Object.values(P).filter((p) => !c.isUnknown(p)).length;
+      const names = ["parents", "grandparents", "great-grandparents", "2×great-grandparents", "3×great-grandparents"];
+      return `<p class="small graph-stats">${gens.filter((x) => x.possible).map((x) => `<span title="${esc(names[x.g - 1])} recorded">${x.found} of ${x.possible} ${esc(names[x.g - 1])}</span>`).join(" · ")}<br>
+        Connected to ${seen.size - 1} of ${total - 1} other people in this tree${seen.size < total ? ` <span class="muted">(${total - seen.size} aren't linked to ${esc(P[id].given || P[id].name)} by any parent, child or spouse link)</span>` : ""}.</p>`;
+    }
+
+    function layout() {
+      const rows = new Map(), placed = new Set();
+      const put = (g, xs) => { const r = rows.get(g) || []; for (const x of xs) if (!placed.has(x)) { placed.add(x); r.push(x); } rows.set(g, r); };
+      put(0, [...(st.sibs ? siblings(id) : []), id, ...spouses(id)]);
+      let up = [id];
+      for (let g = 1; g <= st.up; g++) { up = up.flatMap(parents); put(-g, up); up = rows.get(-g) || []; if (!up.length) break; }
+      let down = [id];
+      for (let g = 1; g <= st.down; g++) { down = down.flatMap(children); put(g, down); down = rows.get(g) || []; if (!down.length) break; }
+      // a highlighted path may run through people outside this neighbourhood (in-laws, cousins' lines): bring each in
+      // next to the relative it connects to, one step at a time
+      const genOf = new Map();
+      for (const [g, r] of rows) for (const x of r) genOf.set(x, g);
+      for (let changed = true; changed;) {
+        changed = false;
+        for (const x of st.path) {
+          if (placed.has(x) || !P[x]) continue;
+          const g = parents(x).some((y) => genOf.has(y)) ? genOf.get(parents(x).find((y) => genOf.has(y))) + 1
+            : children(x).some((y) => genOf.has(y)) ? genOf.get(children(x).find((y) => genOf.has(y))) - 1
+            : spouses(x).some((y) => genOf.has(y)) ? genOf.get(spouses(x).find((y) => genOf.has(y))) : null;
+          if (g == null) continue;
+          put(g, [x]); genOf.set(x, g); changed = true;
+        }
+      }
+      return { rows, placed };
+    }
+
+    function draw() {
+      const { rows, placed } = layout();
+      const W = 168, H = 52, GX = 14, GY = 48, PAD = 10;
+      const gens = [...rows.keys()].filter((g) => rows.get(g).length).sort((a, b) => a - b);
+      const maxN = Math.max(...gens.map((g) => rows.get(g).length));
+      const width = Math.max(maxN * (W + GX) - GX + PAD * 2, W + PAD * 2);
+      const pos = new Map();
+      gens.forEach((g, gi) => {
+        const r = rows.get(g), rw = r.length * (W + GX) - GX, x0 = (width - rw) / 2;
+        r.forEach((x, i) => pos.set(x, { x: x0 + i * (W + GX), y: PAD + gi * (H + GY) }));
+      });
+      const height = PAD * 2 + gens.length * (H + GY) - GY;
+      const edges = [];
+      for (const x of placed) {
+        for (const p of parents(x)) if (pos.has(p)) edges.push({ a: p, b: x, kind: "pc" });
+        for (const s of spouses(x)) if (pos.has(s) && x < s) edges.push({ a: x, b: s, kind: "sp" });
+      }
+      const line = (e) => {
+        const A = pos.get(e.a), B = pos.get(e.b), on = st.pathEdges.has(edgeKey(e.a, e.b));
+        if (e.kind === "sp") {
+          const [L, R] = A.x < B.x ? [A, B] : [B, A];
+          const sameRow = L.y === R.y;
+          return `<path class="g-edge g-sp${on ? " on" : ""}" d="M${L.x + W},${L.y + H / 2} ${sameRow ? `L${R.x},${R.y + H / 2}` : `C${L.x + W + 30},${L.y + H / 2} ${R.x - 30},${R.y + H / 2} ${R.x},${R.y + H / 2}`}"/>`;
+        }
+        const x1 = A.x + W / 2, y1 = A.y + H, x2 = B.x + W / 2, y2 = B.y, my = (y1 + y2) / 2;
+        return `<path class="g-edge g-pc${on ? " on" : ""}" d="M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}"/>`;
+      };
+      const node = (x) => {
+        const p = P[x], { x: nx, y: ny } = pos.get(x);
+        const name = clip(p.name, 21);
+        const yrs = p.living ? "living" : [p.birth && p.birth.year, p.death && p.death.year].some(Boolean) ? `${(p.birth && p.birth.year) || "?"}–${(p.death && p.death.year) || "?"}` : "";
+        const cls = ["g-node", x === id ? "focus" : "", st.path.has(x) ? "on" : "", p.status === "verified" ? "verified" : ""].filter(Boolean).join(" ");
+        return `<a href="#/person/${esc(x)}" class="${cls}" style="--bc: var(--b-${esc(p.branch || "other")}, var(--muted))">
+          <title>${esc(p.name)}${p.relation ? ` · ${esc(p.relation)}` : ""}${yrs ? ` · ${esc(yrs)}` : ""}${p.status ? ` · ${esc(p.status)}` : ""}</title>
+          <rect x="${nx}" y="${ny}" width="${W}" height="${H}" rx="9"/><rect class="g-band" x="${nx}" y="${ny}" width="5" height="${H}" rx="2"/>
+          <text x="${nx + 13}" y="${ny + 21}" class="g-name">${esc(name)}</text>
+          <text x="${nx + 13}" y="${ny + 39}" class="g-sub">${esc(clip([yrs, x !== id && p.relation].filter(Boolean).join(" · "), 25))}</text>
+          ${p.status === "verified" ? `<circle class="g-ok" cx="${nx + W - 11}" cy="${ny + 11}" r="4"/>` : ""}</a>`;
+      };
+      const opt = (n, v) => Array.from({ length: n + 1 }, (_, i) => `<option${i === v ? " selected" : ""}>${i}</option>`).join("");
+      host.innerHTML = `<h2>Family graph</h2>${insights()}
+        <div class="filters graph-ctl"><label class="small">Generations up <select data-k="up">${opt(4, st.up)}</select></label>
+          <label class="small">down <select data-k="down">${opt(4, st.down)}</select></label>
+          <label class="small"><input type="checkbox" data-k="sibs"${st.sibs ? " checked" : ""}> siblings</label>
+          ${st.path.size ? `<button class="linklike" data-k="clear">clear the highlighted path</button>` : ""}
+          <span class="small muted g-legend"><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" class="g-edge g-pc"/></svg> parent–child <svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" class="g-edge g-sp"/></svg> couple <span class="g-dot"></span> verified · labels are relative to you</span></div>
+        <div class="graph-wrap"><svg class="family-graph" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="Family graph around ${esc(P[id].name)}">${edges.map(line).join("")}${[...placed].map(node).join("")}</svg></div>
+        ${st.path.size && [...st.path].some((x) => !placed.has(x)) ? `<p class="small muted">Part of the highlighted path is outside this view; show more generations to see all of it.</p>` : ""}`;
+      host.querySelectorAll("select[data-k]").forEach((s) => (s.onchange = () => { st[s.dataset.k] = +s.value; save(); draw(); }));
+      host.querySelector('input[data-k="sibs"]').onchange = (ev) => { st.sibs = ev.target.checked; save(); draw(); };
+      const clr = host.querySelector('[data-k="clear"]');
+      if (clr) clr.onclick = () => { st.path.clear(); st.pathEdges.clear(); draw(); };
+      const focus = host.querySelector(".g-node.focus");
+      if (focus) { const wrap = host.querySelector(".graph-wrap"), r = focus.getBBox(); wrap.scrollLeft = Math.max(0, r.x + r.width / 2 - wrap.clientWidth / 2); }
+    }
+    const save = () => { try { sessionStorage.setItem("graphView", JSON.stringify({ up: st.up, down: st.down, sibs: st.sibs })); } catch { /* fine */ } };
+    X.highlightPath = (path) => {
+      st.path = new Set(path && path.found ? [path.steps.length ? path.steps[0].from : id, ...path.steps.map((s) => s.to)] : []);
+      st.pathEdges = new Set(path && path.found ? path.steps.map((s) => edgeKey(s.from, s.to)) : []);
+      // widen the view so the path fits, within limits
+      const up = path && path.found ? Math.min(4, Math.max(st.up, ...[...st.path].map((x) => depthUp(x)))) : st.up;
+      st.up = up;
+      draw();
+    };
+    function depthUp(x) { // how many generations above `id` this person sits, if they're a direct ancestor
+      let row = [id];
+      for (let g = 1; g <= 4; g++) { row = row.flatMap(parents); if (row.includes(x)) return g; }
+      return 0;
+    }
+    draw();
+  };
+  /** A relationship path as a chain: A —father→ B —son→ C. */
+  X.pathChain = (c, path, from) => {
+    if (!path || !path.found || !path.steps.length) return "";
+    const chip = (x) => `<a class="chip" href="#/person/${esc(x)}">${esc(c.P[x] ? c.P[x].name : x)}</a>`;
+    return `<div class="path-chain">${chip(path.steps[0].from || from)}${path.steps.map((s) => `<span class="path-rel">${esc(s.rel || "")} →</span>${chip(s.to)}`).join("")}</div>`;
+  };
+
   // ---------------------------------------------------------------- next steps (to-dos)
   const STATUS_TXT = { open: "Open", in_progress: "In progress", needs_review: "Needs review", done: "Done", wont_do: "Won't do" };
   X.todos = function (c, id, ctx) {

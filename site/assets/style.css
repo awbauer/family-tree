@@ -347,3 +347,28 @@ dialog.lightbox img { max-width: 100%; max-height: 62vh; display: block; margin:
 .cite-fields input { flex: 1 1 200px; }
 .lb-edit[hidden], form[hidden] { display: none; }
 .sources-list .ev { display: block; font-size: .78rem; color: var(--muted); }
+
+/* family graph (assets/person.js) */
+.graph-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--paper-2); }
+.family-graph { display: block; margin: 0 auto; font-family: inherit; }
+.family-graph .g-edge { fill: none; stroke: var(--muted); stroke-width: 1.4; opacity: .7; }
+.family-graph .g-sp, .g-legend .g-sp { stroke-dasharray: 4 4; }
+.family-graph .g-edge.on { stroke: var(--accent); stroke-width: 3; opacity: 1; }
+.family-graph .g-node rect:first-of-type { fill: var(--card); stroke: var(--line); stroke-width: 1.2; }
+.family-graph .g-node:hover rect:first-of-type, .family-graph .g-node:focus rect:first-of-type { stroke: var(--accent); }
+.family-graph .g-node.focus rect:first-of-type { stroke: var(--ink); stroke-width: 2.5; }
+.family-graph .g-node.on rect:first-of-type { stroke: var(--accent); stroke-width: 3; }
+.family-graph .g-band { fill: var(--bc, var(--muted)); }
+.family-graph .g-name { fill: var(--ink); font-size: 13px; font-weight: 600; }
+.family-graph .g-sub { fill: var(--muted); font-size: 11px; }
+.family-graph .g-ok, .g-dot { fill: var(--ok); }
+.g-legend { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.g-legend .g-edge { stroke: var(--muted); stroke-width: 1.6; }
+.g-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.graph-ctl { margin: 6px 0 10px; align-items: center; }
+.graph-ctl select { font: inherit; font-size: .85rem; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+.graph-stats span { white-space: nowrap; }
+.path-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
+.path-rel { font-size: .8rem; color: var(--muted); }
+.person-layout > * { min-width: 0; } /* let wide content (the family graph) scroll inside its card instead of widening the page */
+.graph-wrap { max-width: 100%; }
