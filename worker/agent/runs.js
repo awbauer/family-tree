@@ -55,6 +55,12 @@ export async function logRun(env, id, ...lines) {
   await env.DB.prepare("UPDATE agent_runs SET log = ? WHERE id = ?").bind(J(log.slice(-200)), id).run();
 }
 
+/** Note something the run read or searched (prov:used): {kind: "search"|"page", url?, query?}. */
+export async function recordUsed(env, id, item) {
+  const entry = { ...item, at: now() };
+  await env.DB.prepare("UPDATE agent_runs SET used = json_insert(COALESCE(used, '[]'), '$[#]', json(?)) WHERE id = ?").bind(J(entry), id).run();
+}
+
 /** Record a response's token use on the run and in today's budget. */
 export async function recordRunUsage(env, id, { input, output }, model) {
   await env.DB.batch([
