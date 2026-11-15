@@ -19,6 +19,8 @@ Living people are in the real data. It is only ever served by the Worker, behind
 2. Never put real names, GEDCOM IDs from the real tree, the D1 `database_id`, the Access AUD tag or the team domain into a tracked file, commit message, branch name or PR text. Examples and tests use the fictional family in `example/`.
 3. Before **every** commit: run `git status`, read the list, and confirm nothing private is staged. The pre-commit hook (`tools/check_privacy.py`) also blocks private paths, Cloudflare IDs and full names from the private GEDCOM. **Never bypass it with `--no-verify`.** If it fires, fix the change.
 4. Before opening or editing a PR, run the PR title and body through it: `python3 tools/check_privacy.py --file -` (pipe the text in).
+   - Now and then, and always after a big change, run `python3 tools/check_privacy.py --audit`. It scans every tracked file, including what's already committed.
+   - The hook catches names, surnames, IDs and specific places from the private data, not everything. **Test data and examples are fictional**: never reuse a detail from the owner's real tree or from your conversation with them (a cemetery, a street, a date a photo was taken, an occupation), even one that seems harmless, even in a test.
 5. If the hooks aren't active (`git config core.hooksPath` is not `.githooks`), run `git config core.hooksPath .githooks` first. `npm install` sets it.
 6. Don't publish details of **living** people (addresses, phone numbers, employers, photos with location data) anywhere, including in findings. Research is about the dead; the living are context only.
 

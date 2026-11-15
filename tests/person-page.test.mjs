@@ -75,11 +75,11 @@ test("photos: attach with details, choose the main photo, update, and see it in 
   assert.equal(r.status, 200, JSON.stringify(r.data));
   let list = (await tree()).research.media[pid];
   assert.deepEqual(list.filter((m) => m.portrait).map((m) => m.file), ["uploads/2026-11/a.jpg"], "exactly one main photo");
-  r = await edit({ ops: [{ op: "media.update", person: pid, file: "uploads/2026-11/b.jpg", set: { caption: "Headstone, Kozma St", place: "", note: "Photographed 2024" } }] });
+  r = await edit({ ops: [{ op: "media.update", person: pid, file: "uploads/2026-11/b.jpg", set: { caption: "Headstone, Example Road", place: "", note: "Photographed by a cousin" } }] });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   list = (await tree()).research.media[pid];
   const b = list.find((m) => m.file.endsWith("b.jpg"));
-  assert.equal(b.caption, "Headstone, Kozma St");
+  assert.equal(b.caption, "Headstone, Example Road");
   assert.equal(b.place, undefined, "an emptied field is removed");
   assert.equal(b.type, "tombstone");
   const h = (await call("GET", `/api/history?tree=all&id=${pid}`, { as: EDITOR })).data.history;

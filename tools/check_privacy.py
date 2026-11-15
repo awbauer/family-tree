@@ -15,6 +15,11 @@ Fails (exit 1) if:
     or as a lowercase branch-style key ("vandyke"), except surnames in the example family and
     common words listed in COMMON_WORDS (repo-owner usernames inside URLs don't match: "@jsmith" isn't "Smith")
   - ...or a person/family ID from your private GEDCOM, or a prefix of one ("I12…" when your IDs look like I123456)
+  - ...or a specific place from your private data: words from the GEDCOM's places, and the proper nouns in
+    research.json / places.json (places, photo captions, notes). Words the example family uses, and words already
+    in the public repo, don't count, so ordinary words don't trip it.
+  - python3 tools/check_privacy.py --audit   scans every tracked file (not just staged changes), and doesn't excuse
+    place words that are already in the repo: run it to find anything that slipped in earlier.
 
 Enable the hooks once per clone:  git config core.hooksPath .githooks   (npm install does this)
 """
@@ -61,7 +66,14 @@ def names_in(ged):
 
 
 COMMON_WORDS = {"daily", "young", "king", "white", "black", "green", "brown", "long", "short", "little", "rose",
-                "may", "june", "april", "street", "church", "hall", "wood", "hill", "field", "page", "case", "mark"}
+                "may", "june", "april", "street", "church", "hall", "wood", "hill", "field", "page", "case", "mark",
+                # generic place words and countries: not identifying on their own
+                "local", "city", "county", "town", "township", "village", "parish", "district", "province", "state",
+                "cemetery", "graveyard", "hospital", "home", "road", "avenue", "united", "states", "america", "europe",
+                "canada", "mexico", "england", "scotland", "wales", "ireland", "britain", "france", "germany", "italy",
+                "spain", "portugal", "austria", "hungary", "poland", "russia", "ukraine", "sweden", "norway",
+                "denmark", "netherlands", "belgium", "switzerland", "greece", "slovakia", "czechia", "romania",
+                "serbia", "croatia", "lithuania", "latvia", "finland", "australia", "unknown"}
 
 
 def surnames_in(ged):
@@ -98,8 +110,48 @@ def private_names():
     return names
 
 
-def scan_text(text, where, names_re):
+def _words(text, n=4):
+    return set(re.findall(r"[A-ZÀ-Ž][\w\u00C0-\u017F'-]{%d,}" % (n - 1), text))
+
+
+def private_places(baseline=True):
+    """Specific place words from the private data (cemetery, street, town names…)."""
+    fd = ROOT / "family-data"
+    text = ""
+    for f in list(fd.glob("*.ged")) + list(fd.glob("*.json")):
+        try:
+            text += f.read_text(encoding="utf-8-sig", errors="replace") + "\n"
+        except OSError:
+            pass
+    words = set()
+    for m in re.finditer(r"^\s*\d PLAC (.+)$", text, re.M):
+        words |= _words(m.group(1))
+    for m in re.finditer(r'"(?:place|location|caption|address|cemetery|plac)"\s*:\s*"([^"]{3,400})"', text):
+        words |= _words(m.group(1), 5)
+    ex = " ".join(f.read_text(encoding="utf-8", errors="replace") for f in (ROOT / "example").glob("*")).lower()
+    words = {w for w in words if w.lower() not in ex and w.lower() not in COMMON_WORDS and w not in SURNAMES}
+    if baseline:  # already-public words (code, docs) aren't news; --audit skips this so earlier slips still show
+        try:
+            tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True).stdout.split()
+            pub = set()
+            for f in tracked:
+                if f.endswith("package-lock.json") or CONTENT_EXEMPT.search(f):
+                    continue
+                try:
+                    pub |= _words((ROOT / f).read_text(encoding="utf-8", errors="ignore"))
+                except OSError:
+                    pass
+            words -= pub
+        except Exception:
+            pass
+    return words
+
+
+def scan_text(text, where, names_re, places=None):
     problems = []
+    for w in sorted(places if places is not None else PLACES):
+        if re.search(r"(?<![\w@/.-])" + re.escape(w) + r"(?!\w)", text):
+            problems.append(f"{where}: a specific place or detail from your private data: {w!r}")
     for sn in SURNAMES:
         cap = re.compile(r"(?<![\w@/.-])" + re.escape(sn) + r"(?!\w)")          # "Van Dyke" as written
         key = re.compile(r"(?<![\w@/.-])" + re.escape(re.sub(r"\W", "", sn).lower()) + r"(?!\w)")  # "vandyke"
@@ -144,10 +196,29 @@ def staged():
 
 SURNAMES = private_surnames()
 IDS = private_ids()
+PLACES = private_places()
+
+
+def audit():
+    """Every tracked file, with no allowance for words already in the repo."""
+    places = private_places(baseline=False)
+    nre = names_regex()
+    problems = []
+    for f in subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True).stdout.split():
+        if f.endswith("package-lock.json") or CONTENT_EXEMPT.search(f):
+            continue
+        try:
+            text = (ROOT / f).read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        problems += scan_text(text, f, nre, places)
+    return problems
 
 
 def main(argv):
-    if "--file" in argv:
+    if "--audit" in argv:
+        problems = audit()
+    elif "--file" in argv:
         src = argv[argv.index("--file") + 1]
         text = sys.stdin.read() if src == "-" else Path(src).read_text()
         problems = scan_text(text, "text", names_regex())
