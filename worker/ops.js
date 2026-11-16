@@ -401,6 +401,13 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
       }
       case "media.detach": {
         const pid = P(o.person, i);
+        if (o.object) {
+          // a media object imported from GEDCOM (O…), linked on the person record rather than uploaded
+          const p = touch("person", pid);
+          if (!(p.media || []).includes(o.object)) throw new OpError(M.noMedia(o.object), i);
+          p.media = p.media.filter((x) => x !== o.object);
+          break;
+        }
         touch("media_map", pid);
         S.media_map[pid] = (S.media_map[pid] || []).filter((m) => m.file !== o.file);
         if (!S.media_map[pid].length) delete S.media_map[pid];
