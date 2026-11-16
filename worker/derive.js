@@ -696,7 +696,7 @@ export function derive(input, { today } = {}) {
     const ovLiving = get(get(overrides, pid, {}), "living");
     if (ovLiving !== null) p.living = ovLiving;
   }
-  // No dates of their own: estimate a birth year from close relatives (parent + 25, spouse or sibling the same,
+  // No birth year of their own: estimate one from close relatives (parent + 25, spouse or sibling the same,
   // child − 25; the youngest estimate wins) and treat them as living when it falls within the last 100 years.
   const est = {};
   for (const [pid, p] of Object.entries(P)) if (p.birth && p.birth.year) est[pid] = p.birth.year;
@@ -721,9 +721,13 @@ export function derive(input, { today } = {}) {
     }
     Object.assign(est, next);
   }
+  // The estimate decides both ways for anyone without a birth year or a death: a 1940s emigration alone doesn't make
+  // someone whose spouse was born in 1907 living. A dated record from the last 30 years still counts as alive.
   for (const [pid, p] of Object.entries(P)) {
-    if (!p.livingUnknown || get(get(overrides, pid, {}), "living") !== null) continue;
-    if (has(est, pid) && est[pid] > thisYear - 100) p.living = true;
+    if ((p.birth && p.birth.year) || p.death || truthy(get(p, "deceased")) || get(get(overrides, pid, {}), "living") !== null) continue;
+    if (!has(est, pid)) continue;
+    const recent = p.events.some((e) => e.pdate && e.pdate.year && e.pdate.year >= thisYear - 30);
+    p.living = est[pid] > thisYear - 100 || recent;
   }
 
   const issues = checkIssues(P, F, research, S);

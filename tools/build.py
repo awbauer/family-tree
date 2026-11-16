@@ -275,7 +275,7 @@ def main(ged_path, data_dir, out_dir, raw_out=None):
                     issue(pid, "info", "married-surname",
                           f"Recorded only under her husband's surname ({own[0]}). Add her maiden name, or leave the surname blank if it isn't known.")
 
-    # No dates of their own: estimate a birth year from close relatives (parent + 25, spouse or sibling the same,
+    # No birth year of their own: estimate one from close relatives (parent + 25, spouse or sibling the same,
     # child - 25; the youngest estimate wins) and treat them as living when it falls within the last 100 years.
     est = {pid: p["birth"]["year"] for pid, p in P.items() if p["birth"] and p["birth"]["year"]}
     for _ in range(3):
@@ -295,11 +295,14 @@ def main(ged_path, data_dir, out_dir, raw_out=None):
             if c:
                 nxt[pid] = max(c)
         est.update(nxt)
+    # The estimate decides both ways for anyone without a birth year or a death: a 1940s emigration alone doesn't make
+    # someone whose spouse was born in 1907 living. A dated record from the last 30 years still counts as alive.
     for pid, p in P.items():
-        if not p.get("livingUnknown") or overrides.get(pid, {}).get("living") is not None:
+        if (p["birth"] and p["birth"]["year"]) or p["death"] or p.get("deceased") \
+                or overrides.get(pid, {}).get("living") is not None or pid not in est:
             continue
-        if pid in est and est[pid] > this_year - 100:
-            p["living"] = True
+        recent = any(e.get("pdate") and e["pdate"].get("year") and e["pdate"]["year"] >= this_year - 30 for e in p["events"])
+        p["living"] = est[pid] > this_year - 100 or recent
 
     # ---------- family checks ----------
     for fid, f in F.items():
