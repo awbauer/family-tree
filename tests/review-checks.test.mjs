@@ -45,6 +45,21 @@ test("an undated person is living when close relatives put their birth within th
   assert.equal(b.people.OVR.living, false);
 });
 
+test("without a birth year, the relatives' estimate also decides who is not living", () => {
+  const b = run([
+    person("H", "Example", "Sample", "M", { famc: ["F1"], events: [born("1990")] }),
+    person("FA", "Older", "Sample", "M", { fams: ["F1"], events: [born("1960")] }),
+    person("EM", "Emigrant", "Sample", "M", { fams: ["F2"], events: [{ type: "Departure", date: "abt 1942" }] }), // wife b. 1907
+    person("WI", "Wife", "Sample", "F", { fams: ["F2"], events: [born("1907")] }),
+    person("RC", "Recent", "Sample", "F", { fams: ["F3"], events: [{ type: "Residence", date: "2010" }] }),     // husband b. 1920
+    person("HU", "Husband", "Sample", "M", { fams: ["F3"], events: [born("1920")] }),
+    person("YG", "Younger", "Sample", "M", { famc: ["F1"], events: [{ type: "Residence", date: "1940" }] }),   // child of a 1960 birth
+  ], [family("F1", "FA", null, ["H", "YG"]), family("F2", "EM", "WI", []), family("F3", "HU", "RC", [])]);
+  assert.equal(b.people.EM.living, false, "a 1940s record alone no longer makes him living");
+  assert.equal(b.people.RC.living, true, "a record from the last 30 years still counts");
+  assert.equal(b.people.YG.living, true);
+});
+
 test("children of a family with no parent recorded are still siblings", () => {
   const b = run([
     person("H", "Example", "Sample", "M", { famc: ["F1"], events: [born("1990")] }),
