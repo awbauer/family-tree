@@ -45,7 +45,7 @@ const INSTRUCTIONS = `This server is a private family-history database. Everythi
 How to work:
 - Include the returned page_url when referring to a record so the member can open it in the site.
 - Start with whoami (which trees you can use and your role in each) and tree_overview. Every tool takes an optional "tree" (a tree id from whoami); without it, the member's first tree is used.
-- People are I… ids, families F…, sources S…. Events and names carry a fact id ("fid": e1, n1) that edits, reviews and citations point at. Find people with search_people, then get_person.
+- People are I… ids, families F…, sources S…. Events and names carry a fact id ("fid": e1, n1) that edits, reviews and citations point at. Find people with search_people, then get_person. For a word or phrase anywhere (a ship, a street, an employer, an uncertain spelling), use search_text.
 - A person shown as {private: true} is a name only in this member's view: use them to walk the family, never research or change them.
 - Never invent records. Cite only what you actually retrieved and read; a guess is a to-do, not a finding. Negative searches count: log them.
 - Members suggest (suggest_research, suggest_edit); editors review suggestions and edit directly (edit_tree), always with a reason and sources. Use preview_edit to show a change before making it. Never delete people: merge duplicates with person.merge.
@@ -110,7 +110,8 @@ tool("tree_overview", { title: "Tree overview", description: "Counts, years cove
 tool("search_people", { title: "Search people", description: "Find people by name and filters (birth/death year ranges, a place anywhere in their events, branch, sex, living, direct line, research status). Sorted by birth.",
   props: { query: str("name words, any order, accents ignored"), surname: str("exact surname (any of their names)"), given: str("given name contains"), born_from: int("birth year ≥"), born_to: int("birth year ≤"),
     died_from: int("death year ≥"), died_to: int("death year ≤"), place: str("any event place contains"), branch: str("branch key"), sex: en(["M", "F", "U"], "sex"), living: bool("living or not"),
-    direct_line: bool("only the home person's direct line"), status: en(["unverified", "partly-verified", "verified", "disputed"], "research status"), limit: int("max results (default 25, max 200)"), offset: int("skip this many") },
+    direct_line: bool("only the home person's direct line"), status: en(["unverified", "partly-verified", "verified", "disputed"], "research status"),
+    sounds_like: bool("let query words also match names that sound alike (Daitch–Mokotoff) or are spelled one or two letters differently"), limit: int("max results (default 25, max 200)"), offset: int("skip this many") },
   run: async (x, a) => V.search(await x.bundle(), a) });
 tool("get_person", { title: "Get person", description: "One person in full: names and events with fact ids, citations and review status, notes, photos, AI profile, parents' and own families, findings, searches already logged, to-dos, stories, data issues, possible duplicates.",
   props: { id: str("person id, e.g. I12"), include_comments: bool("also the discussion comments on this person") }, required: ["id"],
@@ -137,6 +138,10 @@ tool("get_timeline", { title: "Life timeline", description: "A person's life in 
 tool("search_events", { title: "Search events", description: "Events across the whole tree (people and families) by type (Birth, Death, Marriage, Residence, Census, Immigration, Military, Occupation…), place, year range and text in value or note. Good for \"who lived in X in 1900\" or \"every census entry\".",
   props: { type: str("event type, exact (case ignored)"), place: str("place contains"), year_from: int("year ≥"), year_to: int("year ≤"), text: str("value/note contains"), limit: int("max (default 50, max 500)") },
   run: async (x, a) => V.searchEvents(await x.bundle(), a) });
+tool("search_text", { title: "Search everything", description: "Full-text search across everything your view shows: names (with spelling variants and sound-alikes, labelled), facts, places, notes, citations and transcriptions, stories, findings, to-dos and sources. Every word must match the same record; \"quote\" a phrase. Each result says where it matched with a snippet. Good for \"who worked at the mill\", \"everything citing a ship\" or a name you're not sure how to spell.",
+  props: { query: str("words or \"a phrase\"; accents ignored"), kinds: arr(en(["person", "story", "finding", "todo", "source"], "record kind"), "only these kinds"),
+    variants: bool("match name variants and sound-alikes (default true)"), limit: int("max results (default 25, max 100)"), offset: int("skip this many") }, required: ["query"],
+  run: async (x, a) => V.searchText(await x.bundle(), a) });
 tool("list_surnames", { title: "Surnames", description: "Every surname with how many people carry it, the years it spans, its branches and its most common places.",
   props: { min_count: int("only surnames with at least this many people") }, run: async (x, a) => V.surnames(await x.bundle(), a) });
 tool("list_places", { title: "Places", description: "Places in the tree with event and people counts, years, event types, and the standardized name and coordinates where known.",

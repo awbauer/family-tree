@@ -22,7 +22,7 @@ const personPath = (person) => `/person/${enc(idOf(person))}`;
 const personSection = (person, section) => [personPath(person), { section }];
 
 const sections = {
-  search_people: "/people", list_surnames: "/people", list_places: "/map",
+  search_people: "/people", search_text: "/search", list_surnames: "/people", list_places: "/map",
   search_events: "/timeline", list_data_issues: "/research/review", list_duplicates: "/research/review",
   list_sources: "/sources", list_stories: "/stories", list_findings: "/research/findings",
   list_research_log: "/research/overview", list_todos: "/research/todo", get_my_queue: "/research/todo",
@@ -125,6 +125,16 @@ export async function recordResult(x, tool, args, output) {
       main = card(url("/people", args.query ? { q: args.query } : undefined), tool.title);
       set("people", person);
       break;
+    case "search_text": {
+      main = card(url("/search", { q: args.query }), tool.title);
+      const said = (h) => (h.matched || []).map((m) => m.text).join(" … ");
+      set("results", (h) => h.kind === "person" ? card(url(personPath(h.id)), h.title, null, said(h))
+        : h.kind === "story" ? card(url(`/story/${enc(h.id)}`), h.title, null, said(h))
+        : h.kind === "finding" ? finding({ id: h.id, person: h.person, claim: h.title, finding: said(h) })
+        : h.kind === "todo" ? todo({ id: h.id, task: h.title, where: said(h) })
+        : source({ id: h.id, title: h.title, note: said(h) }));
+      break;
+    }
     case "get_timeline":
       main = person(data.person);
       set("events", (e) => event(e, e.person || data.person, e.whose === "self"));

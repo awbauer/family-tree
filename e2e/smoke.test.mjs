@@ -48,6 +48,21 @@ test("people list and search", async () => {
   await page.waitForFunction(() => document.querySelector("#search-results").innerText.includes("Eva Novák"), null, { timeout: 5000 });
   await page.fill("#search", "");
 });
+test("search: name variants in the header, everything on the search page", async () => {
+  await visit("#/", ["Hartley"]);
+  await page.fill("#search", "Hartlee");
+  await page.waitForFunction(() => /Daniel James Hartley/.test(document.querySelector("#search-results").innerText), null, { timeout: 5000 });
+  await page.press("#search", "ArrowDown");
+  for (let i = 0; i < 12; i++) await page.press("#search", "ArrowDown"); // the last row searches every record
+  await page.press("#search", "Enter");
+  await page.waitForFunction(() => location.hash.startsWith("#/search?q=Hartlee"), null, { timeout: 5000 });
+  await visit("#/search?q=portland", ["Daniel James Hartley", "Portland"]);
+  assert.ok(await page.locator(".search-hits mark").count() >= 1);
+  await visit("#/search?q=England", ["Eva comes to England"]);
+  await page.getByRole("button", { name: /^Stories/ }).click();
+  await page.waitForFunction(() => location.hash.includes("kind=story") && ![...document.querySelectorAll(".search-hits .badge")].some((b) => b.textContent === "Person"), null, { timeout: 5000 });
+  assert.ok((await page.locator(".search-hits > li").count()) >= 1);
+});
 test("person page", async () => {
   await visit("#/person/I5", ["Eva Novák", "Life events", "Eva comes to England"]);
   assert.match(await title(), /Eva Novák/);
