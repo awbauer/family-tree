@@ -31,7 +31,7 @@ IDs: people `I…`, families `F…`, sources `S…`, media `O…` (new ones get 
 | `media.attach` | `person`, `file`, `caption?`, `type?`, `date?`, `place?`, `note?`, `source?`, `portrait?` | `file` is an R2 key already uploaded. `portrait: true` makes it the main photo |
 | `media.update` | `person`, `file`, `set: {caption?, type?, date?, place?, note?, source?}` | An empty value removes the field |
 | `media.set_primary` | `person`, `file` | The person's main photo (their icon); exactly one per person. Exported as GEDCOM `_PRIM Y` |
-| `media.detach` | `person`, `file` | |
+| `media.detach` | `person`, `file` or `object` | `object` unlinks a media object imported from GEDCOM (`O…`) from the person; the object itself stays |
 
 Every op list comes with `reason` (required for direct edits) and optional `sources: [{title, url?, note?}]`. A direct edit or an edit suggestion may also carry `resolves: [findingId]`. Those findings are marked resolved in the same change, so undoing the change reopens them. `POST /api/edit/preview` returns the before/after of every record an op list would touch, without saving; the app uses it to show diffs.
 

@@ -89,6 +89,17 @@ test("photos: attach with details, choose the main photo, update, and see it in 
   assert.ok(Array.isArray(ent.after) && ent.after.every((m) => m.file), "only this person's photos, as before/after lists");
 });
 
+test("media.detach with object unlinks an imported media item from one person only", () => {
+  const mk = (id) => ({ id, names: [{ given: "Example", surname: "Sample", fid: "n1" }], sex: "M", famc: [], fams: [], events: [], notes: [], citations: [], media: ["O1", "O2"] });
+  const state = { people: { A: mk("A"), B: mk("B") }, families: {}, sources: {}, media_map: {}, aliases: {} };
+  const r = applyOps(state, [{ op: "media.detach", person: "A", object: "O1" }], { actor: EDITOR });
+  assert.deepEqual(r.state.people.A.media, ["O2"]);
+  assert.deepEqual(r.state.people.B.media, ["O1", "O2"], "another person's link is untouched");
+  assert.deepEqual(state.people.A.media, ["O1", "O2"], "the input state isn't mutated");
+  assert.deepEqual(r.touched.map((t) => [t.type, t.id]), [["person", "A"]]);
+  assert.throws(() => applyOps(state, [{ op: "media.detach", person: "A", object: "O9" }], { actor: EDITOR }), OpError);
+});
+
 test("preview shows exactly what an edit would change, without saving it", async () => {
   const before = (await person()).events.length;
   const r = await call("POST", "/api/edit/preview", { as: MEMBER, body: { tree: "all", ops: [{ op: "event.add", entity: "person", id: pid, event: { type: "Residence", date: "1939", place: "Leeds" } }] } });
