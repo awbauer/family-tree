@@ -339,6 +339,45 @@ test("member reports are private until approved and cannot become a portrait", a
   assert.equal((await tool("get_report", { file }, MEMBER)).data.markdown, markdown);
 });
 
+test("one report or attachment can be linked to several people, and unlinked from one only", async () => {
+  const markdown = "# Shared example report\n\nAbout two people.";
+  const up = await tool("add_report", { person: "I1", also: ["I2"], name: "Shared example.md", markdown }, EDITOR);
+  assert.equal(up.error, false, JSON.stringify(up.data));
+  const { file } = up.data;
+  assert.deepEqual(up.data.people, ["I1", "I2"]);
+  const onI1 = (await tool("list_attachments", { person: "I1" }, EDITOR)).data.attachments.find((m) => m.file === file);
+  assert.deepEqual(onI1.also_linked_to.map((x) => x.id), ["I2"]);
+  assert.ok((await tool("list_attachments", { person: "I2" }, EDITOR)).data.attachments.some((m) => m.file === file));
+  // an editor links the existing report to a third person
+  const linked = await tool("link_document", { file, people: ["I3"] }, EDITOR);
+  assert.equal(linked.error, false, JSON.stringify(linked.data));
+  const onI3 = (await tool("list_attachments", { person: "I3" }, EDITOR)).data.attachments.find((m) => m.file === file);
+  assert.equal(onI3.caption, "Shared example.md");
+  assert.deepEqual(onI3.also_linked_to.map((x) => x.id).sort(), ["I1", "I2"]);
+  // unlinking from one person leaves the others, and the file stays readable
+  const off = await tool("edit_tree", { ops: [{ op: "media.detach", person: "I1", file }], reason: "test" }, EDITOR);
+  assert.equal(off.error, false, JSON.stringify(off.data));
+  assert.ok(!(await tool("list_attachments", { person: "I1" }, EDITOR)).data.attachments.some((m) => m.file === file));
+  assert.equal((await tool("get_report", { file }, EDITOR)).data.markdown, markdown);
+  // a member can suggest linking a shared document they can see; it waits for review
+  const one = (await call("GET", "/api/tree?tree=one", { as: MEMBER })).data.people;
+  const [a, b] = Object.values(one).filter((p) => !p.private && !p.living).map((p) => p.id);
+  const doc = await tool("add_attachment", { person: a, name: "Example letter.txt", data_base64: Buffer.from("letter").toString("base64"), tree: "one" }, OWNER);
+  assert.equal(doc.error, false, JSON.stringify(doc.data));
+  const suggested = await tool("link_document", { file: doc.data.file, people: [b], tree: "one" }, MEMBER);
+  assert.equal(suggested.error, false, JSON.stringify(suggested.data));
+  assert.ok(suggested.data.proposal, "members suggest");
+  assert.ok(!(await tool("list_attachments", { person: b, tree: "one" }, MEMBER)).data.attachments.some((m) => m.file === doc.data.file));
+  const ok = await tool("review_suggestion", { id: suggested.data.proposal, decision: "approve", tree: "one" });
+  assert.equal(ok.error, false, JSON.stringify(ok.data));
+  assert.ok((await tool("list_attachments", { person: b, tree: "one" }, MEMBER)).data.attachments.some((m) => m.file === doc.data.file), "approved link appears");
+  // a file nobody in this view has attached can't be linked by someone else
+  assert.equal((await tool("link_document", { file: `attachments/${crypto.randomUUID()}`, people: ["I3"] }, EDITOR)).error, true);
+  // the upload endpoint takes several people too, and refuses people outside the view
+  const bad = await tool("add_report", { person: "I1", also: ["I-not-there"], name: "Example.md", markdown }, EDITOR);
+  assert.equal(bad.error, true);
+});
+
 test("MCP Apps resource is available and record cards preserve the selected tree", async () => {
   const list = await rpc("tools/list", {}, { as: MEMBER });
   const template = list.body.result.tools.find((item) => item.name === "get_person")._meta.ui.resourceUri;

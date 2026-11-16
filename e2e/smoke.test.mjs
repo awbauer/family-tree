@@ -151,6 +151,28 @@ test("person attachments download and Markdown reports open in the viewer", asyn
   assert.deepEqual(errors, []);
 });
 
+test("one attachment can be uploaded to several people and linked to more later", async () => {
+  await visit("#/person/I4", ["Attachments", "Add a report"]);
+  await page.getByRole("button", { name: "Add an attachment" }).click();
+  await page.getByLabel("File", { exact: true }).setInputFiles({ name: "shared.txt", mimeType: "text/plain", buffer: Buffer.from("shared") });
+  const also = page.locator("#w-attachments input[name='also-attachment']");
+  const option = await page.locator("#also-attachment-people option").evaluateAll((os) => os.map((o) => o.value).find((v) => /\(I3\)$/.test(v)));
+  await also.fill(option);
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const item = page.locator(".attachment-list li").filter({ hasText: "shared.txt" });
+  await item.waitFor();
+  await item.getByText("Also on:").waitFor();
+  await item.getByRole("button", { name: "Link to more people" }).click();
+  const more = await page.locator("datalist[id^='link-'] option").evaluateAll((os) => os.map((o) => o.value).find((v) => /\(I2\)$/.test(v)));
+  await item.locator("input[name^='link-']").fill(more);
+  await item.getByRole("button", { name: "Link", exact: true }).click();
+  for (const other of ["I3", "I2"]) {
+    await visit(`#/person/${other}`, ["Attachments"]);
+    await page.locator(".attachment-list li").filter({ hasText: "shared.txt" }).getByText("Also on:").waitFor();
+  }
+  assert.deepEqual(errors, []);
+});
+
 test("MCP cards render in a sandbox and open a record in the selected tree", async () => {
   const request = page.request;
   const mcp = async (method, params) => {
