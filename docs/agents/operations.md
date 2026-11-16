@@ -231,6 +231,7 @@ npm run dev
 
 - `npm run build:agents` builds the agents into `agents/dist/agents_bundle` (installing `agents/`'s dependencies the first time). `npm run dev` runs the whole Worker locally in workerd from `wrangler.local.jsonc`, but its AI binding calls the real Cloudflare account, so model calls cost money even in development.
 - The site-side logic is tested in `tests/agents.test.mjs` against the example family, with a fake `env.AGENTS`.
+- Run `npm ci --prefix agents` and then `npm run eval:agents` for scripted evals. These run the production tool schemas, handlers, and lifecycle hooks for all eight agents against the fictional example database. They assert evidence and review boundaries and whether the tools accept, reject, or persist scripted actions. Flue and provider calls are stubbed, so this suite measures tool behavior rather than model-generated answers or tool choice. It needs no credentials or model calls.
 - Version pins, with their reasons in `agents/package.json`: Flue 2.3.0 needs Pi 1.4.x, and the Agents SDK web tools need `agents` ≥ 0.28, which Flue accepts as a project-level override. Remove the pins when Flue catches up.
 
 ## Page assistant (chat on every page)

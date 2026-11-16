@@ -455,3 +455,41 @@ test("malformed RPC messages and tool notifications cannot perform writes", asyn
   const todos = (await tool("list_todos")).data.todos;
   assert.ok(!todos.some((todo) => todo.task === "Example notification task"));
 });
+
+test("every advertised tool rejects input outside its published top-level schema", async (t) => {
+  const { tools } = (await rpc("tools/list", {}, { as: OWNER })).body.result;
+  assert.equal(new Set(tools.map(({ name }) => name)).size, tools.length);
+  for (const { name, inputSchema } of tools) {
+    await t.test(name, async () => {
+      assert.equal(inputSchema.type, "object");
+      const required = inputSchema.required || [];
+      const present = Object.fromEntries(required.map((field) => [field, null]));
+      const bad = await tool(name, { unexpected_test_field: true, ...present });
+      assert.equal(bad.error, true);
+      assert.match(bad.data, /unknown field "unexpected_test_field"/);
+      for (const field of required) {
+        assert.ok(Object.hasOwn(inputSchema.properties, field));
+      }
+      if (required.length) {
+        const missing = await tool(name);
+        assert.equal(missing.error, true);
+        assert.ok(missing.data.includes(`${required[0]} is required`));
+      }
+    });
+  }
+});
+
+test("every tool omitted for a role is also denied when called directly", async () => {
+  const listed = async (as) => (await rpc("tools/list", {}, { as })).body.result.tools.map(({ name }) => name);
+  const all = await listed(OWNER);
+  for (const as of [EDITOR, MEMBER, NAMES, STRANGER]) {
+    const visible = new Set(await listed(as));
+    const omitted = all.filter((name) => !visible.has(name));
+    assert.ok(omitted.length);
+    for (const name of omitted) {
+      const denied = await tool(name, {}, as);
+      assert.equal(denied.error, true, `${name} accepted an unlisted call`);
+      assert.match(denied.data, /needs a role you don't have/);
+    }
+  }
+});

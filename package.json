@@ -20,6 +20,7 @@
     "db:import": "python3 tools/guard_load.py --remote && wrangler d1 execute family-tree -c wrangler.local.jsonc --remote --file build/seed-app.sql",
     "db:import:local": "python3 tools/guard_load.py --local && wrangler d1 execute family-tree -c wrangler.local.jsonc --local --file build/seed-app.sql",
     "test": "node --test tests/",
+    "eval:agents": "node --test evals/",
     "deploy:ci": "node tools/ci_config.mjs && node tools/wait_migrations.mjs && npm run build:web && npm run build:agents && wrangler deploy -c wrangler.ci.jsonc",
     "upload:ci": "node tools/ci_config.mjs && npm run build:web && npm run build:agents && wrangler versions upload -c wrangler.ci.jsonc",
     "test:gedcomx": "FT_STORAGE=gedcomx node --test tests/",
