@@ -21,6 +21,7 @@ test("every agent has a model that isn't retiring, configurable on its own", () 
   assert.deepEqual(agentModel({ AI_MODEL_STORIES: "anthropic/claude-sonnet-5-5", AI_EFFORT_STORIES: "max" }, "stories"), { model: "anthropic/claude-sonnet-5-5", effort: "max" });
   assert.equal(agentModel({ AI_MODEL: "@cf/zai-org/glm-5.3" }, "chat").model, "@cf/zai-org/glm-5.3", "AI_MODEL still applies to all");
   assert.equal(agentModel({ AI_MODEL: "@cf/zai-org/glm-5.3", AI_MODEL_CHAT: FLASH }, "chat").model, FLASH, "the agent's own setting wins");
+  assert.equal(agentModel({ AI_MODEL_CHAT: "anthropic/claude-sonnet-5-5" }, "chat").model, AGENTS.chat.model);
   assert.equal(agentModel({ AI_CHAT_EFFORT: "off" }, "chat").effort, "off", "older effort variables still apply");
   assert.equal(agentModel({ AI_EFFORT_CHAT: "nonsense" }, "chat").effort, AGENTS.chat.effort);
   assert.throws(() => agentModel({}, "nope"));

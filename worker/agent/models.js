@@ -48,7 +48,9 @@ export function agentModel(env, agent) {
   const d = AGENTS[agent];
   if (!d) throw new Error(`unknown agent ${agent}`);
   const key = agent.toUpperCase();
-  const model = String(env[`AI_MODEL_${key}`] || env.AI_MODEL || d.model).trim();
+  const configured = String(env[`AI_MODEL_${key}`] || env.AI_MODEL || d.model).trim();
+  // Chat history can contain private file excerpts. Keep its inference on Workers AI, including after a model change.
+  const model = agent === "chat" && !configured.startsWith("@cf/") ? d.model : configured;
   const e = String(env[`AI_EFFORT_${key}`] || env[d.legacy] || d.effort).trim();
   return { model, effort: LEVELS.includes(e) ? e : d.effort };
 }

@@ -10,6 +10,7 @@
   "workers_dev": false,
   "preview_urls": false,
   "ai": { "binding": "AI" },
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "family-tree-media" }],
   "d1_databases": [
     { "binding": "DB", "database_name": "family-tree", "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID" }
   ]

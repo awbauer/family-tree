@@ -223,3 +223,99 @@ test("a draft is applied once, even with two clicks", async () => {
   assert.deepEqual([r1.status, r2.status].sort(), [200, 409]);
   assert.equal((await env.DB.prepare("SELECT COUNT(DISTINCT batch_id) AS n FROM changes WHERE via = ?").bind(`${id}#${a.id}`).first()).n, 1);
 });
+
+test("the assistant reads report contents and lists a report under its catalogued source", async () => {
+  const { readRecordFile, chatSourceView } = await import("../worker/agent/chat-files.js");
+  const worker = (await import("../worker/index.js")).default;
+  const contents = "# Example transcript\n\n" + "Recorded in the example register.\n".repeat(380);
+  const response = await worker.fetch(new Request("https://tree.example.test/api/attachments?person=I4&type=report&tree=all&source=S2", {
+    method: "POST",
+    headers: { "X-Dev-Principal": EDITOR, "X-Document-Name": "example.md" },
+    body: contents,
+  }), env);
+  assert.equal(response.status, 201);
+  const { file } = await response.json();
+  const chat = await chatRow(await newChat());
+  const { bundle } = await Chat.chatScope(env, chat);
+  assert.ok(Chat.chatPersonView(bundle, "I4").files.some((item) => item.file === file));
+  assert.ok(chatSourceView(bundle, "S2").files.some((item) => item.file === file));
+  const first = await readRecordFile(env, bundle, { source: "S2", file });
+  assert.equal(first.method, "original_text");
+  assert.ok(first.page.includes("attachment="));
+  assert.equal(first.text, contents.slice(0, first.next_offset));
+  const rest = await readRecordFile(env, bundle, { person: "I4", file, offset: first.next_offset });
+  assert.equal(first.text + rest.text, contents);
+  const page = { path: `person/I4?attachment=${encodeURIComponent(file)}`, title: "Example person" };
+  assert.deepEqual(Chat.chatFileTarget(page, {}), { person: "I4", file });
+  assert.match(Chat.pageContext(bundle, page), /selected attachment.*example\.md/);
+  assert.deepEqual(Chat.chatFileTarget({ path: "source/S2" }, { file }), { file, source: "S2" });
+});
+
+test("private record readers use actual image and PDF bytes and report the extraction method", async () => {
+  const { readRecordFile } = await import("../worker/agent/chat-files.js");
+  const { bundle } = await Chat.chatScope(env, await chatRow(await newChat()));
+  const images = { id: "O-example", file: "scan.png", title: "Example image" };
+  const docs = ["scan.pdf", "scan-empty.pdf", "example.zip"].map((file) => ({ file }));
+  const scoped = {
+    ...bundle,
+    people: { ...bundle.people, I4: { ...bundle.people.I4, media: [images.id] } },
+    media: { [images.id]: images },
+    research: { ...bundle.research, media: { I4: docs } },
+  };
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+  await env.MEDIA.put("scan.png", Uint8Array.fromBase64(png));
+  await env.MEDIA.put("scan.pdf", "%PDF-1.4 example bytes");
+  await env.MEDIA.put("scan-empty.pdf", "%PDF-1.4 empty example");
+  await env.MEDIA.put("example.zip", Uint8Array.of(0x50, 0x4b));
+  const llm = [];
+  const fake = { ...env, AI: {
+    async run(model, payload) {
+      llm.push(model);
+      assert.match(model, /gemma/);
+      assert.equal(payload.store, false);
+      assert.equal(payload.messages[1].content[1].image_url.url, `data:image/png;base64,${png}`);
+      return { choices: [{ message: { content: "A visible inscription in the image." } }], usage: { prompt_tokens: 42, completion_tokens: 10 } };
+    },
+    async toMarkdown(doc, options) {
+      assert.equal(doc.name, "record.pdf");
+      assert.equal(doc.blob.type, "application/pdf");
+      assert.equal(options.conversionOptions.pdf.metadata, false);
+      const bytes = await doc.blob.text();
+      return { format: "text", data: bytes.includes("empty") ? "" : "Example register text" };
+    },
+  } };
+  const metered = [];
+  const picture = await readRecordFile(fake, scoped, { person: "I4", file: "scan.png" }, { meter: (usage) => metered.push(usage) });
+  assert.equal(picture.method, "visual_transcription");
+  assert.equal(picture.text, "A visible inscription in the image.");
+  assert.equal(llm.length, 1);
+  assert.equal(metered[0].input, 42);
+  const pdf = await readRecordFile(fake, scoped, { person: "I4", file: "scan.pdf" });
+  assert.equal(pdf.method, "extracted_text");
+  assert.equal(pdf.text, "Example register text");
+  assert.match((await readRecordFile(fake, scoped, { person: "I4", file: "scan-empty.pdf" })).error, /No text could be extracted/);
+  assert.match((await readRecordFile(fake, scoped, { person: "I4", file: "example.zip" })).error, /format cannot be read/);
+});
+
+test("the assistant cannot read unlinked, hidden, external, or oversized evidence", async () => {
+  const { readRecordFile, recordFiles } = await import("../worker/agent/chat-files.js");
+  const { bundle } = await Chat.chatScope(env, await chatRow(await newChat()));
+  const targets = [{ file: "scan.pdf", source: "S2" }, { file: "https://example.test/photo.png" }];
+  const b = { ...bundle, research: { ...bundle.research, media: { I4: targets } } };
+  const hidden = { ...b, scope: { ...b.scope, view: { ...b.scope.view, media: false } } };
+  const reduced = { ...b, people: { ...b.people, I4: { ...b.people.I4, private: true } } };
+  const noSources = { ...b, sources: {} };
+  let reads = 0;
+  const storage = { MEDIA: { async get() { reads++; return { size: 9 * 1024 * 1024 }; } } };
+  for (const [view, args] of [
+    [hidden, { person: "I4", file: "scan.pdf" }],
+    [reduced, { person: "I4", file: "scan.pdf" }],
+    [noSources, { source: "S2", file: "scan.pdf" }],
+    [b, { person: "I4", file: "not-linked.pdf" }],
+    [b, { person: "I4", file: "https://example.test/photo.png" }],
+  ]) assert.ok((await readRecordFile(storage, view, args)).error);
+  assert.deepEqual(recordFiles(hidden, { person: "I4" }), { files: [] });
+  assert.equal(reads, 0);
+  assert.match((await readRecordFile(storage, b, { person: "I4", file: "scan.pdf" })).error, /too large/);
+  assert.equal(reads, 1);
+});
