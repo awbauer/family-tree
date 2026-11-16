@@ -1,7 +1,7 @@
 'use agent';
 // Sherlock, the relatives finder (#44). One conversation (one Durable Object) per run; the conversation id is the run
 // id. Starting from one person who has died, it searches records for parents, siblings, spouses and children who
-// aren't in the tree yet. It reads the tree as the starting editor sees it (living people as a name only), uses the
+// aren't in the tree yet. It reads the tree as the starting editor sees it (people that view keeps private as a name only), uses the
 // same web tools and research sites as the researcher, and its only write is submit_relatives, which files each
 // candidate as a suggestion. Shared logic: worker/agent/relatives.js.
 import { env } from "cloudflare:workers";
@@ -63,7 +63,7 @@ export function Sherlock({ id }) {
 
   useTool({
     name: "get_person",
-    description: "Everything recorded about one person in the tree: names, events with their sources, notes, family (parents, spouses, children, siblings as ids and names), findings, searches already logged, open to-dos. Living people come back as a name only and must not be researched.",
+    description: "Everything recorded about one person in the tree: names, events with their sources, notes, family (parents, spouses, children, siblings as ids and names), findings, searches already logged, open to-dos. People the view keeps private come back as a name only and must not be researched.",
     input: v.object({ id: str("Person id, e.g. I12") }),
     async run({ data }) { return { output: personView((await ctx()).b, data.id) }; },
   });
@@ -82,7 +82,7 @@ export function Sherlock({ id }) {
   useWebTools({ id, runId, check: () => ctx(), submitTool: "submit_relatives" });
   useTool({
     name: "submit_relatives",
-    description: "Submit once, at the end: the relatives you found (candidates), every search you ran (log, nil results included) and follow-ups for the owner (todo). Each candidate becomes a suggestion an editor reviews; nothing changes in the tree until they accept it. Candidates already in the tree are dropped; anyone who could be living is reported only as a possible living relative. If it comes back with errors, fix them and call it again.",
+    description: "Submit once, at the end: the relatives you found (candidates), every search you ran (log, nil results included) and follow-ups for the owner (todo). Each candidate becomes a suggestion an editor reviews; nothing changes in the tree until they accept it. Candidates already in the tree are dropped. If it comes back with errors, fix them and call it again.",
     input: Submission,
     durable: true,
     async run({ data, step }) {
@@ -90,7 +90,7 @@ export function Sherlock({ id }) {
       const r = await checkRelatives(env, b, run, data);
       if (!r.ok) throw new Error(`Not saved. Fix these and call submit_relatives again:\n- ${r.errors.join("\n- ")}`);
       const done = await step.do("file-suggestions", () => submitRelatives(env, runId, r.value));
-      await step.do("log", () => logRun(env, runId, `submitted: ${r.value.candidates.length} candidate${r.value.candidates.length === 1 ? "" : "s"}, ${r.value.living.length} possibly living, ${r.value.already_in_tree.length} already in the tree; suggestions ${done.proposals.map((p) => `#${p}`).join(", ") || "none"}`));
+      await step.do("log", () => logRun(env, runId, `submitted: ${r.value.candidates.length} candidate${r.value.candidates.length === 1 ? "" : "s"}, ${r.value.already_in_tree.length} already in the tree; suggestions ${done.proposals.map((p) => `#${p}`).join(", ") || "none"}`));
       const notes = [];
       if (r.value.already_in_tree.length) notes.push(`Dropped as already in the tree: ${r.value.already_in_tree.map((x) => `${x.name} (= ${x.id})`).join(", ")}.`);
       if (r.value.living.length) notes.push(`${r.value.living.length} possible living relative${r.value.living.length === 1 ? "" : "s"} recorded without details.`);

@@ -1,7 +1,7 @@
 'use agent';
 // The stories agent (issue #33). One conversation (one Durable Object) per run; the conversation id is the run id.
 // It reviews and revises an existing story, or drafts a new one, from the tree as the starting editor sees it, with
-// living people reduced to a name. Its only write is submit_story, which files a suggestion for an editor to review.
+// people that view keeps private reduced to a name. Its only write is submit_story, which files a suggestion for an editor to review.
 import { env } from "cloudflare:workers";
 import { useAgentFinish, useAgentStart, useInitialData, useModel, usePersistentState, useTool } from "@flue/runtime";
 import * as v from "valibot";
@@ -50,7 +50,7 @@ export function StoryWriter({ id }) {
   });
   useTool({
     name: "get_person",
-    description: "Everything recorded about one person: names, events with fact ids and their sources, notes, verification status, family (parents, spouses, children, siblings), findings. Living people come back as a name only.",
+    description: "Everything recorded about one person: names, events with fact ids and their sources, notes, verification status, family (parents, spouses, children, siblings), findings. People the view keeps private come back as a name only.",
     input: v.object({ id: str("Person id, e.g. I12") }),
     async run({ data }) { const { b } = await ctx(); return { output: storyPerson(b, data.id) }; },
   });

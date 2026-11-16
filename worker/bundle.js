@@ -18,10 +18,10 @@ export async function fullBundle(env) {
     if (!state.research.home_person && !Object.keys(state.raw.people).length) fail(404, S.api.http.emptyDatabase);
     const full = Derive.derive({ raw: state.raw, research: state.research, places: state.places }, { today: now().slice(0, 10) });
     full.aliases = state.aliases;
-    // AI-written profiles: only ever for people who have died; scope.js drops them for name-only views
+    // AI-written profiles; scope.js drops them for views that reduce a living person to a name
     for (const r of state.profiles || []) {
       const p = full.people[r.person_id];
-      if (p && !p.living) p.profile = { text: r.text, generated_at: r.generated_at, model: r.model };
+      if (p) p.profile = { text: r.text, generated_at: r.generated_at, model: r.model };
     }
     derivedCache = { version: v, full, db: env.DB };
     scopedCache.clear();

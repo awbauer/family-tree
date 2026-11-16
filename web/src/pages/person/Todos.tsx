@@ -93,7 +93,7 @@ function TodoRow({ t, reload }: { t: any; reload: () => void }) {
       <div className="btn-row todo-acts">
         {!t.assignee && !closedSt(t.status) && <button className="btn" data-a="claim" onClick={() => act("claim")}>{T.claim}</button>}
         {canStatus && t.status !== "done" && <button className="btn" data-a="done" onClick={() => act("done")}>{T.done}</button>}
-        {ai && !p.living && !["done", "wont_do", "needs_review"].includes(t.status) && (!t.assignee || mine) && <button className="btn" data-a="ai" title={T.aiTitle} onClick={() => act("ai")}>{T.ai}</button>}
+        {ai && !p.private && !["done", "wont_do", "needs_review"].includes(t.status) && (!t.assignee || mine) && <button className="btn" data-a="ai" title={T.aiTitle} onClick={() => act("ai")}>{T.ai}</button>}
         {canStatus && !closedSt(t.status) && (
           <select data-a="status" aria-label={T.statusLabel} value={t.status} onChange={(e) => act("status", e.target.value)}>
             {Object.entries(STATUS_TXT).filter(([k]) => editor || ["open", "in_progress", "needs_review"].includes(k)).map(([k, v]) => <option key={k} value={k}>{v}</option>)}

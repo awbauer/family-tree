@@ -93,7 +93,7 @@ How to use it:
 
 If you can only reach the index, record it as an index (`medium` at most) and add a to-do for the image.
 
-When you search the web, use the names of deceased ancestors as needed. Don't search for or record living people's personal details.
+Research living relatives like anyone else: obituaries, wedding and birth notices, school, military and census records, directories. What you find goes only into the private data. Never record phone numbers, email addresses, or government ID or account numbers.
 
 ## What agents must not do
 

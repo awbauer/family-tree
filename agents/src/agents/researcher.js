@@ -72,7 +72,7 @@ export function Researcher({ id }) {
 
   useTool({
     name: "get_person",
-    description: "Everything recorded about one person in the tree: names, events with their sources, notes, verification status, family (parents, spouses, children, siblings as ids and names), findings already made, searches already logged, open to-dos and automatic data-quality warnings. Living people come back as a name only and must not be researched.",
+    description: "Everything recorded about one person in the tree: names, events with their sources, notes, verification status, family (parents, spouses, children, siblings as ids and names), findings already made, searches already logged, open to-dos and automatic data-quality warnings. People the view keeps private come back as a name only and must not be researched.",
     input: v.object({ id: str("Person id, e.g. I12") }),
     async run({ data }) { return { output: personView(await tree(), data.id) }; },
   });

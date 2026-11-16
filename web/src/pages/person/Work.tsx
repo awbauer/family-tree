@@ -26,8 +26,8 @@ export function Work() {
       <Editor />
       <Comments />
       <History />
-      {ai && !p.living && <AiResearch />}
-      {ai && !p.living && <FindRelatives />}
+      {ai && !p.private && <AiResearch />}
+      {ai && !p.private && <FindRelatives />}
       <datalist id="w-people">{people.filter((x) => !isUnknown(x)).map((x) => <option key={x.id} value={`${x.name} (${x.id})`} />)}</datalist>
     </div>
   );

@@ -153,7 +153,7 @@ export const research = {
   },
 
   agentRuns: {
-    intro: "Research agents run in the cloud on Claude, through Cloudflare AI Gateway. Each run works one to-do or person with the tree as the person who started it sees it, searches and reads the web, and files its results as a suggestion. Nothing changes until an editor approves it. Living people are never researched.",
+    intro: "Research agents run in the cloud on Claude, through Cloudflare AI Gateway. Each run works one to-do or person with the tree as the person who started it sees it, searches and reads the web, and files its results as a suggestion. Nothing changes until an editor approves it. Living relatives are researched like anyone else; people your view keeps private are not.",
     runStatus: { queued: "Queued", running: "Running", succeeded: "Done", failed: "Failed", cancelled: "Cancelled" },
     kind: {
       quality: "Data quality review · ",
@@ -190,7 +190,7 @@ export const research = {
     libraryForm: {
       title: "Review the story library",
       subtitle: "· audit every story, suggest fixes, and start new stories",
-      help: "The agent checks every published story against what the tree now records: claims the records contradict or don't record, and links to people who were merged or removed. Each fix is a suggested revision, shown as a diff in Suggestions; nothing published changes until an editor approves it. It then ranks people who have died, and events several people share, by how much sourced material exists and whether a story covers them, and starts story-writer runs for the best ones, each with a brief. Each started run counts against today's run budget. People who are or could be living are never a story's subject.",
+      help: "The agent checks every published story against what the tree now records: claims the records contradict or don't record, and links to people who were merged or removed. Each fix is a suggested revision, shown as a diff in Suggestions; nothing published changes until an editor approves it. It then ranks people, and events several people share, by how much sourced material exists and whether a story covers them, and starts story-writer runs for the best ones, each with a brief. Each started run counts against today's run budget. People your view keeps private are never a story's subject.",
       // "Start up to <input> new stories"
       count: { before: "Start up to", after: "new stories" },
       instructions: "Anything to focus on (optional)",
@@ -236,7 +236,7 @@ export const research = {
         broken_link: "links someone not in the tree",
         removed: "lists someone no longer in the tree",
         merged: "links someone merged into another person",
-        living_details: "details of a living person",
+        private_details: "details of someone private in this view",
       },
       flagText: (text: string) => `: “${text}”`,
       flagRecords: (says: string) => ` (records: ${says})`,

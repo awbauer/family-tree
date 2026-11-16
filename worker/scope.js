@@ -71,6 +71,10 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
   }
   if (v.living === "hidden") ids = new Set([...ids].filter((id) => !P0[id].living));
   const hidden = new Set(Object.keys(P0).filter((id) => !ids.has(id)));
+  // living people this view reduces to a name (or to "Living …"): research, stories, media and profiles about them
+  // are dropped too, since research covers living relatives like anyone else
+  const reduced = new Set([...ids].filter((id) => P0[id].living && (v.living === "names-only" || v.living === "anonymous")));
+  const open = (x) => ids.has(x) && !reduced.has(x);
 
   // ---- 2. families: keep visible members only
   const families = {};
@@ -119,7 +123,6 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
 
   // ---- 5. research layer
   const R0 = full.research || {};
-  const visiblePerson = (x) => !x || ids.has(x);
   const research = {
     site: R0.site, branches: (R0.branches || []).filter((b) => Object.values(people).some((p) => p.branch === b.key)),
     core_people: (R0.core_people || []).filter((x) => ids.has(x)), home_person: home,
@@ -127,18 +130,21 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
   };
   if (v.research) {
     const treeOk = (t) => !t.tree || t.tree === tree.id;
-    research.findings = (R0.findings || []).filter((f) => f.person ? ids.has(f.person) : true);
-    research.todo = (R0.todo || []).filter((t) => (t.person ? ids.has(t.person) : treeOk(t)));
-    research.todo_done = (R0.todo_done || []).filter((t) => (t.person ? ids.has(t.person) : treeOk(t)));
-    research.research_log = (R0.research_log || []).filter((l) => visiblePerson(l.person));
-    research.people_status = Object.fromEntries(Object.entries(R0.people_status || {}).filter(([k]) => ids.has(k)));
+    research.findings = (R0.findings || []).filter((f) => f.person ? open(f.person) : true);
+    research.todo = (R0.todo || []).filter((t) => (t.person ? open(t.person) : treeOk(t)));
+    research.todo_done = (R0.todo_done || []).filter((t) => (t.person ? open(t.person) : treeOk(t)));
+    research.research_log = (R0.research_log || []).filter((l) => !l.person || open(l.person));
+    research.people_status = Object.fromEntries(Object.entries(R0.people_status || {}).filter(([k]) => open(k)));
     research.duplicates = (R0.duplicates || []).filter((d) => d.ids.every((x) => ids.has(x)));
   } else {
     Object.assign(research, { findings: [], todo: [], todo_done: [], research_log: [], people_status: {}, duplicates: [] });
   }
-  // a story shows when everyone it's about is in scope; people merged since it was written count as who they became
-  research.stories = (R0.stories || []).filter((s) => (s.people || []).every((x) => ids.has(followAlias(full.aliases, x))));
-  research.media = v.media ? Object.fromEntries(Object.entries(R0.media || {}).filter(([k]) => ids.has(k))) : {};
+  // a story shows when everyone it's about is in scope; people merged since it was written count as who they became.
+  // A story about, or linking, a living person this view reduces to a name is left out as well.
+  const linksIn = (body) => [...String(body || "").matchAll(/\[\[([^|\]]+)/g)].map((m) => m[1].trim()); // [[I12|Name]] or [[I12]]
+  research.stories = (R0.stories || []).filter((s) => (s.people || []).every((x) => ids.has(followAlias(full.aliases, x)))
+    && ![...(s.people || []), ...linksIn(s.body)].some((x) => reduced.has(followAlias(full.aliases, x))));
+  research.media = v.media ? Object.fromEntries(Object.entries(R0.media || {}).filter(([k]) => open(k))) : {};
 
   // ---- 6. sources and GEDCOM media: only what visible people cite, plus sources nobody cites (so they can be
   // tidied up; they point at no one)
@@ -169,8 +175,8 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
   const out = { generated: full.generated, home, people, families, sources, media, issues, aliases, research,
     places: full.places, scope: { tree: tree.id, treeName: tree.name, view: v } };
 
-  // ---- 8. text scrub: no hidden person's name or ID may survive in any string
-  return scrub(out, hidden, full.people, people);
+  // ---- 8. text scrub: no hidden person's name or ID may survive in any string, nor an anonymous living person's name
+  return scrub(out, hidden, full.people, people, v.living === "anonymous" ? reduced : new Set());
 }
 
 function noCites(e) { const { citations, ...rest } = e; return rest; }
@@ -185,12 +191,12 @@ function namesOf(p) {
   return out;
 }
 
-export function scrub(out, hidden, allPeople, visiblePeople) {
-  if (!hidden.size) return out;
+export function scrub(out, hidden, allPeople, visiblePeople, nameOnly = new Set()) {
+  if (!hidden.size && !nameOnly.size) return out;
   const visibleNames = new Set();
-  for (const p of Object.values(visiblePeople)) for (const n of namesOf(p)) visibleNames.add(n.toLowerCase());
+  for (const p of Object.values(visiblePeople)) if (!nameOnly.has(p.id)) for (const n of namesOf(p)) visibleNames.add(n.toLowerCase());
   const hiddenNames = new Set();
-  for (const id of hidden) for (const n of namesOf(allPeople[id])) {
+  for (const id of [...hidden, ...nameOnly]) for (const n of namesOf(allPeople[id])) {
     if (n.length >= 5 && !visibleNames.has(n.toLowerCase())) hiddenNames.add(n);
   }
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

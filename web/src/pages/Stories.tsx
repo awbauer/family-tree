@@ -28,7 +28,7 @@ function DraftForm() {
   const navigate = useNavigate();
   const add = (value: string) => {
     const id = (value.match(/\(([^)]+)\)\s*$/) || [])[1];
-    if (id && D.people[id] && !D.people[id].living && !chosen.includes(id)) setChosen([...chosen, id]);
+    if (id && D.people[id] && !D.people[id].private && !chosen.includes(id)) setChosen([...chosen, id]);
     setPick("");
   };
   async function submit(e: FormEvent) {
@@ -48,7 +48,7 @@ function DraftForm() {
             onChange={(e) => { setPick(e.target.value); if (/\([^)]+\)\s*$/.test(e.target.value)) add(e.target.value); }} />
           <button type="button" className="btn" id="sd-add" onClick={() => add(pick)}>{DR.add}</button>
         </div>
-        <datalist id="sd-people">{people.filter((p) => !isUnknown(p) && !p.living).map((p) => <option key={p.id} value={`${p.name} (${p.id})`} />)}</datalist>
+        <datalist id="sd-people">{people.filter((p) => !isUnknown(p) && !p.private).map((p) => <option key={p.id} value={`${p.name} (${p.id})`} />)}</datalist>
         <div id="sd-chips" className="small muted">
           {chosen.length ? chosen.map((id, i) => (
             <span key={id} className="badge">{D.people[id].name} <button type="button" className="linklike" aria-label={DR.remove} onClick={() => setChosen(chosen.filter((_, j) => j !== i))}>✕</button> </span>

@@ -22,7 +22,7 @@ Living people are in the real data. It is only ever served by the Worker, behind
    - Now and then, and always after a big change, run `python3 tools/check_privacy.py --audit`. It scans every tracked file, including what's already committed.
    - The hook catches names, surnames, IDs and specific places from the private data, not everything. **Test data and examples are fictional**: never reuse a detail from the owner's real tree or from your conversation with them (a cemetery, a street, a date a photo was taken, an occupation), even one that seems harmless, even in a test.
 5. If the hooks aren't active (`git config core.hooksPath` is not `.githooks`), run `git config core.hooksPath .githooks` first. `npm install` sets it.
-6. Don't publish details of **living** people (addresses, phone numbers, employers, photos with location data) anywhere, including in findings. Research is about the dead; the living are context only.
+6. **Living relatives are researched like anyone else.** Their facts, findings and stories belong in the private data (D1, `family-data/`), behind Access, where each viewer's tree view decides how much of them they see (full, names only, anonymous or hidden). Never put living people's details anywhere else: not in the repo, PRs, issues or public pages. Never record phone numbers, email addresses, or government ID or account numbers, and strip location data from photos.
 
 If a task would require breaking one of these rules, stop and ask the owner.
 

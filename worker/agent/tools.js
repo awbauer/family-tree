@@ -1,21 +1,22 @@
 // What the research agent can see, and how its submission is checked. Plain functions over a scoped bundle, so they
 // run (and are tested) without the agent runtime; agents/src/agents/researcher.js wraps them as Flue tools.
-// The agent reads the tree only as the editor who started the run can see it, and living people are reduced to an
-// id and a name: enough to walk through the family, nothing to research.
+// The agent reads the tree only as the editor who started the run can see it. People that view reduces to a name
+// (private) come through as an id and a name: enough to walk through the family, nothing to research. Living
+// relatives the view shows in full are researched like anyone else.
 import * as Graph from "../graph.js";
 import { validateBatch } from "../research.js";
 import { referencedIds, applyOps, OpError } from "../ops.js";
 import { loadEditable } from "../store.js";
 
 const norm = (x) => String(x || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-const isHidden = (p) => !p || p.living || p.private;
+const isHidden = (p) => !p || p.private;
 const years = (p) => [p.birth && p.birth.year, p.death && p.death.year];
 const brief = (b, id) => {
   const p = b.people[id];
   if (!p) return null;
-  if (isHidden(p)) return { id, name: p.name, living: true };
+  if (isHidden(p)) return { id, name: p.name, private: true };
   const [born, died] = years(p);
-  return { id, name: p.name, born: born || undefined, died: died || undefined };
+  return { id, name: p.name, born: born || undefined, died: died || undefined, living: p.living || undefined };
 };
 
 function family(b, p) {
@@ -45,10 +46,10 @@ const cite = (b, c) => {
 export function personView(b, id) {
   const p = b.people[id];
   if (!p) return { error: `There's no person ${id} in this tree (or you can't see them).` };
-  if (isHidden(p)) return { id, name: p.name, living: true, note: "Living person: no details are shared and they must not be researched. Use them only to reach their relatives.", family: family(b, p) };
+  if (isHidden(p)) return { id, name: p.name, private: true, note: "Private in this tree's view: no details are shared and they must not be researched. Use them only to reach their relatives.", family: family(b, p) };
   const R = b.research || {};
   return {
-    id, name: p.name, sex: p.sex || "unknown",
+    id, name: p.name, sex: p.sex || "unknown", living: p.living || undefined,
     other_names: (p.names || []).slice(1).map((n) => `${n.given || ""} ${n.surname || ""}`.trim()).filter(Boolean),
     branch: p.branch,
     events: (p.events || []).map((e) => ({ fid: e.fid, type: e.type, date: e.date, place: e.place, detail: e.value, note: e.note, sources: (e.citations || []).map((c) => cite(b, c)) })),
@@ -99,9 +100,6 @@ export async function checkSubmission(env, b, input) {
     clean.agent = "cloud";
     const visible = (pid) => !!b.people[pid] && !b.people[pid].private;
     errors.push(...validateBatch(clean, visible));
-    for (const [i, f] of (clean.findings || []).entries()) {
-      if (f.person && b.people[f.person] && b.people[f.person].living) errors.push(`findings[${i}]: ${f.person} is living. Research is about people who have died.`);
-    }
     if (!(clean.log || []).length) errors.push("batch.log: log every search you ran, including nil results");
     // a status change needs evidence in the same submission
     for (const pid of Object.keys(clean.people_status || {})) {
@@ -121,7 +119,7 @@ export async function checkSubmission(env, b, input) {
       const { people, families } = referencedIds(edits.ops);
       for (const pid of people) {
         if (!b.people[pid]) errors.push(`edits: person ${pid} isn't in this tree`);
-        else if (b.people[pid].private || b.people[pid].living) errors.push(`edits: ${pid} is living; leave their details alone`);
+        else if (b.people[pid].private) errors.push(`edits: ${pid} is private in this tree's view; leave their details alone`);
       }
       for (const fid of families) if (!b.families[fid]) errors.push(`edits: family ${fid} isn't in this tree`);
       if (!errors.length) {

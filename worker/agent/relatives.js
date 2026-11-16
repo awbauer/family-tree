@@ -1,4 +1,4 @@
-// Sherlock, the relatives finder (#44): starting at one person who has died, it searches records for parents,
+// Sherlock, the relatives finder (#44): starting at one person, it searches records for parents,
 // siblings, spouses and children who aren't in the tree yet, and suggests them. It never adds anyone itself.
 // Plain functions over a scoped bundle, shared by the site Worker (which starts runs) and the agents
 // (agents/src/agents/sherlock.js wraps them as Flue tools); tested without the agent runtime.
@@ -6,8 +6,8 @@
 // Each candidate becomes its own suggestion: a `new-person` finding (confidence, the records seen) carrying the edit
 // ops that add the person and link them to the family, so an editor accepts it in one step in the queue. The searches
 // (nil results included) and follow-ups for the owner go in one research suggestion. Before anything is filed,
-// candidates already in the tree are dropped, and anyone who could be living is reduced to "possible living relative,
-// not researched".
+// candidates already in the tree are dropped. Living relatives are suggested like anyone else; people the starter's
+// view keeps private are never attached to.
 import { J, now, audit, parse } from "../db.js";
 import { validateBatch } from "../research.js";
 import { applyOps, OpError } from "../ops.js";
@@ -18,14 +18,12 @@ export const RELATIVES_PATH = "/agents/sherlock"; // where agents/src/app.js mou
 export const SHERLOCK = "agent:sherlock";
 export const LOOKING_FOR = ["any", "parents", "siblings", "spouse", "children", "named"];
 export const RELATIONS = ["parent", "sibling", "spouse", "child"];
-/** No death record and born within this many years (or birth unknown): possibly living, never researched. */
-export const LIVING_YEARS = 110;
 
-export const SHERLOCK_SYSTEM = `You are Sherlock, a genealogy agent for a private family-history site. Starting from one person who has died, you look for close relatives who are NOT in the family tree yet: parents, siblings, spouses and children (and, when asked for two generations, the same for their immediate family). You suggest them; an editor decides. You cannot change anything directly.
+export const SHERLOCK_SYSTEM = `You are Sherlock, a genealogy agent for a private family-history site. Starting from one person, you look for close relatives who are NOT in the family tree yet: parents, siblings, spouses and children (and, when asked for two generations, the same for their immediate family). You suggest them; an editor decides. You cannot change anything directly.
 
 Rules, in order of importance:
 1. Never invent records. Every candidate must come from records you actually retrieved and read in this session with web_fetch (or saw in web_search results, labelled as such). No made-up URLs, certificate numbers, dates or names. A relative you think probably existed is a to-do, not a candidate.
-2. Never research living people. Anyone with no death record who was born within the last ${LIVING_YEARS} years (or whose birth year you don't know) could be alive: do not search for them or record details about them. You may report them only as a possible living relative. The site strips their details anyway.
+2. Living relatives count: find and suggest them like anyone else, from records and published sources (obituaries, wedding and birth notices, directories). Never record phone numbers, email addresses, or government ID or account numbers. People shown as a name only are private in this tree's view: don't research them or attach anyone to them.
 3. Don't "find" people who are already in the tree. The first message lists the immediate family already recorded; use search_people before proposing anyone. Candidates already in the tree are dropped.
 4. Paywalls and sign-ins: if a record is on a subscription or institution site you have no credential for, log the search as inconclusive and add a to-do for the owner naming the exact collection.
 5. Log every search in log, including the ones that found nothing. Negative results matter.
@@ -45,16 +43,6 @@ const norm = (x) => String(x || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toL
 const yearOf = (x) => { const m = String((x && (x.date || x.year)) || x || "").match(/\b(1[0-9]{3}|20[0-9]{2})\b/); return m ? +m[1] : null; };
 const hasAny = (x) => !!(x && (String(x.date || "").trim() || String(x.place || "").trim() || x.year));
 
-/**
- * The living-person rule for a candidate: with no death record, anyone born within LIVING_YEARS of `year`, or whose
- * birth year isn't known, could be alive.
- */
-export function possiblyLiving(c, year = new Date().getUTCFullYear()) {
-  if (hasAny(c && c.died)) return false;
-  const by = yearOf(c && c.born);
-  return by == null || by > year - LIVING_YEARS;
-}
-
 /** Validate the start form's options. */
 export function cleanOptions(d) {
   const looking_for = d.looking_for || "any";
@@ -69,8 +57,8 @@ export function cleanOptions(d) {
 const brief = (b, id) => {
   const p = b.people[id];
   if (!p) return null;
-  if (p.living || p.private) return { id, name: p.name, living: true };
-  return { id, name: p.name, born: (p.birth && p.birth.year) || undefined, died: (p.death && p.death.year) || undefined };
+  if (p.private) return { id, name: p.name, private: true };
+  return { id, name: p.name, born: (p.birth && p.birth.year) || undefined, died: (p.death && p.death.year) || undefined, living: p.living || undefined };
 };
 
 /** Ids of the person's parents, siblings, spouses and children in the tree. */
@@ -109,7 +97,7 @@ export function firstMessage(b, person, o, sitesText) {
   if (o.hints) lines.push(`Hints from the editor: ${o.hints}`);
   lines.push("", `The person (get_person returns the same):`, JSON.stringify(view));
   lines.push("", "Immediate family already in the tree (don't propose them again):");
-  for (const [k, ids] of Object.entries(fam)) lines.push(`- ${k}: ${ids.length ? ids.map((x) => { const r = brief(b, x); return `${r.name} (${x}${r.living ? ", living" : `${r.born ? `, b. ${r.born}` : ""}${r.died ? `, d. ${r.died}` : ""}`})`; }).join("; ") : "none recorded"}`);
+  for (const [k, ids] of Object.entries(fam)) lines.push(`- ${k}: ${ids.length ? ids.map((x) => { const r = brief(b, x); return `${r.name} (${x}${r.private ? ", private" : `${r.born ? `, b. ${r.born}` : ""}${r.died ? `, d. ${r.died}` : ""}${r.living ? ", living" : ""}`})`; }).join("; ") : "none recorded"}`);
   if (sitesText) lines.push("", sitesText);
   return lines.join("\n");
 }
@@ -190,7 +178,7 @@ const label = (c) => `${String(c.given || "").trim()} ${String(c.surname || "").
 
 /**
  * Check a submission. Returns {ok: true, value} or {ok: false, errors}. value: {summary, candidates (to file, each
- * with its ops and finding), living ([{relation, of}], no details), already_in_tree, batch ({log, todo})}.
+ * with its ops and finding), living (always empty now; kept for older reports), already_in_tree, batch ({log, todo})}.
  */
 export async function checkRelatives(env, b, run, input, { year = new Date().getUTCFullYear() } = {}) {
   const errors = [];
@@ -213,9 +201,7 @@ export async function checkRelatives(env, b, run, input, { year = new Date().get
     if (!RELATIONS.includes(c.relation)) { errors.push(`${w}: relation must be one of ${RELATIONS.join(", ")}`); continue; }
     if (!allowedOf.has(c.of)) { errors.push(`${w}: of must be ${o.depth === 2 ? `${subject} or one of their parents, siblings, spouses or children in the tree` : subject}`); continue; }
     const ofP = b.people[c.of];
-    if (!ofP || ofP.living || ofP.private) { errors.push(`${w}: ${c.of} is living; don't attach anyone to a living person`); continue; }
-    // the living rule comes first: a possibly living candidate is reported without details, whatever else is wrong
-    if (possiblyLiving(c, year)) { value.living.push({ relation: c.relation, of: c.of }); continue; }
+    if (!ofP || ofP.private) { errors.push(`${w}: ${c.of} is private in this tree's view; don't attach anyone to them`); continue; }
     if (!label(c)) { errors.push(`${w}: give the candidate's given name or surname as the records spell it`); continue; }
     const dup = findExisting(b, c);
     if (dup) { value.already_in_tree.push({ name: label(c), relation: c.relation, of: c.of, id: dup }); continue; }

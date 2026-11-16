@@ -13,6 +13,7 @@ import { makeEnv, client, migrate } from "./helpers/fake-env.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OWNER = "owner@example.test", EDITOR = "editor@example.test", MEMBER = "member@example.test";
+const NAMES = "names@example.test"; // an editor whose view reduces living people to their names (private)
 const YEAR = 2026;
 let env, call, calls, L, Bundle;
 
@@ -37,6 +38,8 @@ before(async () => {
   call = client((await import("../worker/index.js")).default, env);
   await call("PUT", "/api/admin/grants", { body: { principal: EDITOR, tree_id: "all", role: "editor" } });
   await call("PUT", "/api/admin/grants", { body: { principal: MEMBER, tree_id: "all", role: "member" } });
+  await call("PUT", "/api/admin/views/names", { body: { name: "Names only", filter: { living: "names-only" } } });
+  await call("PUT", "/api/admin/grants", { body: { principal: NAMES, tree_id: "all", role: "editor", view_id: "names" } });
   L = await import("../worker/agent/library.js");
   Bundle = await import("../worker/bundle.js");
   await env.DB.batch([
@@ -46,12 +49,13 @@ before(async () => {
 });
 
 const b = async () => (await Bundle.scopedFor(env, EDITOR, "all")).bundle;
+const nb = async () => (await Bundle.scopedFor(env, NAMES, "all")).bundle;
 const start = (body, as = EDITOR) => call("POST", "/api/agent/runs", { as, body: { tree: "all", kind: "library", ...body } });
 const runRow = (id) => env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first();
 const story = async (slug) => (await call("GET", "/api/tree?tree=all", { as: EDITOR })).data.research.stories.find((x) => x.slug === slug);
 const fakeStory = (body, people = []) => ({ slug: "t", title: "T", people, body });
 
-test("the audit flags contradicted and unrecorded claims, gone and merged people, and details of the living", async () => {
+test("the audit flags contradicted and unrecorded claims, gone and merged people, and details of people private in the view", async () => {
   const B = await b();
   let f = L.auditStory(B, WRONG);
   assert.equal(f.length, 1, JSON.stringify(f));
@@ -66,8 +70,14 @@ test("the audit flags contradicted and unrecorded claims, gone and merged people
   assert.deepEqual(f.map((x) => [x.kind, x.type]), [["unsupported", "Death"]]);
   f = L.auditStory(B, fakeStory("Here is [[I999999|Nobody]].", ["I999998"]));
   assert.deepEqual(f.map((x) => x.kind).sort(), ["broken_link", "removed"]);
-  f = L.auditStory(B, fakeStory("[[I1|Sam]] was born in 1992."));
-  assert.deepEqual(f.map((x) => x.kind), ["living_details"]);
+  // a living relative's dated claims are checked like anyone's in a full view; in a names-only view they're private
+  assert.deepEqual(L.auditStory(B, fakeStory("[[I1|Sam]] was born in 1992.")), []);
+  assert.deepEqual(L.auditStory(B, fakeStory("[[I1|Sam]] was born in 1990.")).map((x) => x.kind), ["contradiction"]);
+  const NB = await nb();
+  assert.equal(NB.people.I1.private, true);
+  f = L.auditStory(NB, fakeStory("[[I1|Sam]] was born in 1992."));
+  assert.deepEqual(f.map((x) => x.kind), ["private_details"]);
+  assert.match(L.flagText(NB, f[0]), /private in this tree's view/);
   // a person merged into another is followed, and flagged
   const merged = { ...B, aliases: { I777: "I8" } };
   f = L.auditStory(merged, fakeStory("[[I777|Arthur]] was born in 1899.", ["I777"]));
@@ -76,15 +86,25 @@ test("the audit flags contradicted and unrecorded claims, gone and merged people
   assert.deepEqual(L.auditStory(B, B.research.stories.find((s) => s.slug === "eva-comes-to-england")), []);
 });
 
-test("candidates: people who have died with sourced records, uncovered first; the possibly living are skipped", async () => {
+test("candidates: people with sourced records, living relatives included, uncovered first; people private in the view are skipped", async () => {
   const B = await b();
   const c = L.rankCandidates(B, { limit: 50, year: YEAR });
-  const ids = c.filter((x) => x.kind === "person").map((x) => x.people[0]);
-  for (const id of ["I1", "I2", "I3", "I16"]) assert.ok(!ids.includes(id), `${id} is living`);
-  assert.equal(L.couldBeLiving(B.people.I17, YEAR), true, "born 1925, no death recorded");
-  assert.equal(L.couldBeLiving(B.people.I11, YEAR), false, "born 1908");
-  assert.equal(L.couldBeLiving(B.people.I8, YEAR), false);
-  assert.ok(!c.some((x) => x.people.includes("I17")));
+  assert.equal(L.notASubject(B.people.I2), false, "living, shown in full");
+  assert.equal(L.notASubject(B.people.I17), false, "born 1925, no death recorded");
+  assert.equal(L.notASubject(B.people.I8), false);
+  assert.equal(L.notASubject(undefined), true);
+  // a living relative and someone with no death recorded qualify once they have sourced records
+  const sourced = structuredClone(B);
+  for (const id of ["I2", "I17"]) sourced.people[id].events.forEach((e) => { e.citations = [{ source: "S-example-1" }]; });
+  const sc = L.rankCandidates(sourced, { limit: 50, year: YEAR }).filter((x) => x.kind === "person").map((x) => x.people[0]);
+  assert.ok(sc.includes("I2") && sc.includes("I17"), JSON.stringify(sc));
+  // in a view that reduces the living to names they're private, and never a candidate, sourced or not
+  const NB = await nb();
+  assert.equal(L.notASubject(NB.people.I2), true);
+  const nsourced = structuredClone(NB);
+  nsourced.people.I2.events = [{ type: "Birth", date: "1960", citations: [{ source: "S-example-1" }] }];
+  const nc = L.rankCandidates(nsourced, { limit: 50, year: YEAR });
+  for (const id of ["I1", "I2", "I3", "I16"]) assert.ok(!nc.some((x) => x.people.includes(id)), `${id} is private in this view`);
   for (const x of c) assert.ok(x.material.sourced || x.material.sources || x.kind === "group");
   // I5 is in the example story, I8 in the test story: covered, so after everyone uncovered
   const i5 = c.find((x) => x.key === "person:I5"), firstCovered = c.findIndex((x) => x.covered_by.length);
@@ -183,8 +203,12 @@ test("a run with N = 1 starts exactly one story-writer run, linked from the libr
   const lib = (await start({ n: 1 })).data.run;
   let run = await runRow(lib.id);
   const B = await b();
-  assert.match(L.checkCommission(B, run, { people: ["I1"], brief: "A story about someone living, which must not happen." }).errors.join(), /could be living/);
-  assert.match(L.checkCommission(B, run, { people: ["I17"], brief: "No death recorded and born within living memory." }).errors.join(), /could be living/);
+  // living relatives may be a story's subject in a full view; not where the starter's view keeps them private
+  for (const id of ["I1", "I17"]) {
+    const ok = L.checkCommission(B, run, { people: [id], brief: "A story about a relative, from the tree's records." });
+    assert.equal(ok.ok, true, `${id}: ${JSON.stringify(ok.errors)}`);
+  }
+  assert.match(L.checkCommission(await nb(), run, { people: ["I1"], brief: "A story about a living relative, from the tree's records." }).errors.join(), /people: .*\(I1\) is private in this tree's view/);
   assert.match(L.checkCommission(B, run, { people: ["I7"], brief: "short" }).errors.join(), /brief/);
   const brief = "Ingrid Lindqvist (I7): her life from birth to death, built on her sourced death record (I7 e2).";
   const c = L.checkCommission(B, run, { people: ["I7"], brief, length: "short", candidate: "person:I7" });

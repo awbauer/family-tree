@@ -95,12 +95,12 @@ function Profile() {
   const { ai, api } = useData();
   const { id, p } = usePerson();
   const [btn, setBtn] = useState<{ busy: boolean; text?: string }>({ busy: false });
-  if (!p.profile && !(ai && !p.living)) return null;
+  if (!p.profile && !(ai && !p.private)) return null;
   return (
     <section className="card profile" style={{ marginBottom: 20 }}><h2>{T.profile.title}</h2>
       {p.profile ? <><p className="prose">{p.profile.text}</p><p className="small muted">{T.profile.written(p.profile.generated_at.slice(0, 10))}</p></>
         : <p className="small muted">{T.profile.none}</p>}
-      {ai && !p.living && <button className="btn" id="profile-refresh" disabled={btn.busy} onClick={async () => {
+      {ai && !p.private && <button className="btn" id="profile-refresh" disabled={btn.busy} onClick={async () => {
         setBtn({ busy: true });
         try { await api("POST", `profiles/${encodeURIComponent(id)}/refresh`); setBtn({ busy: true, text: T.profile.queued }); }
         catch (e: any) { alert(e.message); setBtn({ busy: false }); }

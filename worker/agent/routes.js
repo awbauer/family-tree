@@ -88,7 +88,7 @@ export async function startRun(c, d, { grantOrFail, scoped, loadTodo }) {
   if (person) {
     const p = b.people[person];
     if (!p) fail(404, S.api.agentRuns.personNotInTree);
-    if (p.living || p.private) fail(400, S.api.agentRuns.livingNotResearched);
+    if (p.private) fail(400, S.api.agentRuns.livingNotResearched);
   }
   const instructions = String(d.instructions || "").trim().slice(0, 2000) || null;
   if (!todo && !person && (!instructions || instructions.length < 10)) fail(400, S.api.agentRuns.needTarget);
@@ -172,7 +172,7 @@ export async function refreshProfileRoute(c, id, { grantOrFail, scoped }) {
   const b = await scoped(c, g);
   const p = b.people[id];
   if (!p) fail(404, S.api.http.notFoundDot);
-  if (p.living || p.private) fail(400, S.api.agentRuns.profileLiving);
+  if (p.private) fail(400, S.api.agentRuns.profileLiving);
   try { await checkDaily(c.env); } catch (e) { if (e instanceof BudgetError) fail(429, e.message); throw e; }
   const r = await agentsFetch(c.env, "/internal/profiles", { person: id, force: true });
   return json({ ok: true, queued: r }, 202);
@@ -237,7 +237,7 @@ async function startStory(c, d, g, { scoped }) {
     for (const pid of people) {
       const p = b.people[pid];
       if (!p) fail(404, S.api.agentRuns.notInTree(pid));
-      if (p.living || p.private) fail(400, S.api.agentRuns.storyLiving(p.name));
+      if (p.private) fail(400, S.api.agentRuns.storyLiving(p.name));
     }
     o.people = people;
     o.length = Stories.LENGTHS[d.length] ? d.length : "medium";
@@ -291,7 +291,7 @@ async function startRelatives(c, d, g, { scoped }) {
   if (!person) fail(400, S.api.agentRuns.relativesPerson);
   const p = b.people[person];
   if (!p) fail(404, S.api.agentRuns.personNotInTree);
-  if (p.living || p.private) fail(400, S.api.agentRuns.relativesLiving);
+  if (p.private) fail(400, S.api.agentRuns.relativesLiving);
   let o;
   try { o = Relatives.cleanOptions(d); } catch (e) { if (e instanceof OpError) fail(400, e.message); throw e; }
   try { await checkDaily(env, s, { runs: true }); } catch (e) { if (e instanceof BudgetError) fail(429, e.message); throw e; }

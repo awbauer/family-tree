@@ -12,6 +12,8 @@ import { makeEnv, client, migrate } from "./helpers/fake-env.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OWNER = "owner@example.test", EDITOR = "editor@example.test", NARROW = "narrow@example.test", MEMBER = "member@example.test";
+// an editor whose view reduces living people to their names: for them, the living are private
+const NAMES = "names@example.test";
 let env, call, ex, calls, branchKey;
 let Tools, Runs, Content, Bundle;
 
@@ -35,6 +37,8 @@ before(async () => {
   await call("PUT", "/api/admin/grants", { body: { principal: EDITOR, tree_id: "all", role: "editor" } });
   await call("PUT", "/api/admin/grants", { body: { principal: NARROW, tree_id: "one", role: "editor" } });
   await call("PUT", "/api/admin/grants", { body: { principal: MEMBER, tree_id: "all", role: "member" } });
+  await call("PUT", "/api/admin/views/names", { body: { name: "Names only", filter: { living: "names-only" } } });
+  await call("PUT", "/api/admin/grants", { body: { principal: NAMES, tree_id: "all", role: "editor", view_id: "names" } });
   Tools = await import("../worker/agent/tools.js");
   Runs = await import("../worker/agent/runs.js");
   Content = await import("../worker/agent/content.js");
@@ -53,12 +57,18 @@ test("/api/me says whether agents are available", async () => {
   assert.equal((await c2("GET", "/api/me")).data.ai, false);
 });
 
-test("only editors start runs; living people are never researched", async () => {
+test("only editors start runs; living relatives are researched unless private in the starter's view", async () => {
   const p = dead();
   assert.equal((await call("POST", "/api/agent/runs", { as: MEMBER, body: { tree: "all", person: p.id } })).status, 403);
   assert.equal((await call("GET", "/api/agent/runs?tree=all", { as: MEMBER })).status, 403);
   const lv = living();
-  if (lv) assert.equal((await call("POST", "/api/agent/runs", { as: EDITOR, body: { tree: "all", person: lv.id } })).status, 400);
+  assert.ok(lv, "the example family has living people");
+  const refused = await call("POST", "/api/agent/runs", { as: NAMES, body: { tree: "all", person: lv.id } });
+  assert.equal(refused.status, 400, "private in the starter's view");
+  assert.match(refused.data.error, /private in your view/);
+  const ok = await call("POST", "/api/agent/runs", { as: EDITOR, body: { tree: "all", person: lv.id } });
+  assert.equal(ok.status, 201, JSON.stringify(ok.data));
+  assert.match(lastCall().body.body, new RegExp(`get_person\\("${lv.id}"\\)`));
   assert.equal((await call("POST", "/api/agent/runs", { as: EDITOR, body: { tree: "all" } })).status, 400, "needs a to-do, a person or instructions");
 });
 
@@ -92,16 +102,22 @@ test("starting a run claims the to-do and hands the agent its task through env.A
   assert.equal((await call("GET", `/api/agent/runs/${run.id}`, { as: EDITOR })).data.run.status, "cancelled");
 });
 
-test("the agent sees only its starter's scope, and living people as a name only", async () => {
+test("the agent sees only its starter's scope; living relatives in full, unless the view keeps them private", async () => {
   const b = (await Bundle.scopedFor(env, NARROW, "one")).bundle;
   const outside = Object.values(ex.people).find((p) => p.branch !== branchKey && !p.living);
   if (outside) assert.ok(Tools.personView(b, outside.id).error, "people outside the starter's tree are invisible");
-  const lv = Object.values(b.people).find((p) => p.living);
-  if (lv) {
-    const v = Tools.personView(b, lv.id);
-    assert.deepEqual(Object.keys(v).sort(), ["family", "id", "living", "name", "note"]);
-    assert.ok(!JSON.stringify(v).includes("events"));
-  }
+  const lv = Object.values(ex.people).find((p) => p.living && p.events.length >= 2);
+  assert.ok(lv, "a living person with recorded events");
+  // a view that reduces the living to names: a name and family only
+  const priv = Tools.personView((await Bundle.scopedFor(env, NAMES, "all")).bundle, lv.id);
+  assert.deepEqual(Object.keys(priv).sort(), ["family", "id", "name", "note", "private"]);
+  assert.ok(!JSON.stringify(priv).includes("events"));
+  assert.ok(!JSON.stringify(priv).includes(String(lv.birth.year)), "no dates for a private person");
+  // a full view: the living relative's recorded facts, marked living
+  const full = Tools.personView((await Bundle.scopedFor(env, EDITOR, "all")).bundle, lv.id);
+  assert.equal(full.living, true);
+  assert.equal(full.private, undefined);
+  assert.equal(full.events.length, lv.events.length);
   const p = dead();
   const v = Tools.personView(b, p.id);
   assert.equal(v.id, p.id);
@@ -121,7 +137,17 @@ test("submissions are checked before anything is filed", async () => {
   assert.match(await bad({ summary: "x", batch: { findings: good.batch.findings } }), /log every search/);
   assert.match(await bad({ summary: "" }), /summary/);
   assert.match(await bad({ summary: "x", batch: { log: good.batch.log }, edits: { reason: "dup", sources: [{ title: "t", note: "n" }], ops: [{ op: "person.delete", id: p.id }] } }), /never delete people/);
-  if (lv) assert.match(await bad({ summary: "x", batch: { findings: [{ ...good.batch.findings[0], person: lv.id }], log: good.batch.log } }), /living/);
+  // a finding about a living relative is fine in a full view, refused where the starter's view keeps them private
+  const onLiving = { summary: "x", batch: { findings: [{ ...good.batch.findings[0], person: lv.id }], log: [{ ...good.batch.log[0], person: lv.id }] } };
+  assert.equal((await Tools.checkSubmission(env, b, onLiving)).ok, true, "living relatives are researched");
+  const nb = (await Bundle.scopedFor(env, NAMES, "all")).bundle;
+  const r = await Tools.checkSubmission(env, nb, onLiving);
+  assert.equal(r.ok, false);
+  assert.match(r.errors.join(" | "), new RegExp(lv.id));
+  const edit = { summary: "x", batch: { log: good.batch.log }, edits: { reason: "A record gives the birth date.", sources: [{ title: "t", note: "n" }], ops: [{ op: "event.add", entity: "person", id: lv.id, event: { type: "Residence", date: "2001" } }] } };
+  assert.match((await Tools.checkSubmission(env, nb, edit)).errors.join(" | "), /private in this tree's view/);
+  const fullEdit = await Tools.checkSubmission(env, b, edit);
+  assert.equal(fullEdit.ok, true, JSON.stringify(fullEdit.errors));
   assert.match(await bad({ summary: "x", batch: { log: good.batch.log, people_status: { [p.id]: { status: "partly-verified", note: "n" } } } }), /status change needs/);
   assert.equal((await Tools.checkSubmission(env, b, { ...good, batch: { ...good.batch, people_status: { [p.id]: { status: "partly-verified", note: "n" } } } })).ok, true);
 });
@@ -174,22 +200,50 @@ test("the daily run limit is enforced", async () => {
   assert.match(last.data.error, /daily limit/);
 });
 
-test("profiles: written only for the dead, from facts that never name the living", async () => {
-  for (const p of Object.values(ex.people).filter((x) => x.living)) assert.ok((await Content.prepareProfile(env, p.id)).skipped);
+test("profiles: written for living relatives too; a living relative is named without dates; private views don't show them", async () => {
+  // living relatives get profiles like anyone else, given enough recorded
+  const lv = Object.values(ex.people).find((x) => x.living && x.events.length >= 2);
+  const lp = await Content.prepareProfile(env, lv.id);
+  assert.equal(lp.skipped, undefined, JSON.stringify(lp));
+  assert.match(lp.hash, /^[0-9a-f]{64}$/);
+  assert.equal(lp.facts.name, lv.name);
+  assert.equal(lp.facts.events.length, lv.events.length);
+  const thin = Object.values(ex.people).find((x) => x.living && x.events.length < 2 && !(x.notes || []).length);
+  if (thin) assert.match((await Content.prepareProfile(env, thin.id)).skipped, /not enough/);
+
+  // as someone else's relative, a living person appears by name, marked living, with no dates
   const withLivingKin = Object.values(ex.people).find((p) => !p.living && p.events.length >= 2 && [...(p.fams || [])].some((f) => (ex.families[f].children || []).some((c) => ex.people[c].living)));
-  const p = withLivingKin || dead();
+  assert.ok(withLivingKin, "the example family has someone with a living child");
+  const p = withLivingKin;
   const prep = await Content.prepareProfile(env, p.id);
   assert.match(prep.hash, /^[0-9a-f]{64}$/);
   assert.equal(prep.current, false);
-  const facts = JSON.stringify(prep.facts);
-  for (const q of Object.values(ex.people).filter((x) => x.living)) assert.ok(!facts.includes(q.name), `living ${q.id} named in profile facts`);
-  if (withLivingKin) assert.match(facts, /a living (son|daughter|child)/);
+  const kids = p.fams.flatMap((f) => ex.families[f].children || []).map((c) => ex.people[c]).filter((c) => c.living);
+  for (const k of kids) {
+    const line = prep.facts.family.find((x) => x.includes(k.name));
+    assert.match(line, new RegExp(`^(son|daughter|child) ${k.name} \\(living\\)$`), line);
+  }
+  assert.ok(!prep.facts.family.some((x) => /a living/.test(x)), "no unnamed 'a living …' any more");
+
   await Content.saveProfile(env, p.id, { text: "A short, factual biography of this person, written from the recorded facts only.", hash: prep.hash, model: "test" });
+  await Content.saveProfile(env, lv.id, { text: "A short, factual biography of a living relative, from the recorded facts only.", hash: lp.hash, model: "test" });
   assert.equal((await Content.prepareProfile(env, p.id)).current, true);
-  const shown = (await call("GET", "/api/tree?tree=all", { as: EDITOR })).data.people[p.id];
-  assert.match(shown.profile.text, /factual biography/);
-  // the plan skips it now, and a view without notes doesn't show it
-  assert.ok(!(await Content.planContent(env, { limit: 500 })).some((i) => i.kind === "profile" && i.id === p.id));
+  const shown = (await call("GET", "/api/tree?tree=all", { as: EDITOR })).data.people;
+  assert.match(shown[p.id].profile.text, /factual biography/);
+  assert.match(shown[lv.id].profile.text, /living relative/, "a full view shows a living relative's profile");
+  // the plan skips them now
+  const plan = await Content.planContent(env, { limit: 500 });
+  assert.ok(!plan.some((i) => i.kind === "profile" && (i.id === p.id || i.id === lv.id)));
+  // a view that reduces the living to names drops their profiles, and keeps the others
+  const names = (await call("GET", "/api/tree?tree=all", { as: NAMES })).data;
+  assert.equal(names.people[lv.id].profile, undefined);
+  assert.ok(!JSON.stringify(names).includes("living relative, from the recorded facts"));
+  assert.match(names.people[p.id].profile.text, /factual biography/);
+  // refreshing a profile from a view where they're private is refused
+  const rf = await call("POST", `/api/profiles/${lv.id}/refresh?tree=all`, { as: NAMES });
+  assert.equal(rf.status, 400);
+  assert.match(rf.data.error, /private in your view/);
+  // and a view without notes shows no profile at all
   await call("PUT", "/api/admin/views/nonotes", { body: { name: "No notes", filter: { living: "names-only", notes: false } } });
   await call("PUT", "/api/admin/grants", { body: { principal: MEMBER, tree_id: "all", role: "member", view_id: "nonotes" } });
   assert.equal((await call("GET", "/api/tree?tree=all", { as: MEMBER })).data.people[p.id].profile, undefined);
@@ -219,6 +273,9 @@ test("profile refresh and content refresh go to the agents", async () => {
   const r = await call("POST", `/api/profiles/${p.id}/refresh?tree=all`, { as: EDITOR });
   assert.equal(r.status, 202, JSON.stringify(r.data));
   assert.deepEqual(lastCall().body, { person: p.id, force: true });
+  const lv = living();
+  assert.equal((await call("POST", `/api/profiles/${lv.id}/refresh?tree=all`, { as: EDITOR })).status, 202, "a living relative's profile, in a full view");
+  assert.deepEqual(lastCall().body, { person: lv.id, force: true });
   assert.equal((await call("POST", "/api/content/refresh", { as: EDITOR })).status, 403);
   assert.equal((await call("POST", "/api/content/refresh", { as: OWNER })).status, 202);
   assert.equal(lastCall().url, "/internal/content/refresh");

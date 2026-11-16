@@ -177,9 +177,9 @@ Editors can hand a to-do or a person to a research agent that runs in Cloudflare
 **Who sees what.**
 
 - An agent sees the tree **exactly as the editor who started the run sees it**. It re-checks that before every tool call, so revoking their grant or cancelling the run stops it.
-- Living people reach the model as an id and a name only, so it can walk through the family. No dates, places, notes or events.
-- Findings about living people are rejected.
-- Profiles are written only for people who have died. Their facts name a living relative only as "a living son".
+- Living relatives are researched, written about and profiled like anyone else, as far as the starter's view shows them. People that view keeps private (living people in a `names-only` or `anonymous` view) reach the model as an id and a name only: no dates, places, notes or events, no findings, edits or stories about them.
+- Profiles are written for everyone with enough recorded, living relatives included. In someone else's profile, a living relative appears by name only, without dates.
+- Views that reduce living people to names (or hide their names) also drop the findings, to-dos, log entries, statuses, photos, profiles and stories about them, and stories that link them (`worker/scope.js`).
 - The agents have no URL of their own. Every request from outside goes to the site, which checks Access, the caller's role and the budgets, and only then calls the agents in-process (`env.AGENTS`, set up in `worker/main.js`).
 - **AI Gateway logs every request, prompts and responses included.** That means the facts sent to the model are stored in the gateway's logs, which only members of your Cloudflare account can read. Logs are kept per the gateway's retention setting; set `AI_GATEWAY_LOGS=false` to stop logging. Token use is also recorded in D1 (`agent_runs`, `ai_usage`), and Workers Traces get spans without content.
 - This does send family data (the people being researched, and their deceased relatives' facts) to Anthropic through Cloudflare. Leave the feature off if that isn't acceptable for your family.
@@ -275,12 +275,12 @@ Research → Agent runs → **Data quality review** starts an agent (`agents/src
 Editors can have an agent (`agents/src/agents/stories.js`, Flue, one Durable Object per run) **review** a story or **draft** a new one. Either way the result is a suggestion in Research → Suggestions; nothing is published until an editor approves it.
 
 - **Review:** **Review with AI** on a story page, with optional instructions. The agent checks every claim against the records of the people the story links and either reports the story as up to date (nothing filed) or proposes a revision that changes as little as needed. The queue shows the list of changes (each with its reason and the facts behind it) and a paragraph diff against the current text. Approving keeps the story's citations.
-- **Draft:** **Draft a story with AI** on the Stories page. Pick one or more people who have died, an optional angle, and a length (short ~300, medium ~700, long ~1,200 words). The agent writes from the records only, plus the site's context entries. The queue shows the story, its sources, and notes mapping each paragraph to the facts behind it. The notes aren't published.
+- **Draft:** **Draft a story with AI** on the Stories page. Pick one or more people, an optional angle, and a length (short ~300, medium ~700, long ~1,200 words). The agent writes from the records only, plus the site's context entries. The queue shows the story, its sources, and notes mapping each paragraph to the facts behind it. The notes aren't published.
 - **Checks on every submission:**
   - every `[[id|name]]` link is a person in the tree;
   - a draft links each of its subjects and is roughly the requested length;
   - every source is one the tree already cites for those people, or a context entry;
-  - living people are never a subject, and come to the agent as a name only.
+  - people the starter's view keeps private are never a subject, and come to the agent as a name only.
 - **No web access**, so nothing in a story can come from outside the tree.
 - **Budget:** one run against `AGENT_MAX_RUNS_PER_DAY`, spend against `AI_DAILY_BUDGET_USD` and `AGENT_MAX_RUN_USD`; model `AI_MODEL_STORIES` (default GLM-5.3), effort `AI_EFFORT_STORIES`. Durable Object migration `v4` (`FlueStoryWriterAgent`). The weekly content job's story check (`StoryReviewer`) is separate and unchanged.
 
@@ -292,15 +292,15 @@ Research → Agent runs → **Review the story library** starts an agent (`agent
 - **Audit:** every published story (up to 50, flagged ones first) is checked against the tree as it is now, when the run starts and again whenever the agent reads it:
   - links to people who are no longer in the tree, and people who were merged into someone else (followed through the merge);
   - dated claims ("born in 1897", "died in 1950") about the person linked just before them: flagged when the person's records give a different year (two years' leeway for "abt" dates) or record no such event;
-  - dated claims about someone living.
+  - dated claims about someone the starter's view keeps private.
 
   The flags are leads. The agent reads the story and the records, then gives each story a verdict: up to date, revised, or needs an editor.
 - **Fix:** a revision is checked with the stories agent's own checks (`checkStory`: links, sources, the story's citations kept) and filed as a story revision suggestion, shown as a diff in Research → Suggestions. **Nothing published changes until an editor approves it.** A story that already has a revision waiting gets no second one.
 - **Gaps:** candidate subjects for new stories, best first:
-  - people who have died with at least one sourced fact or source, scored by sourced facts, distinct sources, facts, notes and findings;
+  - people with at least one sourced fact or source (living relatives included), scored by sourced facts, distinct sources, facts, notes and findings;
   - events several such people share: the same migration (type, place, decade), war service (place, decade) or trade.
 
-  Anyone covered by a story sorts after everyone who isn't. Anyone who is or could be living (no death or burial recorded and born within 110 years) is skipped.
+  Anyone covered by a story sorts after everyone who isn't. People the starter's view keeps private are skipped.
 - **Commission:** up to N story-writer runs for the best candidates, each with a brief from the librarian. Each is an ordinary stories-agent draft run (`kind: "story"`, the stories agent's model, its own suggestion), started as the editor who started the librarian. Its `options.parent` names the librarian run; the librarian's report (`agent_runs.report.children`) lists it. No migration was needed for the link.
 - **Report:** each story's flags and verdict, with links to the suggested revisions; the candidates; and the story runs started, with their status.
 - **Budget:** the librarian is one run against `AGENT_MAX_RUNS_PER_DAY`; its own spend is capped by `AGENT_MAX_RUN_USD`. Each child run counts against the daily run and spend budgets as usual, and isn't started once they're used up. Model `AI_MODEL_LIBRARY` (default DeepSeek V4.1 Flash, the quality reviewer's model), effort `AI_EFFORT_LIBRARY`. Durable Object migration `v5` (`FlueStoryLibrarianAgent`). Stopping a librarian run doesn't stop story runs it already started; stop those separately.
@@ -329,16 +329,16 @@ Admin → **Research sites** (`#/admin/sites`, owner only) is the list of geneal
 
 ## Sherlock: find relatives (agent)
 
-**Find relatives** on a person page (editors, people who have died) starts Sherlock (`agents/src/agents/sherlock.js`, Flue, one Durable Object per run; shared logic in `worker/agent/relatives.js`). It searches records for the person's parents, siblings, spouses and children who aren't in the tree yet, and suggests them. It never adds anyone itself.
+**Find relatives** on a person page (editors) starts Sherlock (`agents/src/agents/sherlock.js`, Flue, one Durable Object per run; shared logic in `worker/agent/relatives.js`). It searches records for the person's parents, siblings, spouses and children who aren't in the tree yet, and suggests them. It never adds anyone itself.
 
 - **Options (all optional):** looking for any relative, parents, siblings, a spouse, children, or a named relative ("a brother called Example"); free-text hints; depth one generation (default) or two (also the relatives of the person's immediate family).
 - **What it starts with:** the person's full view (names, events with places, sources, findings, the research log, open to-dos), their immediate family already in the tree, and the research sites summary. It fetches anything else with the researcher's tools, under the same lean-context rules, and the same `web_search`, `web_fetch` and `research_sites`.
 - **What it files:** each candidate becomes its own **suggestion** in Research → Suggestions: a `new-person` finding (confidence, the records seen) carrying the edit ops that add the person and link them to the family (`person.create` plus `family.set_spouse`, `family.add_child` or `family.create`). Approving it applies both in one step. The change is logged as `agent:sherlock` **on behalf of** the approving editor (`via` = the run), and the finding is recorded on the relative's page as resolved. Rejecting it keeps the finding, dismissed, with the reviewer's note. The searches, negative ones included, and any to-dos for the owner go in one research suggestion.
 - **Checks before filing:**
   - **Already in the tree:** a candidate with the same first given name and surname as anyone in the tree (any recorded name, accents and case ignored), and birth and death years within two years where both are known, is dropped and listed as "already in the tree".
-  - **Living people:** a candidate with no death record who was born within 110 years, or whose birth year isn't known, is reported only as "possible living relative, not researched", with no name or details, and no suggestion is filed.
+  - **Living relatives** are suggested like anyone else. Nobody is attached to a person the starter's view keeps private.
   - Every candidate needs a source with a URL or a note saying where the record is, and its ops must apply to the tree as it is.
-- **Report:** Research → Agent runs shows each Sherlock run with what it suggested (and the suggestion numbers), how many possible living relatives it noted, who it found already in the tree, and the searches it logged.
+- **Report:** Research → Agent runs shows each Sherlock run with what it suggested (and the suggestion numbers), who it found already in the tree, and the searches it logged.
 - **Model and budget:** `AI_MODEL_RELATIVES` / `AI_EFFORT_RELATIVES` (default: the researcher's model, DeepSeek V4.1 Flash, high). One run against `AGENT_MAX_RUNS_PER_DAY`, spend against `AI_DAILY_BUDGET_USD` and `AGENT_MAX_RUN_USD`, pages and searches against `AGENT_MAX_FETCHES` and `AGENT_MAX_SEARCHES`. Durable Object migration `v6` (`FlueSherlockAgent`). API: `POST /api/agent/runs {tree, kind: "relatives", person, looking_for?, named?, hints?, depth?}`.
 
 ## GEDCOM X storage, export and import
@@ -384,7 +384,7 @@ Every write is also recorded in the `changes` table (who, when, before and after
 4. Copy the same file to `family-data/media/photos/` for local preview.
 5. Wire it up through a batch's `media` key: `{"media": {"<ID>": [{"file": "photos/<name>.jpg", "portrait": true, "caption": "…", "date": "c. 1925", "source": "Family collection, held by …"}]}}`. Then merge, build and load.
 
-Photos of living people: only with their consent, and only if the owner says so.
+Photos of living people: the owner decides. Strip location data first, as above.
 
 ## Your local files
 
