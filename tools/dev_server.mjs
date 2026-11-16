@@ -39,7 +39,9 @@ export async function startDevServer({ port = PORT, site = SITE, as = AS, quiet 
         const chunks = [];
         for await (const c of req) chunks.push(c);
         const headers = { "Content-Type": req.headers["content-type"] || "" };
-        if (req.headers["x-dev-principal"]) headers["X-Dev-Principal"] = req.headers["x-dev-principal"];
+        for (const name of ["x-dev-principal", "x-document-name", "x-document-title"]) {
+          if (req.headers[name]) headers[name] = req.headers[name];
+        }
         const r = await worker.fetch(new Request(url, { method: req.method, headers, body: chunks.length ? Buffer.concat(chunks) : undefined }), env, { waitUntil() {} });
         res.writeHead(r.status, Object.fromEntries(r.headers));
         res.end(Buffer.from(await r.arrayBuffer()));

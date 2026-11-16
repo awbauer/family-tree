@@ -1,6 +1,7 @@
 // The edit engine: apply a list of ops (docs/design/edit-ops.md) to the raw tree, in memory, atomically.
 // Returns the touched entities with before/after snapshots, so the caller can write them with version checks
 // and record an audit trail that can be reverted.
+import { documentType } from "./documents.ts";
 import { S as Strings } from "../strings/index.ts";
 
 const M = Strings.api.ops; // `S` below is the working state
@@ -132,7 +133,9 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
   };
   const cleanMedia = (o, m, i) => {
     for (const k of MEDIA_FIELDS) if (k in o) { if (o[k] == null || o[k] === "") delete m[k]; else m[k] = String(o[k]).slice(0, 1000); }
-    if ("type" in o && o.type != null && o.type !== "") {
+    const document = documentType(m.file);
+    if (document) m.type = document;
+    else if ("type" in o && o.type != null && o.type !== "") {
       if (!MEDIA_TYPES.includes(o.type)) throw new OpError(M.mediaType(MEDIA_TYPES), i);
       m.type = o.type;
     }
@@ -376,7 +379,10 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
         const list = S.media_map[pid] = [...(S.media_map[pid] || [])];
         if (!list.some((m) => m.file === o.file)) {
           const m = cleanMedia(o, { file: o.file }, i);
-          if (o.portrait) { for (const x of list) delete x.portrait; m.portrait = true; }
+          if (o.portrait && !documentType(o.file)) {
+            for (let j = 0; j < list.length; j++) if (list[j].portrait) list[j] = { ...list[j], portrait: undefined };
+            m.portrait = true;
+          }
           list.push(m);
         }
         break;
@@ -395,7 +401,7 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
         const pid = P(o.person, i);
         touch("media_map", pid);
         const list = S.media_map[pid] = (S.media_map[pid] || []).map((m) => ({ ...m }));
-        if (!list.some((x) => x.file === o.file)) throw new OpError(M.noMedia(o.file), i);
+        if (documentType(o.file) || !list.some((x) => x.file === o.file)) throw new OpError(M.noMedia(o.file), i);
         for (const m of list) { if (m.file === o.file) m.portrait = true; else delete m.portrait; }
         break;
       }

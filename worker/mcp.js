@@ -17,6 +17,7 @@
 import { HttpError, fail } from "./http.js";
 import { grantFor, can } from "./auth.js";
 import { now, J } from "./db.js";
+import { documentType, documentsFor, FILE_LIMIT } from "./documents.ts";
 import * as V from "./mcp-views.js";
 import { S } from "../strings/index.ts";
 
@@ -156,6 +157,20 @@ tool("get_provenance", { title: "Provenance (PROV-O)", description: "W3C PROV-O 
   props: { id: str("person id"), run: str("agent run id (editors)") }, run: async (x, a) => x.api("GET", `/api/prov${qs({ id: a.id, run: a.run })}`) });
 tool("get_media", { title: "Get photo or document", description: "A photo or scanned document attached to someone you can see (its `file` from get_person), returned as an image or a PDF.",
   props: { file: str("the media file key") }, required: ["file"], run: (x, a) => media(x, a.file) });
+tool("list_attachments", { title: "List attachments and reports", description: "List general attachments and Markdown reports attached to one person in your view.",
+  props: { person: str("person id"), type: en(["attachment", "report"], "omit to list both") }, required: ["person"],
+  run: async (x, a) => {
+    const b = await x.bundle();
+    if (!Object.hasOwn(b.people, a.person) || b.people[a.person].private) fail(404, M.notInTree(a.person));
+    return { attachments: documentsFor(b, a.person).filter((m) => !a.type || documentType(m.file) === a.type)
+      .map((m) => ({ ...m, download_url: documentUrl(x, m.file) })) };
+  } });
+tool("get_attachment", { title: "Open an attachment", description: "Get a private attachment by its file key. Files up to 8 MB are embedded. Larger files return an authenticated download link.",
+  props: { file: str("attachment file key from list_attachments") }, required: ["file"],
+  run: (x, a) => getDocument(x, a.file, "attachment") });
+tool("get_report", { title: "Read a Markdown report", description: "Read the original Markdown of a visible report by its file key.",
+  props: { file: str("report file key from list_attachments") }, required: ["file"],
+  run: (x, a) => getDocument(x, a.file, "report") });
 tool("preview_edit", { title: "Preview an edit", description: "What a list of edit ops would change, record by record (before and after), without saving anything. Show this to the member before suggest_edit or edit_tree.",
   props: { ops: OPS }, required: ["ops"], run: async (x, a) => x.api("POST", "/api/edit/preview", { ops: a.ops }) });
 tool("list_research_sites", { title: "Research sites", description: "The genealogy sites this family prefers for research, with coverage, record types, access and notes on how to search each (editors).",
@@ -198,6 +213,20 @@ W("upload_media", { title: "Upload a photo or document", description: "Upload a 
     try { bytes = Uint8Array.from(atob(String(a.data_base64).replace(/\s+/g, "")), (ch) => ch.charCodeAt(0)); } catch { fail(400, M.badBase64); }
     return x.api("POST", `/api/media/upload${qs({ name: a.name || "upload" })}`, bytes, { "Content-Type": a.content_type, "Content-Length": String(bytes.byteLength) });
   } });
+W("add_attachment", { title: "Add an attachment", description: "Upload any file (up to 20 MB) and attach it to a person. Members submit it for review.",
+  props: { person: str("person id"), name: str("original filename"), title: str("optional display title"), data_base64: str("file bytes as base64") },
+  required: ["person", "name", "data_base64"],
+  run: (x, a) => {
+    const data = a.data_base64.replace(/\s+/g, "");
+    if (data.length > Math.ceil(FILE_LIMIT / 3) * 4) fail(413, S.api.uploads.tooLarge);
+    let bytes;
+    try { bytes = Uint8Array.from(atob(data), (ch) => ch.charCodeAt(0)); } catch { fail(400, M.badBase64); }
+    return addDocument(x, a, "attachment", bytes);
+  } });
+W("add_report", { title: "Add a report", description: "Attach UTF-8 Markdown as a report with a built-in viewer. Members submit it for review.",
+  props: { person: str("person id"), name: str("filename ending in .md or .markdown"), title: str("optional display title"), markdown: str("the report in Markdown") },
+  required: ["person", "name", "markdown"],
+  run: (x, a) => addDocument(x, a, "report", new TextEncoder().encode(a.markdown)) });
 W("link_my_person", { title: "Link me to my person", description: "Say which person in the tree you are, so relationships are labelled relative to you. null unlinks.",
   props: { person_id: { type: ["string", "null"], description: "person id, or null" } }, required: ["person_id"],
   run: async (x, a) => x.api("PUT", "/api/me/person", { tree: x.treeId, person_id: a.person_id }) });
@@ -314,7 +343,35 @@ function b64(buf) {
   return btoa(s);
 }
 
+function documentUrl(x, file) {
+  return `${x.c.url.origin}/media/${file}${qs({ tree: x.treeId })}`;
+}
+
+function addDocument(x, args, type, bytes) {
+  return x.api("POST", `/api/attachments${qs({ person: args.person, type })}`, bytes, {
+    "Content-Length": String(bytes.byteLength),
+    "X-Document-Name": enc(args.name),
+    "X-Document-Title": enc(args.title || ""),
+  });
+}
+
+async function getDocument(x, file, type) {
+  if (documentType(file) !== type || !x.c.env.MEDIA) fail(404, M.notInTree(file));
+  const uri = documentUrl(x, file);
+  const response = await x.downloadDocument(uri, file);
+  if (type === "report") return { file, markdown: await response.text(), download_url: uri };
+  const size = await x.c.env.DB.prepare("SELECT bytes FROM uploads WHERE key = ?").bind(file).first("bytes");
+  const mimeType = "application/octet-stream";
+  if (size > MEDIA_MAX) {
+    await response.body?.cancel();
+    return { content: [{ type: "resource_link", name: file, uri, mimeType, size }] };
+  }
+  return { content: [{ type: "resource", resource: { uri, mimeType, blob: b64(await response.arrayBuffer()) } }] };
+}
+
 async function media(x, file) {
+  const typeOfDocument = documentType(file);
+  if (typeOfDocument) return getDocument(x, file, typeOfDocument);
   const b = await x.bundle();
   const files = new Set([...Object.values((b.research && b.research.media) || {}).flat().map((m) => m && m.file), ...Object.values(b.media || {}).map((m) => m.file),
   ]);
@@ -354,6 +411,7 @@ export async function callTool(c, deps, name, rawArgs) {
     const x = {
       c, treeId,
       bundle: () => deps.scoped(c, g),
+      downloadDocument: (uri, file) => deps.downloadDocument({ ...c, url: new URL(uri) }, file),
       api: (method, path, body, headers) => {
         const sep = path.includes("?") ? "&" : "?";
         return callRoute(c, deps.route, method, treeId && !/[?&]tree=/.test(path) ? `${path}${sep}tree=${enc(treeId)}` : path, body, headers);

@@ -230,6 +230,31 @@ export const person = {
     parentsMarried: "Parents married",
   },
 
+  attachments: {
+    title: "Attachments",
+    none: "No attachments yet.",
+    attachment: "Attachment",
+    report: "Report",
+    addAttachment: "Add an attachment",
+    addReport: "Add a report",
+    chooseFile: "File",
+    markdownFile: "Markdown file",
+    documentTitle: "Title (optional)",
+    upload: "Upload",
+    suggest: "Submit for review",
+    sent: "Submitted for review.",
+    cancel: "Cancel",
+    download: "Download",
+    read: "Read report",
+    loading: "Loading report…",
+    loadError: "The report could not be opened.",
+    uploadError: "The file could not be uploaded.",
+    remove: "Remove",
+    suggestRemove: "Suggest removing",
+    removeConfirm: "Remove this file from the person's page?",
+    removeReason: "Remove an attachment",
+  },
+
   // web/src/pages/person/Photos.tsx
   photos: {
     title: "Photos and documents",

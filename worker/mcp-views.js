@@ -1,6 +1,7 @@
 // What the MCP server's read tools return: plain functions over a scoped bundle (worker/scope.js), so every answer
 // stays inside what the caller may see, and they run (and are tested) without a request. A person their view reduces
 // to a name comes through as {id, name, private: true}: enough to walk through the family, nothing more.
+import { documentType, documentsFor } from "./documents.ts";
 import * as Graph from "./graph.js";
 import { relationship } from "./agent/tools.js";
 
@@ -114,8 +115,9 @@ export function person(b, id, { comments } = {}) {
     events: (p.events || []).map((e) => eventOut(b, e)),
     citations: (p.citations || []).map((c) => cite(b, c)),
     notes: p.notes,
+    attachments: documentsFor(b, id),
     media: [
-      ...(((b.research && b.research.media) || {})[id] || []).map((m) => compact({ file: m.file, caption: m.caption, type: m.type, date: m.date, place: m.place, note: m.note, source: m.source, main: m.portrait || undefined })),
+      ...(((b.research && b.research.media) || {})[id] || []).filter((m) => !documentType(m.file)).map((m) => compact({ file: m.file, caption: m.caption, type: m.type, date: m.date, place: m.place, note: m.note, source: m.source, main: m.portrait || undefined })),
       ...(p.media || []).map((mid) => (b.media || {})[mid]).filter(Boolean).map((m) => compact({ id: m.id, file: m.file, caption: m.title, type: m.type, date: m.date, place: m.place, imported: true })),
     ],
     profile: p.profile && p.profile.text,

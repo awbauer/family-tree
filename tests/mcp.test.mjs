@@ -289,3 +289,52 @@ test("exports respect the caller's view", async () => {
   assert.match(ged, /^0 HEAD/);
   assert.equal((await tool("export_tree", {}, MEMBER)).error, true);
 });
+
+test("person attachments keep the original bytes and obey tree and media scope", async () => {
+  const file = Buffer.from([0x50, 0x4b, 0xff, 0x00]);
+  const up = await tool("add_attachment", { person: "I1", name: "Example archive.zip", data_base64: file.toString("base64") });
+  assert.equal(up.error, false, up.data);
+  assert.equal(up.data.type, "attachment");
+  const key = up.data.file;
+  const get = await tool("get_attachment", { file: key });
+  assert.equal(get.content[0].resource.blob, file.toString("base64"));
+  const list = await tool("list_attachments", { person: "I1" });
+  assert.ok(list.data.attachments.some((m) => m.file === key && m.caption === "Example archive.zip"));
+  assert.equal((await tool("get_attachment", { file: key }, NAMES)).error, true);
+  assert.equal((await tool("get_attachment", { file: key }, MEMBER)).error, true);
+  const res = await worker.fetch(new Request(`https://tree.example.test/media/${key}?tree=all`, {
+    headers: { "X-Dev-Principal": OWNER },
+  }), env);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("Content-Type"), "application/octet-stream");
+  assert.equal(res.headers.get("X-Content-Type-Options"), "nosniff");
+  assert.match(res.headers.get("Content-Disposition"), /^attachment;.*Example%20archive.zip$/);
+  assert.deepEqual(Buffer.from(await res.arrayBuffer()), file);
+  assert.equal((await call("GET", `/media/${key}?tree=all&preview_view=names`)).status, 404);
+});
+
+test("member reports are private until approved and cannot become a portrait", async () => {
+  const markdown = "# Example report\n\n**Sample** text.";
+  const args = { person: "I17", name: "Example.md", markdown };
+  assert.equal((await tool("add_report", { ...args, name: "Example.pdf" }, MEMBER)).error, true);
+  const up = await tool("add_report", args, MEMBER);
+  assert.equal(up.error, false, up.data);
+  const { file, proposal } = up.data;
+  assert.equal((await tool("get_report", { file }, MEMBER)).error, true);
+  assert.equal((await call("GET", `/media/${file}?tree=one&proposal=${proposal}`)).data, markdown);
+  assert.equal((await call("GET", `/media/${file}?tree=one&proposal=${proposal + 1}`)).status, 404);
+  const approved = await tool("review_suggestion", { id: proposal, decision: "approve", tree: "one" });
+  assert.equal(approved.error, false, approved.data);
+  assert.equal((await tool("get_report", { file }, MEMBER)).data.markdown, markdown);
+  const person = (await tool("get_person", { id: "I17" }, MEMBER)).data;
+  assert.equal(person.attachments.find((m) => m.file === file).type, "report");
+  assert.ok(!person.media?.some((m) => m.file === file));
+  const portrait = await tool("edit_tree", { ops: [{ op: "media.set_primary", person: "I17", file }], reason: "test" });
+  assert.equal(portrait.error, true);
+  const remove = await tool("edit_tree", { ops: [{ op: "media.detach", person: "I17", file }], reason: "test" });
+  assert.equal(remove.error, false, remove.data);
+  assert.equal((await tool("get_report", { file }, MEMBER)).error, true);
+  const undo = await tool("revert_change", { batch: remove.data.batch, reason: "test" });
+  assert.equal(undo.error, false, undo.data);
+  assert.equal((await tool("get_report", { file }, MEMBER)).data.markdown, markdown);
+});
