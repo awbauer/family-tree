@@ -162,6 +162,7 @@ export const common = {
     finding: "Finding",
     reopened: "reopened",
     researchStatus: "Research status",
+    statusNote: "Status note",
     sourceLabel: "Source",
     family: "Family",
     person: "Person",

@@ -11,11 +11,15 @@ const M = Strings.api.ops;
 
 export async function loadEditable(env) {
   const tree = await readTree(env);
-  const cfg = (await env.DB.prepare("SELECT key, value, version FROM config WHERE key IN ('media_map', 'aliases')").all()).results;
+  const [cfg, statuses] = await Promise.all([
+    env.DB.prepare("SELECT key, value, version FROM config WHERE key IN ('media_map', 'aliases')").all().then((r) => r.results),
+    env.DB.prepare("SELECT person_id, data, version FROM statuses").all().then((r) => r.results),
+  ]);
   const versions = { ...tree.versions };
   const c = Object.fromEntries(cfg.map((r) => { versions[`config:${r.key}`] = r.version; return [r.key, parse(r.value, {})]; }));
+  const statusMap = Object.fromEntries(statuses.map((r) => { versions[`status:${r.person_id}`] = r.version; return [r.person_id, parse(r.data)]; }));
   return {
-    state: { people: tree.people, families: tree.families, sources: tree.sources, media_map: c.media_map || {}, aliases: c.aliases || {} },
+    state: { people: tree.people, families: tree.families, sources: tree.sources, statuses: statusMap, media_map: c.media_map || {}, aliases: c.aliases || {} },
     versions, mode: tree.mode,
   };
 }
@@ -32,6 +36,7 @@ export function commitStatements(env, { touched, versions, state, actor, actorKi
   for (const x of touched) {
     if (x.type === "media_map") { mediaTouched = true; continue; }
     if (x.type === "aliases") { aliasesTouched = true; continue; }
+    if (x.type === "status" && x.after != null) st.push(guard(env, "NOT EXISTS (SELECT 1 FROM people WHERE id = ?)", x.id));
     const w = writeRecord(env, mode, x, versions, t, actor);
     st.push(...w.statements);
     const vAfter = w.versionAfter;
@@ -39,7 +44,7 @@ export function commitStatements(env, { touched, versions, state, actor, actorKi
       .bind(t, actor, actorKind, x.type, x.id, op, x.before == null ? null : J(x.before), x.after == null ? null : J(x.after), reason || null, proposalId || null, batchId, vAfter, src, onBehalfOf, via));
   }
   // A merge (person.merge) adds an alias drop -> keep. Re-point the research rows filed under the dropped person in the
-  // same batch, so findings, to-dos, log entries, statuses and comments follow them to the surviving record.
+  // same batch, so findings, to-dos, log entries and comments follow them to the surviving record.
   if (aliasesTouched) {
     const al = touched.find((x) => x.type === "aliases");
     for (const [drop, keep] of Object.entries(al.after || {})) {
@@ -48,9 +53,6 @@ export function commitStatements(env, { touched, versions, state, actor, actorKi
       st.push(env.DB.prepare("UPDATE todos SET person_id = ?, updated_at = ?, updated_by = ? WHERE person_id = ?").bind(keep, t, actor, drop));
       st.push(env.DB.prepare("UPDATE research_log SET person_id = ?, data = json_set(data, '$.person', ?) WHERE person_id = ?").bind(keep, keep, drop));
       st.push(env.DB.prepare("UPDATE comments SET entity_id = ? WHERE entity_type = 'person' AND entity_id = ?").bind(keep, drop));
-      // keep the surviving person's own status if it has one; otherwise take the dropped person's
-      st.push(env.DB.prepare("INSERT OR IGNORE INTO statuses (person_id, data, updated_at, updated_by) SELECT ?, data, ?, ? FROM statuses WHERE person_id = ?").bind(keep, t, actor, drop));
-      st.push(env.DB.prepare("DELETE FROM statuses WHERE person_id = ?").bind(drop));
     }
   }
   for (const [key, flag, value] of [["media_map", mediaTouched, state.media_map], ["aliases", aliasesTouched, state.aliases]]) {
@@ -165,7 +167,7 @@ export async function revertBatch(env, batchId, { actor, actorKind, reason }) {
         .bind(t, actor, actorKind, r.entity_id, r.after, r.before, reason || `revert ${batchId}`, nb));
       continue;
     }
-    if (!["person", "family", "source"].includes(r.entity_type)) continue;
+    if (!["person", "family", "source", "status"].includes(r.entity_type)) continue;
     // allowed only if the record still holds exactly what this batch wrote (content, not version: undoing a later
     // change restores this batch's result, after which this batch can be undone too)
     st.push(...await restoreRecord(env, mode, r.entity_type, r.entity_id, before, after, t, actor));

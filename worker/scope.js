@@ -1,3 +1,4 @@
+import { documentType } from "./documents.ts";
 // Per-tree, per-view filtering of the derived bundle. Runs on the FINAL payload, server-side, before anything
 // leaves the Worker. Two passes: (1) structural: drop people/links/research outside the scope; (2) a text scrub
 // that replaces any remaining name or ID of a hidden person inside free text (issue messages, event notes, story
@@ -160,6 +161,13 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
   for (const p of Object.values(people)) (p.media || []).forEach((m) => citedMedia.add(m));
   const citedAnywhere = citingSources(P0, F0, R0.media, new Set());
   const sources = v.sources ? Object.fromEntries(Object.entries(full.sources || {}).filter(([k]) => citedSources.has(k) || !citedAnywhere.has(k))) : {};
+  if (!v.sources) research.media = Object.fromEntries(Object.entries(research.media).map(([pid, files]) => [pid,
+    files.map((m) => {
+      if (!m.source || !documentType(m.file)) return m;
+      const { source, ...file } = m;
+      return file;
+    }),
+  ]));
   const media = v.media ? Object.fromEntries(Object.entries(full.media || {}).filter(([k]) => citedMedia.has(k))) : {};
 
   // ---- 7. data-quality issues: re-run on the scoped data when possible (messages embed names)

@@ -8,7 +8,8 @@
 import { J, now, parse } from "../db.js";
 import { scopedFor } from "../bundle.js";
 import { can } from "../auth.js";
-import { referencedIds, applyOps, OpError } from "../ops.js";
+import { referencedIds, applyOps, OpError, editsPersonStatus, documentSource } from "../ops.js";
+import { S } from "../../strings/index.ts";
 import { loadEditable } from "../store.js";
 import { recordUsage } from "./config.js";
 
@@ -190,6 +191,11 @@ export async function checkChange(env, sc, ops) {
   if (ops.length > 50) return { errors: ["ops: at most 50 ops in one change; split it up"] };
   const b = sc.bundle;
   const { people, families } = referencedIds(ops);
+  if (!b.scope.view.research && ops.some(editsPersonStatus)) errors.push(S.api.edit.personStatusHidden);
+  for (const op of ops) {
+    const source = documentSource(op);
+    if (source && !Object.hasOwn(b.sources, source)) errors.push(S.api.edit.sourceNotVisible(source));
+  }
   for (const pid of people) {
     if (!b.people[pid]) errors.push(`person ${pid} isn't in this tree`);
     else if (b.people[pid].private) errors.push(`${pid} is shown to this editor as a name only; their details can't be changed`);
@@ -200,7 +206,9 @@ export async function checkChange(env, sc, ops) {
   const { state } = await loadEditable(env);
   try {
     const res = applyOps(state, ops, { actor: sc.access.principal });
-    const touched = res.touched.filter((x) => ["person", "family", "media_map", "source"].includes(x.type));
+    const touched = res.touched.filter((x) => x.type === "status"
+      ? b.scope.view.research && b.people[x.id] && !b.people[x.id].private
+      : ["person", "family", "media_map", "source"].includes(x.type));
     if (!touched.length) return { errors: ["these ops change nothing: the tree already says this"] };
     return { touched, created: res.created };
   } catch (e) {

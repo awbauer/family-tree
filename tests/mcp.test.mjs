@@ -365,3 +365,82 @@ test("MCP Apps resource is available and record cards preserve the selected tree
   assert.ok(fallback.body.result.content.every((item) => item.type === "text"));
   assert.match(JSON.parse(fallback.body.result.content[0].text).page_url, /#\/person\/I4$/);
 });
+
+test("person.update previews and edits person status with evidence and supports undo", async () => {
+  const person = "I4";
+  const before = (await tool("get_person", { id: person })).data;
+  const set = { research_status: "disputed", status_note: "The example records disagree." };
+  const ops = [{ op: "person.update", id: person, set }];
+  const preview = await tool("preview_edit", { ops }, EDITOR);
+  assert.equal(preview.error, false, preview.data);
+  assert.equal(preview.data.touched[0].type, "status");
+  assert.deepEqual(preview.data.touched[0].after, { status: set.research_status, note: set.status_note });
+
+  const evidence = [{ title: "Example register", note: "Page 8" }];
+  const saved = await tool("edit_tree", { ops, reason: "Check conflicting records", sources: evidence }, EDITOR);
+  assert.equal(saved.error, false, saved.data);
+  const result = (await tool("get_person", { id: person })).data;
+  assert.equal(result.research_status, set.research_status);
+  assert.equal(result.status_note, set.status_note);
+  const logged = (await tool("get_history", { id: person }, EDITOR)).data.history.find((h) => h.batch === saved.data.batch);
+  assert.equal(logged.reason, "Check conflicting records");
+  assert.deepEqual(logged.sources, evidence);
+  assert.equal(logged.entities[0].type, "status");
+
+  const downgrade = await tool("edit_tree", {
+    reason: "Resolve the conflict", ops: [{ op: "person.update", id: person, set: { research_status: "partly-verified" } }],
+  }, EDITOR);
+  assert.equal(downgrade.error, false, downgrade.data);
+  assert.equal((await tool("get_person", { id: person })).data.status_note, set.status_note);
+  assert.equal((await tool("revert_change", { batch: saved.data.batch }, EDITOR)).error, true);
+  assert.equal((await tool("revert_change", { batch: downgrade.data.batch }, EDITOR)).error, false);
+  assert.equal((await tool("revert_change", { batch: saved.data.batch }, EDITOR)).error, false);
+  const restored = (await tool("get_person", { id: person })).data;
+  assert.equal(restored.research_status, before.research_status);
+  assert.equal(restored.status_note, before.status_note);
+});
+
+test("unknown person.update fields fail explicitly and status suggestions require approval", async () => {
+  const person = "I17";
+  const before = (await tool("get_person", { id: person }, MEMBER)).data;
+  const bad = [{ op: "person.update", id: person, set: { notes: "Should not save", research_stauts: "verified" } }];
+  assert.match((await tool("preview_edit", { ops: bad }, MEMBER)).data, /unknown person.update set fields: research_stauts/);
+  assert.equal((await tool("edit_tree", { ops: bad, reason: "test" }, EDITOR)).error, true);
+  assert.deepEqual((await tool("get_person", { id: person }, MEMBER)).data.notes, before.notes);
+  const invalid = [{ op: "person.update", id: person, set: { research_status: "wrong" } }];
+  assert.match((await tool("preview_edit", { ops: invalid }, MEMBER)).data, /research_status must be one of/);
+
+  const ops = [{ op: "person.update", id: person, set: { research_status: "verified", status_note: null } }];
+  const proposed = await tool("suggest_edit", { ops, reason: "Example status review" }, MEMBER);
+  assert.equal(proposed.error, false, proposed.data);
+  assert.equal((await tool("get_person", { id: person }, MEMBER)).data.research_status, before.research_status);
+  const approved = await tool("review_suggestion", { id: proposed.data.proposal.id, decision: "approve", tree: "one" });
+  assert.equal(approved.error, false, approved.data);
+  const updated = (await tool("get_person", { id: person }, MEMBER)).data;
+  assert.equal(updated.research_status, "verified");
+  assert.equal(updated.status_note, undefined);
+});
+
+test("reports link existing sources on upload or through a later media edit", async () => {
+  const args = { person: "I4", name: "Example citation.md", markdown: "# Example transcription" };
+  const count = env.MEDIA.objects.size;
+  assert.equal((await tool("add_report", { ...args, source: "S-not-found" })).error, true);
+  assert.equal(env.MEDIA.objects.size, count);
+
+  const uploaded = await tool("add_report", { ...args, source: "S2" }, EDITOR);
+  assert.equal(uploaded.error, false, uploaded.data);
+  const { file } = uploaded.data;
+  const report = (await tool("get_report", { file })).data;
+  assert.equal(report.source, "S2");
+  assert.match(report.source_url, /#\/source\/S2$/);
+  const source = (await tool("get_source", { id: "S2" })).data;
+  assert.ok(source.cited_by.some((use) => use.file === file && use.where === "report" && use.page_url.includes("attachment=")));
+
+  const existing = await tool("add_report", { ...args, name: "Another example.md" }, EDITOR);
+  const set = [{ op: "media.update", person: args.person, file: existing.data.file, set: { source: "S2" } }];
+  const edit = await tool("edit_tree", { ops: set, reason: "Link the example register" }, EDITOR);
+  assert.equal(edit.error, false, edit.data);
+  assert.equal((await tool("get_report", { file: existing.data.file })).data.source, "S2");
+  assert.equal((await tool("revert_change", { batch: edit.data.batch }, EDITOR)).error, false);
+  assert.equal((await tool("get_report", { file: existing.data.file })).data.source, undefined);
+});

@@ -193,3 +193,17 @@ test("MCP cards render in a sandbox and open a record in the selected tree", asy
     await preview.close();
   }
 });
+
+test("a report linked to a source is readable from both pages", async () => {
+  const response = await page.request.post(`${srv.url}/mcp`, { data: {
+    jsonrpc: "2.0", id: 1, method: "tools/call",
+    params: { name: "add_report", arguments: { person: "I4", source: "S2", name: "example-source.md", markdown: "# Example transcription" } },
+  } });
+  assert.equal((await response.json()).result.isError, undefined);
+  await page.goto(`${srv.url}/#/person/I4`);
+  const report = page.locator(".attachment-list li").filter({ hasText: "example-source.md" });
+  await report.getByRole("link", { name: /Source:/ }).click();
+  await page.waitForURL("**/#/source/S2");
+  await report.getByRole("button", { name: "Read report" }).click();
+  await page.frameLocator(".report-viewer").getByRole("heading", { name: "Example transcription" }).waitFor();
+});

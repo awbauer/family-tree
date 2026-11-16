@@ -33,7 +33,7 @@ import * as Agent from "./agent/routes.js";
 import * as Chat from "./agent/chat-routes.js";
 import { validateBatch, researchStatements, followMerges, dropMissing } from "./research.js";
 import { J, now, parse, loadState, todoOut, write, audit, meta } from "./db.js";
-import { OpError, referencedIds, sourceIds, applyOps, assignFids } from "./ops.js";
+import { OpError, referencedIds, sourceIds, applyOps, assignFids, editsPersonStatus, documentSource } from "./ops.js";
 import { loadEditable, applyAndCommit, revertBatch, isConflict, newBatchId } from "./store.js";
 import * as Graph from "./graph.js";
 import * as Prov from "./prov.js";
@@ -321,8 +321,9 @@ async function listProposals(c) {
   if (!can.review(g)) rows = rows.filter((r) => r.author === self(c)); // members see their own suggestions
   const b = await scoped(c, g);
   rows = rows.filter((row) => row.kind !== "edit" || (parse(row.payload, {}).ops || []).every((op) => {
-    if (!documentType(op.file)) return true;
-    return canSeeDocuments(b, b.aliases?.[op.person] || op.person);
+    if (editsPersonStatus(op)) return canSeePersonStatus(b, b.aliases?.[op.id] || op.id);
+    if (documentType(op.file)) return canSeeDocuments(b, b.aliases?.[op.person] || op.person);
+    return true;
   }));
   return json({ proposals: rows.map(proposalOut) });
 }
@@ -456,6 +457,10 @@ async function todoCloseStatements(c, row, payload, d, t, id) {
 async function checkEdit(c, g, payload, { dryRun, uploader = self(c) }) {
   if (!payload || !Array.isArray(payload.ops) || !payload.ops.length) fail(400, S.api.edit.opsRequired);
   const b = await scoped(c, g);
+  for (const op of payload.ops) {
+    if (!op || typeof op.op !== "string") fail(422, S.api.ops.unknownOp(op?.op));
+    if (editsPersonStatus(op) && !b.scope.view.research) fail(403, S.api.edit.personStatusHidden);
+  }
   const { people, families } = referencedIds(payload.ops);
   for (const pid of people) {
     const p = b.people[pid];
@@ -466,6 +471,11 @@ async function checkEdit(c, g, payload, { dryRun, uploader = self(c) }) {
   for (const op of payload.ops) {
     if (typeof op?.op !== "string" || !op.op.startsWith("media.") || !documentType(op.file)) continue;
     if (!b.scope.view.media) fail(403, S.api.uploads.documentsHidden);
+    const source = documentSource(op);
+    if (source && (!b.scope.view.sources || (!Object.hasOwn(b.sources, source) &&
+      !payload.ops.some((candidate) => candidate.op === "source.upsert" && candidate.id === source)))) {
+      fail(403, S.api.edit.sourceNotVisible(source));
+    }
     if (op.op === "media.attach" && uploader) {
       const upload = await c.env.DB.prepare("SELECT uploaded_by FROM uploads WHERE key = ?").bind(op.file).first();
       if (upload?.uploaded_by !== uploader) fail(403, S.api.uploads.uploadNotOwned);
@@ -499,7 +509,7 @@ async function edit(c, d) {
   const extra = await resolveStatements(c, g, d.resolves, { batch: batchId, note: d.reason });
   try {
     const res = await applyAndCommit(c.env, d.ops, { actor: self(c), actorKind: "person", reason: d.reason, sources: d.sources, batchId, extra });
-    return json({ ok: true, batch: res.batchId, touched: res.touched.filter((x) => x.type !== "media_map" || canSeeDocuments(b, x.id)), created: res.created, resolved: (d.resolves || []).map(Number) });
+    return json({ ok: true, batch: res.batchId, touched: res.touched.filter((x) => visibleEditItem(b, x)), created: res.created, resolved: (d.resolves || []).map(Number) });
   } catch (e) {
     if (e instanceof OpError) fail(422, e.message);
     if (isConflict(e)) fail(409, S.api.edit.conflict);
@@ -516,7 +526,7 @@ async function previewEdit(c) {
   const { state } = await loadEditable(c.env);
   try {
     const res = applyOps(state, d.ops, { actor: self(c) });
-    return json({ touched: res.touched.filter((x) => x.type === "media_map" ? canSeeDocuments(b, x.id) : ["person", "family", "source"].includes(x.type)) });
+    return json({ touched: res.touched.filter((x) => ["media_map", "person", "family", "source", "status"].includes(x.type) && visibleEditItem(b, x)) });
   } catch (e) { if (e instanceof OpError) fail(422, e.message); throw e; }
 }
 
@@ -587,7 +597,8 @@ async function entityRows(c, g, b, id, { limit = 200 } = {}) {
 }
 
 /** Never show snapshots of entities outside the caller's scope. */
-const visibleRow = (c, g, b) => (r) => ["person", "media", "status"].includes(r.entity_type) ? !!b.people[r.entity_id] || c.access.isOwner
+const visibleRow = (c, g, b) => (r) => r.entity_type === "status" ? canSeePersonStatus(b, r.entity_id)
+  : ["person", "media"].includes(r.entity_type) ? !!b.people[r.entity_id] || c.access.isOwner
   : r.entity_type === "family" ? !!b.families[r.entity_id] || c.access.isOwner
   : r.entity_type === "finding" ? (b.research.findings || []).some((f) => String(f.id) === r.entity_id)
   : c.access.isOwner || can.review(g);
@@ -600,7 +611,7 @@ async function history(c) {
   if (id) rows = await entityRows(c, g, b, id);
   else {
     if (!can.review(g)) fail(403, S.api.history.editorsFull);
-    rows = (await c.env.DB.prepare("SELECT * FROM changes WHERE entity_type IN ('person','family','source','config') ORDER BY id DESC LIMIT 200").all()).results.filter(visibleRow(c, g, b));
+    rows = (await c.env.DB.prepare("SELECT * FROM changes WHERE entity_type IN ('person','family','source','config','status') ORDER BY id DESC LIMIT 200").all()).results.filter(visibleRow(c, g, b));
   }
   const batches = {};
   for (const r of rows) {
@@ -647,6 +658,13 @@ async function revert(c, batchId) {
   const g = grantOrFail(c);
   if (!can.review(g) || c.access.kind === "agent") fail(403, S.api.history.editorsRevert);
   const d = await c.request.json().catch(() => ({}));
+  if (!c.access.isOwner) {
+    const statuses = (await c.env.DB.prepare("SELECT entity_id FROM changes WHERE batch_id = ? AND entity_type = 'status'").bind(batchId).all()).results;
+    if (statuses.length) {
+      const b = await scoped(c, g);
+      if (statuses.some(({ entity_id }) => !canSeePersonStatus(b, b.aliases?.[entity_id] || entity_id))) fail(403, S.api.edit.personStatusHidden);
+    }
+  }
   try {
     const r = await revertBatch(c.env, batchId, { actor: self(c), actorKind: "person", reason: d.reason });
     if (!r) fail(404, S.api.history.noSuchChange);
@@ -711,12 +729,13 @@ async function upload(c) {
 async function addDocument(c) {
   const g = grantOrFail(c);
   const sp = c.url.searchParams;
-  const person = sp.get("person"), type = sp.get("type");
+  const person = sp.get("person"), type = sp.get("type"), source = sp.get("source");
   const origin = c.request.headers.get("Origin");
   if (origin && origin !== c.url.origin) fail(403, S.api.uploads.crossOrigin);
   if (type !== "attachment" && type !== "report") fail(400, S.api.uploads.documentType);
   const b = await scoped(c, g);
   if (!canSeeDocuments(b, person)) fail(403, S.api.uploads.documentsHidden);
+  if (source && !Object.hasOwn(b.sources, source)) fail(403, S.api.edit.sourceNotVisible(source));
   if (!c.env.MEDIA) fail(500, S.api.http.noMediaBinding);
 
   let name, title;
@@ -757,12 +776,12 @@ async function addDocument(c) {
   await c.env.DB.prepare("INSERT INTO uploads (key, uploaded_by, uploaded_at, content_type, bytes, original_name) VALUES (?, ?, ?, ?, ?, ?)")
     .bind(key, self(c), now(), contentType, size, name).run();
   const reason = report ? S.api.uploads.addReport : S.api.uploads.addAttachment;
-  const payload = { reason, ops: [{ op: "media.attach", person, file: key, type, caption: title || name }] };
+  const payload = { reason, ops: [{ op: "media.attach", person, file: key, type, caption: title || name, ...(source ? { source } : {}) }] };
   const direct = can.review(g) && c.access.kind !== "agent";
   const result = direct ? await edit(c, { tree: g.tree_id, ...payload })
     : await createProposal(c, { tree: g.tree_id, kind: "edit", payload, rationale: reason });
   const saved = await result.json();
-  return json({ file: key, type, ...(direct ? { batch: saved.batch } : { proposal: saved.proposal.id }) }, 201);
+  return json({ file: key, type, ...(source ? { source } : {}), ...(direct ? { batch: saved.batch } : { proposal: saved.proposal.id }) }, 201);
 }
 
 // ---------------------------------------------------------------- export (#8)
@@ -933,6 +952,16 @@ async function media(c) {
   obj.writeHttpMetadata(headers);
   headers.set("etag", obj.httpEtag);
   return new Response(obj.body, { headers });
+}
+
+function canSeePersonStatus(b, person) {
+  return b.scope.view.research && Object.hasOwn(b.people, person) && !b.people[person].private;
+}
+
+function visibleEditItem(b, item) {
+  if (item.type === "media_map") return canSeeDocuments(b, item.id);
+  if (item.type === "status") return canSeePersonStatus(b, item.id);
+  return true;
 }
 
 function canSeeDocuments(b, person) {

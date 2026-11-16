@@ -7,7 +7,7 @@ IDs: people `I…`, families `F…`, sources `S…`, media `O…` (new ones get 
 | op | fields | notes |
 |---|---|---|
 | `person.create` | `id?`, `names: [{given, surname, suffix?, type?}]`, `sex?` (`M`/`F`/`U`), `events?: [event]` | |
-| `person.update` | `id`, `set: {sex?, notes?}` | |
+| `person.update` | `id`, `set: {sex?, notes?, research_status?, status_note?}` | Person-level status is `unverified`, `partly-verified`, `verified`, or `disputed`. A null or blank `status_note` clears it. Omitted fields keep their values. Unknown fields in `set` are rejected. |
 | `person.delete` | `id` | Only if they're in no family; unlink first |
 | `person.merge` | `keep`, `drop` | Same rules as `tools/edits.py` merge_people; `drop` becomes an alias |
 | `name.add` | `person`, `name: {given, surname, suffix?, type?}` | gets a new `fid` |
@@ -29,7 +29,7 @@ IDs: people `I…`, families `F…`, sources `S…`, media `O…` (new ones get 
 | `source.merge` | `keep`, `drop` | Re-points every use of `drop` to `keep`: citations on people, names, person and family events, fact-review evidence, and photos' `source`. Fills `keep`'s empty fields from `drop`, then removes `drop`. One batch, so one undo restores both |
 | `source.delete` | `id` | Only when nothing cites it; merge a cited duplicate instead |
 | `media.attach` | `person`, `file`, `caption?`, `type?`, `date?`, `place?`, `note?`, `source?`, `portrait?` | `file` is an R2 key already uploaded. `portrait: true` makes it the main photo |
-| `media.update` | `person`, `file`, `set: {caption?, type?, date?, place?, note?, source?}` | An empty value removes the field |
+| `media.update` | `person`, `file`, `set: {caption?, type?, date?, place?, note?, source?}` | An empty value removes the field. To link an existing report to a catalogued source, set `source` to its id on the report’s media entry. |
 | `media.set_primary` | `person`, `file` | The person's main photo (their icon); exactly one per person. Exported as GEDCOM `_PRIM Y` |
 | `media.detach` | `person`, `file` or `object` | `object` unlinks a media object imported from GEDCOM (`O…`) from the person; the object itself stays |
 

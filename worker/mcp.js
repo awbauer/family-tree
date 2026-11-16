@@ -17,6 +17,7 @@
 import { HttpError, fail } from "./http.js";
 import { grantFor, can } from "./auth.js";
 import { now, J } from "./db.js";
+import { PERSON_STATUSES } from "./ops.js";
 import { documentType, documentsFor, FILE_LIMIT } from "./documents.ts";
 import { presentsRecords, recordResult } from "./mcp-records.js";
 import { cardResource, cardHtml } from "./mcp-card-view.js";
@@ -51,14 +52,14 @@ How to work:
 - Ask the member before any write: edits, suggestions, to-dos, comments, uploads, sharing changes.`;
 
 const OPS_HELP = `Edit ops (applied in order, all or nothing). People I…, families F…, sources S…; new records get ids when "id" is left out. Facts are addressed by fid.
-person.create {id?, names:[{given,surname,suffix?,type?}], sex?:"M"|"F"|"U", events?:[event]} · person.update {id, set:{sex?, notes?}} · person.merge {keep, drop} · person.delete {id} (only if in no family; prefer merge)
+person.create {id?, names:[{given,surname,suffix?,type?}], sex?:"M"|"F"|"U", events?:[event]} · person.update {id, set:{sex?, notes?, research_status?:"unverified"|"partly-verified"|"verified"|"disputed", status_note?:string|null}} · person.merge {keep, drop} · person.delete {id} (only if in no family; prefer merge)
 name.add {person, name} · name.update {person, fid, set} · name.remove {person, fid}
 event.add {entity:"person"|"family", id, event:{type, date?, place?, note?, value?, age?, citations?}} · event.update {entity, id, fid, set} · event.remove {entity, id, fid}
 citation.add {entity, id, fid?, citation} · citation.remove {entity, id, fid?, index}
 fact.review {entity, id, fid, status:"verified"|"disputed"|"unverified", note, evidence?:[{index}|citation], finding?}
 family.create {id?, husband?, wife?, children?, events?} · family.set_spouse {family, role:"husband"|"wife", person|null} · family.swap_spouses {family} · family.add_child / family.remove_child {family, person} · family.delete {family} · family.merge {keep, drop}
 source.upsert {id?, data:{title, type?, author?, publication?, url?, repository?, apid?, note?, text?}} · source.merge {keep, drop} · source.delete {id}
-media.attach {person, file, caption?, type?, date?, place?, note?, source?, portrait?} · media.update {person, file, set} · media.set_primary {person, file} · media.detach {person, file}
+media.attach {person, file, caption?, type?, date?, place?, note?, source?, portrait?} · media.update {person, file, set:{caption?, type?, date?, place?, note?, source?}} (set source to a catalogued source id, or null to unlink it) · media.set_primary {person, file} · media.detach {person, file}
 A citation: {source?:"S…", title?, url?, page?, text?, note?, accessed?, source_type?:"original"|"derivative"|"authored", information?:"primary"|"secondary"|"undetermined", evidence?:"direct"|"indirect"|"negative", quality?:0-3, personal?:true}.`;
 
 const BATCH_HELP = `A research batch: {findings?:[{person, kind:"confirmed"|"correction"|"conflict"|"data-error"|"new-fact"|"new-person", field?, fact?:"e3", claim?, finding, confidence:"high"|"medium"|"low", sources:[{title, url?|note?}], proposed_ops?:[op]}], log?:[{person?, searched, result:"found"|"nil"|"inconclusive", note?, url?}], todo?:[{person?, task, where?, priority:"high"|"medium"|"low"}], todo_done?:[{id, outcome?}], people_status?:{"I…":{status:"unverified"|"partly-verified"|"verified"|"disputed", note?}}, stories?:[{title, body, people:[ids], sources:[…], era?}]}. Every finding and story needs sources; story bodies link people as [[I12|Name]].`;
@@ -71,7 +72,26 @@ const en = (values, description) => ({ type: "string", enum: values, description
 const arr = (items, description) => ({ type: "array", items, description });
 const objAny = (description) => ({ type: "object", description, additionalProperties: true });
 const TREE = str("Tree id (from whoami). Defaults to your first tree.");
-const OPS = arr(objAny("one op"), "The ops. " + OPS_HELP);
+const OPS = arr({
+  ...objAny("one op"),
+  required: ["op"],
+  if: { properties: { op: { const: "person.update" } } },
+  then: {
+    required: ["id", "set"],
+    properties: {
+      id: str("person id"),
+      set: {
+        type: "object", minProperties: 1, additionalProperties: false,
+        properties: {
+          sex: en(["M", "F", "U", ""], "sex"),
+          notes: { anyOf: [str("one note"), arr(str("note"), "notes"), { type: "null" }] },
+          research_status: en(PERSON_STATUSES, "person-level research status"),
+          status_note: { type: ["string", "null"], description: "person-level status note; null clears it" },
+        },
+      },
+    },
+  },
+}, "The ops. " + OPS_HELP);
 const SOURCES = arr({ type: "object", properties: { title: str("what the record is"), url: str("where it is (http/https)"), note: str("where/how, if no url") }, required: ["title"] }, "The records that support this change.");
 
 // ---------------------------------------------------------------- the tools
@@ -216,8 +236,8 @@ W("upload_media", { title: "Upload a photo or document", description: "Upload a 
     try { bytes = Uint8Array.from(atob(String(a.data_base64).replace(/\s+/g, "")), (ch) => ch.charCodeAt(0)); } catch { fail(400, M.badBase64); }
     return x.api("POST", `/api/media/upload${qs({ name: a.name || "upload" })}`, bytes, { "Content-Type": a.content_type, "Content-Length": String(bytes.byteLength) });
   } });
-W("add_attachment", { title: "Add an attachment", description: "Upload any file (up to 20 MB) and attach it to a person. Members submit it for review.",
-  props: { person: str("person id"), name: str("original filename"), title: str("optional display title"), data_base64: str("file bytes as base64") },
+W("add_attachment", { title: "Add an attachment", description: "Upload any file (up to 20 MB) and attach it to a person, optionally linking an existing source. Members submit it for review.",
+  props: { person: str("person id"), name: str("original filename"), title: str("optional display title"), source: str("existing catalogued source id from get_source"), data_base64: str("file bytes as base64") },
   required: ["person", "name", "data_base64"],
   run: (x, a) => {
     const data = a.data_base64.replace(/\s+/g, "");
@@ -226,8 +246,8 @@ W("add_attachment", { title: "Add an attachment", description: "Upload any file 
     try { bytes = Uint8Array.from(atob(data), (ch) => ch.charCodeAt(0)); } catch { fail(400, M.badBase64); }
     return addDocument(x, a, "attachment", bytes);
   } });
-W("add_report", { title: "Add a report", description: "Attach UTF-8 Markdown as a report with a built-in viewer. Members submit it for review.",
-  props: { person: str("person id"), name: str("filename ending in .md or .markdown"), title: str("optional display title"), markdown: str("the report in Markdown") },
+W("add_report", { title: "Add a report", description: "Attach UTF-8 Markdown as a report with a built-in viewer and optionally link an existing source. For an already uploaded report, use media.update with set.source. Members submit it for review.",
+  props: { person: str("person id"), name: str("filename ending in .md or .markdown"), title: str("optional display title"), source: str("existing catalogued source id from get_source"), markdown: str("the report in Markdown") },
   required: ["person", "name", "markdown"],
   run: (x, a) => addDocument(x, a, "report", new TextEncoder().encode(a.markdown)) });
 W("link_my_person", { title: "Link me to my person", description: "Say which person in the tree you are, so relationships are labelled relative to you. null unlinks.",
@@ -352,7 +372,7 @@ function documentUrl(x, file) {
 }
 
 function addDocument(x, args, type, bytes) {
-  return x.api("POST", `/api/attachments${qs({ person: args.person, type })}`, bytes, {
+  return x.api("POST", `/api/attachments${qs({ person: args.person, type, source: args.source })}`, bytes, {
     "Content-Length": String(bytes.byteLength),
     "X-Document-Name": enc(args.name),
     "X-Document-Title": enc(args.title || ""),

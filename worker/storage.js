@@ -39,7 +39,8 @@ export async function readTree(env) {
 }
 
 const guard = (env, cond, ...args) => env.DB.prepare(`INSERT INTO _guard (x) SELECT NULL WHERE ${cond}`).bind(...args);
-const TABLE = { person: "people", family: "families", source: "sources" };
+const TABLE = { person: "people", family: "families", source: "sources", status: "statuses" };
+const keyColumn = (type) => type === "status" ? "person_id" : "id";
 const toStored = (m, type, v) => (m === "working" ? v : type === "person" ? GX.personToGx(v) : type === "source" ? GX.sourceToGx(v) : v);
 
 /**
@@ -61,16 +62,16 @@ export function writeRecord(env, m, x, versions, t, actor) {
     }
     return { statements: st, versionAfter: x.after == null ? null : prevMax + 1 };
   }
-  const tbl = TABLE[x.type];
+  const tbl = TABLE[x.type], key = keyColumn(x.type);
   const v = versions[`${x.type}:${x.id}`];
   if (x.before == null) {
-    st.push(guard(env, `EXISTS (SELECT 1 FROM ${tbl} WHERE id = ?)`, x.id));
-    st.push(env.DB.prepare(`INSERT INTO ${tbl} (id, data, version, updated_at, updated_by) VALUES (?, ?, 1, ?, ?)`).bind(x.id, J(toStored(m, x.type, x.after)), t, actor));
+    st.push(guard(env, `EXISTS (SELECT 1 FROM ${tbl} WHERE ${key} = ?)`, x.id));
+    st.push(env.DB.prepare(`INSERT INTO ${tbl} (${key}, data, version, updated_at, updated_by) VALUES (?, ?, 1, ?, ?)`).bind(x.id, J(toStored(m, x.type, x.after)), t, actor));
     return { statements: st, versionAfter: 1 };
   }
-  st.push(guard(env, `NOT EXISTS (SELECT 1 FROM ${tbl} WHERE id = ? AND version = ?)`, x.id, v));
-  if (x.after == null) st.push(env.DB.prepare(`DELETE FROM ${tbl} WHERE id = ?`).bind(x.id));
-  else st.push(env.DB.prepare(`UPDATE ${tbl} SET data = ?, version = version + 1, updated_at = ?, updated_by = ? WHERE id = ?`).bind(J(toStored(m, x.type, x.after)), t, actor, x.id));
+  st.push(guard(env, `NOT EXISTS (SELECT 1 FROM ${tbl} WHERE ${key} = ? AND version = ?)`, x.id, v));
+  if (x.after == null) st.push(env.DB.prepare(`DELETE FROM ${tbl} WHERE ${key} = ?`).bind(x.id));
+  else st.push(env.DB.prepare(`UPDATE ${tbl} SET data = ?, version = version + 1, updated_at = ?, updated_by = ? WHERE ${key} = ?`).bind(J(toStored(m, x.type, x.after)), t, actor, x.id));
   return { statements: st, versionAfter: x.after == null ? null : v + 1 };
 }
 
@@ -93,15 +94,15 @@ export async function restoreRecord(env, m, type, id, before, after, t, actor) {
     }
     return st;
   }
-  const tbl = TABLE[type];
+  const tbl = TABLE[type], key = keyColumn(type);
   const stored = (v) => J(toStored(m, type, v));
   if (after == null) {
-    st.push(guard(env, `EXISTS (SELECT 1 FROM ${tbl} WHERE id = ?)`, id));
-    st.push(env.DB.prepare(`INSERT INTO ${tbl} (id, data, version, updated_at, updated_by) VALUES (?, ?, 1, ?, ?)`).bind(id, stored(before), t, actor));
+    st.push(guard(env, `EXISTS (SELECT 1 FROM ${tbl} WHERE ${key} = ?)`, id));
+    st.push(env.DB.prepare(`INSERT INTO ${tbl} (${key}, data, version, updated_at, updated_by) VALUES (?, ?, 1, ?, ?)`).bind(id, stored(before), t, actor));
   } else {
-    st.push(guard(env, `NOT EXISTS (SELECT 1 FROM ${tbl} WHERE id = ? AND data = ?)`, id, stored(after)));
-    if (before == null) st.push(env.DB.prepare(`DELETE FROM ${tbl} WHERE id = ?`).bind(id));
-    else st.push(env.DB.prepare(`UPDATE ${tbl} SET data = ?, version = version + 1, updated_at = ?, updated_by = ? WHERE id = ?`).bind(stored(before), t, actor, id));
+    st.push(guard(env, `NOT EXISTS (SELECT 1 FROM ${tbl} WHERE ${key} = ? AND data = ?)`, id, stored(after)));
+    if (before == null) st.push(env.DB.prepare(`DELETE FROM ${tbl} WHERE ${key} = ?`).bind(id));
+    else st.push(env.DB.prepare(`UPDATE ${tbl} SET data = ?, version = version + 1, updated_at = ?, updated_by = ? WHERE ${key} = ?`).bind(stored(before), t, actor, id));
   }
   return st;
 }
