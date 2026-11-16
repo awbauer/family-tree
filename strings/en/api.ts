@@ -300,6 +300,24 @@ export const api = {
     noMedia: "media: photos are attached by the owner, not through research batches (yet)",
   },
 
+  /** The MCP server (worker/mcp.js): JSON-RPC errors and tool errors an AI client shows its user. */
+  mcp: {
+    parseError: "Parse error: the body must be a JSON-RPC 2.0 message.",
+    invalidRequest: "Invalid request: expected a JSON-RPC 2.0 request.",
+    unknownMethod: (m: string) => `Method not found: ${m}`,
+    unknownTool: (t: string) => `Unknown tool: ${t}`,
+    toolNotAllowed: (t: string) => `${t} needs a role you don't have on any tree.`,
+    badArguments: (detail: string) => `Invalid arguments: ${detail}`,
+    missing: (field: string) => `${field} is required.`,
+    notInTree: (id: string) => `There's no ${id} in this tree, or this tree's view doesn't show it.`,
+    noStory: (slug: string) => `There's no story "${slug}" in this tree's view.`,
+    badOrigin: "This origin may not call the MCP server.",
+    postOnly: "The MCP endpoint takes JSON-RPC over POST (Streamable HTTP, no SSE stream).",
+    mediaTooLarge: (mb: number) => `That file is over ${mb} MB, too large to return through MCP. Open it on the site.`,
+    badBase64: "data_base64 isn't valid base64.",
+    failed: (status: number, msg: string) => `${msg} (HTTP ${status})`,
+  },
+
   /** Encryption key setup for research site credentials (worker/secrets.js). */
   secrets: {
     keyHelp,

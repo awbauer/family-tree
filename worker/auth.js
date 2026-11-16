@@ -7,7 +7,7 @@ const ROLE_RANK = { agent: 1, member: 1, editor: 2, owner: 3 };
 let jwksCache = { at: 0, keys: null, team: null };
 
 /** Returns {ok, principal, kind, email} or {ok:false, error}. */
-export async function identify(request, env) {
+export async function identify(request, env, { extraAud = [] } = {}) {
   if (env.ALLOW_UNAUTHENTICATED === "true") {
     // Local development only. DEV_PRINCIPAL lets you test as someone else (e.g. "agent:test" or a member's email).
     const p = (request.headers.get("X-Dev-Principal") || env.DEV_PRINCIPAL || env.OWNER_EMAIL || "dev@localhost").toLowerCase();
@@ -24,7 +24,7 @@ export async function identify(request, env) {
     const payload = JSON.parse(b64text(p64));
     const t = Math.floor(Date.now() / 1000);
     const auds = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-    if (!auds.includes(aud)) throw new Error("audience mismatch");
+    if (![aud, ...extraAud].some((a) => a && auds.includes(a))) throw new Error("audience mismatch");
     if (payload.iss !== `https://${team}`) throw new Error("issuer mismatch");
     if (payload.exp && payload.exp < t) throw new Error("expired");
     if (payload.nbf && payload.nbf > t + 60) throw new Error("not yet valid");

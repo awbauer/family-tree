@@ -1,0 +1,124 @@
+{
+  "tree": "all",
+  "name": "Everyone",
+  "view": {
+    "living": "full",
+    "research": true,
+    "notes": true,
+    "media": true,
+    "sources": true
+  },
+  "home_person": {
+    "id": "I1",
+    "name": "Sam Hartley",
+    "sex": "M",
+    "born": 1992,
+    "living": true
+  },
+  "core_people": [
+    {
+      "id": "I1",
+      "name": "Sam Hartley",
+      "sex": "M",
+      "born": 1992,
+      "living": true
+    },
+    {
+      "id": "I2",
+      "name": "Daniel James Hartley",
+      "sex": "M",
+      "born": 1960,
+      "living": true
+    },
+    {
+      "id": "I3",
+      "name": "Ana Maria Costa",
+      "sex": "F",
+      "born": 1963,
+      "living": true
+    },
+    {
+      "id": "I16",
+      "name": "Lena Hartley",
+      "sex": "F",
+      "born": 1990,
+      "living": true
+    }
+  ],
+  "counts": {
+    "people": 18,
+    "families": 8,
+    "sources": 3,
+    "living": 4,
+    "private": 0,
+    "direct_line": 14,
+    "stories": 1,
+    "findings_open": 3,
+    "todos_open": 2
+  },
+  "years": {
+    "earliest": 1899,
+    "latest": 2020
+  },
+  "research_status": {
+    "unverified": 14,
+    "verified": 1,
+    "partly-verified": 1,
+    "disputed": 2
+  },
+  "data_issues": {
+    "error": 1,
+    "warn": 1
+  },
+  "branches": [
+    {
+      "key": "hartley",
+      "name": "Hartley",
+      "people": 5
+    },
+    {
+      "key": "novak",
+      "name": "Novák",
+      "people": 3
+    },
+    {
+      "key": "costa",
+      "name": "Costa",
+      "people": 3
+    },
+    {
+      "key": "lindqvist",
+      "name": "Lindqvist",
+      "people": 3
+    }
+  ],
+  "methodology": "Every person starts **Unverified**. Mark them **Verified** once independent records (not other people's trees) confirm who they were, and **Disputed** when records contradict the tree.",
+  "context": [
+    {
+      "year": 1914,
+      "month": 7,
+      "title": "First World War begins"
+    },
+    {
+      "year": 1918,
+      "month": 10,
+      "title": "Czechoslovakia founded",
+      "branches": [
+        "novak"
+      ]
+    },
+    {
+      "year": 1939,
+      "month": 9,
+      "title": "Second World War begins in Europe"
+    },
+    {
+      "year": 1957,
+      "month": 9,
+      "title": "Capelinhos volcano erupts in the Azores",
+      "branches": [
+        "costa"
+      ]
+    }
+  ]
+}

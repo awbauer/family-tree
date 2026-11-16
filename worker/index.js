@@ -19,6 +19,7 @@
  *   GET  /api/admin/stories/hidden        stories some tree doesn't show, and why (owner only; worker/hidden-stories.js)
  *   /api/research-sites…                 the research sites list and its credentials (worker/sites.js)
  *   GET  /media/<key>                    photos/documents from R2, only if attached to someone you can see
+ *   POST /mcp                            the MCP server (worker/mcp.js): the same API as tools, for members' own AI clients
  *   everything else                      static app from ./site (contains no family data)
  *
  * Privacy: every /api and /media request needs a verified Cloudflare Access identity (fails closed), and data is
@@ -41,6 +42,7 @@ import * as Storage from "./storage.js";
 import { exportGedcom } from "./gedcom_export.js";
 import * as Audit from "./audit.js";
 import * as Sites from "./sites.js";
+import * as Mcp from "./mcp.js";
 import { S } from "../strings/index.ts";
 
 const TODO_STATUSES = ["open", "in_progress", "needs_review", "done", "wont_do"];
@@ -51,15 +53,18 @@ export default {
     const url = new URL(request.url);
     const isApi = url.pathname.startsWith("/api/");
     const isMedia = url.pathname.startsWith("/media/");
-    if (!isApi && !isMedia) return env.ASSETS.fetch(request);
+    const isMcp = Mcp.isMcpPath(url.pathname);
+    if (!isApi && !isMedia && !isMcp) return env.ASSETS.fetch(request);
 
-    const ident = await identify(request, env);
-    if (!ident.ok) return json({ error: ident.error }, 403);
+    // the MCP endpoint may sit behind its own Access application (Managed OAuth), with its own audience tag
+    const ident = await identify(request, env, isMcp ? { extraAud: Mcp.audiences(env) } : undefined);
+    if (!ident.ok) return isMcp ? Mcp.unauthorized(ident.error) : json({ error: ident.error }, 403);
     if (!env.DB) return json({ error: S.api.http.noDatabase }, 500);
     try {
       const access = await resolveAccess(env, ident);
       const c = { request, env, ctx, url, access, ident };
       if (isMedia) return await media(c);
+      if (isMcp) return await Mcp.handle(c, { route, scoped, grantOrFail });
       return await route(c);
     } catch (e) {
       if (e instanceof HttpError) return json({ error: e.message, ...(e.extra || {}) }, e.status);

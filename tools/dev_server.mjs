@@ -35,7 +35,7 @@ export async function startDevServer({ port = PORT, site = SITE, as = AS, quiet 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     try {
-      if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/media/")) {
+      if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/media/") || url.pathname === "/mcp") {
         const chunks = [];
         for await (const c of req) chunks.push(c);
         const headers = { "Content-Type": req.headers["content-type"] || "" };

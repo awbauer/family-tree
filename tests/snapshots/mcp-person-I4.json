@@ -1,0 +1,165 @@
+{
+  "id": "I4",
+  "name": "George Hartley",
+  "sex": "M",
+  "living": false,
+  "relation_to_home_person": "grandfather",
+  "branch": "hartley",
+  "direct_line": true,
+  "generation": 2,
+  "names": [
+    {
+      "fid": "n1",
+      "given": "George",
+      "surname": "Hartley"
+    }
+  ],
+  "birth": {
+    "date": "2 Feb 1931",
+    "place": "Leeds, Yorkshire, England"
+  },
+  "death": {
+    "date": "19 Nov 2004",
+    "place": "Leeds, Yorkshire, England"
+  },
+  "events": [
+    {
+      "fid": "e1",
+      "type": "Birth",
+      "date": "2 Feb 1931",
+      "place": "Leeds, Yorkshire, England",
+      "year": 1931
+    },
+    {
+      "fid": "e2",
+      "type": "Death",
+      "date": "19 Nov 2004",
+      "place": "Leeds, Yorkshire, England",
+      "year": 2004,
+      "citations": [
+        {
+          "source": "S2",
+          "title": "England & Wales, Civil Registration Death Index",
+          "page": "Vol. 2c, p. 411"
+        }
+      ]
+    },
+    {
+      "fid": "e3",
+      "type": "Occupation",
+      "date": "1961",
+      "place": "Leeds, Yorkshire, England",
+      "value": "Tram conductor",
+      "year": 1961
+    }
+  ],
+  "research_status": "verified",
+  "status_note": "Birth and death matched to the GRO death index and the 1939 Register (example).",
+  "parents_families": [
+    {
+      "id": "F4",
+      "husband": {
+        "id": "I8",
+        "name": "Arthur Hartley",
+        "sex": "M",
+        "born": 1899,
+        "died": 1966
+      },
+      "wife": {
+        "id": "I9",
+        "name": "Florence Pike",
+        "sex": "F",
+        "born": 1903,
+        "died": 1979
+      },
+      "children": [
+        {
+          "id": "I17",
+          "name": "Thomas Hartley",
+          "sex": "M",
+          "born": 1925
+        },
+        {
+          "id": "I4",
+          "name": "George Hartley",
+          "sex": "M",
+          "born": 1931,
+          "died": 2004
+        }
+      ],
+      "events": [
+        {
+          "fid": "e1",
+          "type": "Marriage",
+          "date": "1924",
+          "place": "Leeds, Yorkshire, England",
+          "year": 1924
+        }
+      ]
+    }
+  ],
+  "own_families": [
+    {
+      "id": "F2",
+      "husband": {
+        "id": "I4",
+        "name": "George Hartley",
+        "sex": "M",
+        "born": 1931,
+        "died": 2004
+      },
+      "wife": {
+        "id": "I5",
+        "name": "Eva Novák",
+        "sex": "F",
+        "born": 1934,
+        "died": 2015
+      },
+      "children": [
+        {
+          "id": "I2",
+          "name": "Daniel James Hartley",
+          "sex": "M",
+          "born": 1960,
+          "living": true
+        }
+      ],
+      "events": [
+        {
+          "fid": "e1",
+          "type": "Marriage",
+          "date": "1958",
+          "place": "Leeds, Yorkshire, England",
+          "year": 1958
+        }
+      ],
+      "spouse": {
+        "id": "I5",
+        "name": "Eva Novák",
+        "sex": "F",
+        "born": 1934,
+        "died": 2015
+      }
+    }
+  ],
+  "findings": [
+    {
+      "id": 1,
+      "version": 1,
+      "person": "I4",
+      "kind": "confirmed",
+      "field": "death",
+      "claim": "d. 19 Nov 2004 Leeds",
+      "finding": "Death index lists George Hartley, born 2 Feb 1931, registered Leeds, Dec quarter 2004.",
+      "confidence": "high",
+      "sources": [
+        {
+          "title": "England & Wales Death Index (example citation)",
+          "url": "https://www.freebmd.org.uk/",
+          "note": "Illustrative — not a real record"
+        }
+      ],
+      "status": "open"
+    }
+  ]
+}

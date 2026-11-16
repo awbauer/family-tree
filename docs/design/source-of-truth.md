@@ -11,7 +11,7 @@ Today the pipeline runs one way: tree software → GEDCOM → `tools/build.py` �
 - **Every change is logged and can be undone.**
 - **Sharing is by invite only, per tree.** Everything stays behind Cloudflare Access; there are no public links. Each person invited is granted specific trees, optionally through an admin-defined filtered view.
 - **Tree software (Ancestry) stays useful as a source of hints.** A later GEDCOM export can be compared with the database and its differences become *suggestions*. It never overwrites.
-- **AI agents and the MCP server ([issue #3](https://github.com/awbauer/family-tree/issues/3)) only suggest.** They use the same review queue as a relative's suggestion.
+- **AI agents only suggest.** They use the same review queue as a relative's suggestion. The MCP server ([issue #3](https://github.com/awbauer/family-tree/issues/3)) acts as the signed-in member, with that member's role: members suggest through it, editors may edit.
 
 ## Trees, grants and views (who sees what)
 
@@ -133,7 +133,7 @@ To-dos are first-class rows (`todos`, with history in `todo_events`): priority, 
 | 6 | Sharing | admin UI for trees, views and grants; invites via the Access API (optional token); "link me to my person"; tree switcher |
 | 7 | Ancestry hints | `import_hints.py` diff → proposals |
 
-The AI agent and MCP server ([#3](https://github.com/awbauer/family-tree/issues/3)) build on phase 3: its write tools submit proposals.
+The AI agents build on phase 3: their write tools submit proposals. The MCP server ([#3](https://github.com/awbauer/family-tree/issues/3)) calls the same routes as the site, as the member.
 
 ## Risks
 
