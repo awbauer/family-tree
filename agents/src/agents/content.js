@@ -2,7 +2,7 @@
 // Narrative upkeep: short AI-written profiles for people who have died, and checks that stories still agree with
 // the facts. Each job is its own small conversation, dispatched by src/content-jobs.js with the facts as the
 // message; the agent answers through one tool, which stores the result (profiles) or files a suggestion (stories).
-// Living people never reach these agents: the facts name a living relative only as "a living son".
+// Living relatives are written about like anyone else; as someone else's relative they appear by name only, with no dates.
 import { env } from "cloudflare:workers";
 import { useAgentFinish, useInitialData, useModel, usePersistentState, useTool } from "@flue/runtime";
 import * as v from "valibot";

@@ -198,7 +198,7 @@ export function AgentRuns() {
       <p className="muted">{A.intro}</p>
       <form id="ar-new" className="card filters" style={{ marginBottom: 16 }} onSubmit={startRun}>
         <input name="person" list="ar-people" placeholder={A.newRun.person} style={{ flex: 1, minWidth: 200 }} />
-        <datalist id="ar-people">{people.filter((p) => !isUnknown(p) && !p.living).map((p) => <option key={p.id} value={`${p.name} (${p.id})`} />)}</datalist>
+        <datalist id="ar-people">{people.filter((p) => !isUnknown(p) && !p.private).map((p) => <option key={p.id} value={`${p.name} (${p.id})`} />)}</datalist>
         <input name="instructions" placeholder={A.newRun.instructions} style={{ flex: 2, minWidth: 240 }} /><button className="btn primary">{A.newRun.start}</button>
       </form>
       <details className="card" style={{ marginBottom: 16 }}><summary><b>{QF.title}</b> <span className="small muted">{QF.subtitle}</span></summary>

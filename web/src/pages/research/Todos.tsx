@@ -100,7 +100,7 @@ export function Todos() {
     const status = statuses.length && !(statuses.indexOf(t.status) < 0 && !editor)
       ? <select data-status={t.id} defaultValue={t.status} onChange={(e: ChangeEvent<HTMLSelectElement>) => act("status", t, e.target)}>{statuses.map((x) => <option key={x} value={x}>{STATUS_TXT[x]}</option>)}</select>
       : <span className={`badge st-${t.status === "done" ? "verified" : t.status === "needs_review" ? "partly-verified" : "unverified"}`}>{STATUS_TXT[t.status]}</span>;
-    const living = t.person && D.people[t.person] && D.people[t.person].living;
+    const isPrivate = t.person && D.people[t.person] && D.people[t.person].private;
     return (
       <tr id={`td-${t.id}`}><td className={`prio-${t.priority}`}>{t.priority}</td><td>{t.person && D.people[t.person] ? <PersonLink id={t.person} /> : "—"}</td>
         <td>{t.task}{t.where && <><br /><span className="small muted"><Linkify text={t.where} /></span></>}{t.outcome && <><br /><span className="small"><b>{T.outcome}</b> {t.outcome}</span></>}</td>
@@ -108,7 +108,7 @@ export function Todos() {
         <td><div className="btn-row">
           {!t.assignee && !["done", "wont_do"].includes(t.status) && <button className="btn" data-act="claim" onClick={() => act("claim", t)}>{T.takeIt}</button>}
           {editor && <button className="btn" data-act="assign" title={T.assignTitle} onClick={() => act("assign", t)}>{T.assign}</button>}
-          {ai && !["done", "wont_do", "needs_review"].includes(t.status) && (!t.assignee || mine) && !living &&
+          {ai && !["done", "wont_do", "needs_review"].includes(t.status) && (!t.assignee || mine) && !isPrivate &&
             <button className="btn" data-act="research" title={T.researchTitle} onClick={() => act("research", t)}>{T.research}</button>}
           <button className="btn" data-act="history" onClick={() => act("history", t)}>{T.historyButton}</button>
         </div></td></tr>

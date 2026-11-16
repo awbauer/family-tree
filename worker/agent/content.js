@@ -1,21 +1,24 @@
 // Keeps narrative content in step with the facts (the shared, model-free half; the writing is done by the Flue
 // agents in agents/src/agents/content.js, which call prepare*/save* below through their tools):
-//   - profiles: a short AI-written biography for each person who has died, rebuilt whenever their recorded facts,
+//   - profiles: a short AI-written biography for each person (living relatives included), rebuilt whenever their recorded facts,
 //     findings or close family change (content hash). Shown on the person page, labelled as AI-written.
 //   - stories: when the facts behind a story change, Claude checks the story against them and, if it is now wrong
 //     or incomplete, proposes a revision as a suggestion (stories are authored content, so an editor decides).
-// Living people never reach the model here: a living relative appears only as "a living son", with no name.
+// Living relatives are written about like anyone else, but as someone else's relative they appear by name only, with
+// no dates, so a profile shown to a view that reduces the living to names leaks nothing more (scope.js drops profiles
+// of the living themselves from those views).
 import { J, now, write, audit } from "../db.js";
 import { fullBundle } from "../bundle.js";
 import { settings, recordUsage } from "./config.js";
 
 export const CONTENT_AGENT = "agent:content";
-const PROMPT_VERSION = "1"; // bump to rebuild every profile after changing the prompts below
+const PROMPT_VERSION = "2"; // bump to rebuild every profile after changing the prompts below
 
 export const PROFILE_SYSTEM = `You write short biographies for a private family-history site, from the recorded facts you are given and nothing else.
 - 80 to 220 words of plain prose. No headings, lists, links or markdown.
 - Use only the facts given. Do not add context, motives, feelings or "likely" details that the facts don't state. If facts conflict, or a status says something is unverified or disputed, say so plainly.
-- Refer to relatives by the names given. Relatives described as "a living …" stay unnamed.
+- Refer to relatives by the names given. For relatives marked living, use the name only, with no dates.
+- Never mention phone numbers, email addresses, or government ID or account numbers.
 - Dates and places as recorded. If little is known, write a short paragraph and say what is not yet known.`;
 
 export const STORY_SYSTEM = `You maintain stories on a private family-history site. You are given a story and the current recorded facts about the people in it. Decide whether the story still agrees with the facts.
@@ -35,7 +38,7 @@ const relWord = (kind, p) => REL[kind][p.sex === "M" ? 0 : p.sex === "F" ? 1 : 2
 function relative(full, id, kind) {
   const p = full.people[id];
   if (!p) return null;
-  if (p.living) return `a living ${relWord(kind, p)}`;
+  if (p.living) return `${relWord(kind, p)} ${p.name} (living)`;
   const y = [p.birth && p.birth.year, p.death && p.death.year];
   return `${relWord(kind, p)} ${p.name}${y[0] || y[1] ? ` (${y[0] || "?"}–${y[1] || "?"})` : ""}`;
 }
@@ -69,7 +72,7 @@ export function profileFacts(full, id) {
   };
 }
 
-const profileCandidate = (p) => p && !p.living && !isUnknown(p) && ((p.events || []).length >= 2 || (p.notes || []).length);
+const profileCandidate = (p) => p && !isUnknown(p) && ((p.events || []).length >= 2 || (p.notes || []).length);
 
 function storyFacts(full, story) {
   return {
@@ -77,7 +80,6 @@ function storyFacts(full, story) {
     people: (story.people || []).map((id) => {
       const p = full.people[id];
       if (!p) return { id, missing: true };
-      if (p.living) return { id, name: p.name, living: true };
       return { id, ...profileFacts(full, id) };
     }),
   };
@@ -111,7 +113,7 @@ export async function prepareProfile(env, id) {
   const s = settings(env);
   const { full } = await fullBundle(env);
   const p = full.people[id];
-  if (!profileCandidate(p)) return { skipped: p && p.living ? "living" : "not enough recorded to write a profile" };
+  if (!profileCandidate(p)) return { skipped: "not enough recorded to write a profile" };
   const facts = profileFacts(full, id);
   const hash = await sha256(PROMPT_VERSION + s.agents.profiles.model + J(facts));
   const cur = await env.DB.prepare("SELECT source_hash FROM profiles WHERE person_id = ?").bind(id).first();

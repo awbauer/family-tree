@@ -49,7 +49,7 @@ export function StoryLibrarian({ id }) {
   });
   useTool({
     name: "get_person",
-    description: "Everything recorded about one person: names, events with fact ids and their sources, notes, verification status, family, findings. Living people come back as a name only.",
+    description: "Everything recorded about one person: names, events with fact ids and their sources, notes, verification status, family, findings. People the view keeps private come back as a name only.",
     input: v.object({ id: str("Person id, e.g. I12") }),
     async run({ data }) { const { b } = await ctx(); return { output: storyPerson(b, data.id) }; },
   });

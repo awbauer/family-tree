@@ -13,4 +13,4 @@ Follow `docs/agents/research-protocol.md` exactly. In short:
 6. `python3 tools/merge_research.py --check <batch>` until it passes, then merge, then `python3 tools/build.py`.
 7. Report to the owner: findings with confidence, nil results, what needs a human. Don't load D1 or deploy; that's the `publish` skill, with the owner's OK.
 
-Privacy: nothing from `family-data/` or `build/` goes into git, PRs, or any external service other than the record searches themselves. Don't record personal details of living people.
+Privacy: nothing from `family-data/` or `build/` goes into git, PRs, or any external service other than the record searches themselves. Living relatives are researched like anyone else; never record phone numbers, email addresses, or ID or account numbers.

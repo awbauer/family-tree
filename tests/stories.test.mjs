@@ -1,5 +1,6 @@
 // The stories agent (#33): reviewing a story and drafting a new one, both only ever as a suggestion. Checks that a
-// submission links only real people, cites only the tree's sources, and keeps living people out of the subject;
+// submission links only real people, cites only the tree's sources, and keeps people private in the starter's view
+// out of the subject;
 // approving files the story like any research suggestion. The agents are a fake env.AGENTS.
 // Fictional example family only.
 import { test, before } from "node:test";
@@ -13,6 +14,7 @@ import { makeEnv, client, migrate } from "./helpers/fake-env.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OWNER = "owner@example.test", EDITOR = "editor@example.test", MEMBER = "member@example.test";
+const NAMES = "names@example.test"; // an editor whose view reduces living people to their names (private)
 let env, call, calls, St, Bundle, story;
 
 before(async () => {
@@ -29,6 +31,8 @@ before(async () => {
   call = client((await import("../worker/index.js")).default, env);
   await call("PUT", "/api/admin/grants", { body: { principal: EDITOR, tree_id: "all", role: "editor" } });
   await call("PUT", "/api/admin/grants", { body: { principal: MEMBER, tree_id: "all", role: "member" } });
+  await call("PUT", "/api/admin/views/names", { body: { name: "Names only", filter: { living: "names-only" } } });
+  await call("PUT", "/api/admin/grants", { body: { principal: NAMES, tree_id: "all", role: "editor", view_id: "names" } });
   St = await import("../worker/agent/stories.js");
   Bundle = await import("../worker/bundle.js");
   story = research.stories[0];
@@ -42,7 +46,7 @@ const living = async () => Object.values((await b()).people).find((p) => p.livin
 const citedTitle = async (p) => { const B = await b(); const c = p.events.flatMap((e) => e.citations || [])[0]; return ((B.sources || {})[c.source] || {}).title || c.title || c.source; };
 const words = (n) => Array.from({ length: n }, (_, i) => `word${i}`).join(" ");
 
-test("editors start story runs; drafts are about people who have died", async () => {
+test("editors start story runs; drafts may be about living relatives, not about people private in the starter's view", async () => {
   assert.equal((await start({ mode: "review", slug: story.slug }, MEMBER)).status, 403);
   assert.equal((await start({ mode: "review", slug: "no-such-story" })).status, 404);
   let r = await start({ mode: "review", slug: story.slug, instructions: "Make it shorter" });
@@ -51,7 +55,13 @@ test("editors start story runs; drafts are about people who have died", async ()
   assert.equal(calls.at(-1).url, `/agents/stories/${r.data.run.id}`);
   assert.match(calls.at(-1).body.body, /get_story\("eva-comes-to-england"\)/);
   assert.match(calls.at(-1).body.body, /Make it shorter/);
-  assert.equal((await start({ mode: "draft", people: [(await living()).id] })).status, 400, "living people aren't a story's subject");
+  const lv = await living();
+  const refused = await start({ mode: "draft", people: [lv.id] }, NAMES);
+  assert.equal(refused.status, 400, "private in the starter's view");
+  assert.match(refused.data.error, /private in your view/);
+  r = await start({ mode: "draft", people: [lv.id] });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  assert.match(calls.at(-1).body.body, new RegExp(lv.id));
   assert.equal((await start({ mode: "draft", people: [] })).status, 400);
   r = await start({ mode: "draft", people: [(await dead())[0].id], length: "short" });
   assert.equal(r.status, 201);
@@ -100,6 +110,11 @@ test("a draft links its subjects, cites only the tree's sources, and is the righ
   assert.equal(St.checkStory(B, o, { ...good, sources: [{ title }, { title: ctx.title }] }).ok, true, "context entries may be cited");
   const r = St.checkStory(B, o, good);
   assert.equal(r.ok, true, JSON.stringify(r.errors));
+  // a living relative linked in a full view is one of the story's people, like anyone else
+  const lv = await living();
+  const kin = St.checkStory(B, o, { ...good, body: `${good.body} [[${lv.id}|${lv.name}]]` });
+  assert.equal(kin.ok, true, JSON.stringify(kin.errors));
+  assert.ok(JSON.stringify(kin.value.batch.stories[0].people).includes(lv.id), JSON.stringify(kin.value.batch));
   const run = (await start(o)).data.run;
   const { proposals: [pid] } = await St.submitStory(env, await runRow(run.id), r.value);
   const payload = JSON.parse((await env.DB.prepare("SELECT payload FROM proposals WHERE id = ?").bind(pid).first()).payload);
