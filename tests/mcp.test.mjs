@@ -359,6 +359,11 @@ test("one report or attachment can be linked to several people, and unlinked fro
   assert.equal(off.error, false, JSON.stringify(off.data));
   assert.ok(!(await tool("list_attachments", { person: "I1" }, EDITOR)).data.attachments.some((m) => m.file === file));
   assert.equal((await tool("get_report", { file }, EDITOR)).data.markdown, markdown);
+  // text files come back as text, not as an embedded file
+  const note = await tool("add_attachment", { person: "I2", name: "Example notes.csv", data_base64: Buffer.from("a,b\n1,2\n").toString("base64") }, EDITOR);
+  const read = await tool("get_attachment", { file: note.data.file }, EDITOR);
+  assert.equal(read.content[0].type, "text");
+  assert.equal(read.data.text, "a,b\n1,2\n");
   // a member can suggest linking a shared document they can see; it waits for review
   const one = (await call("GET", "/api/tree?tree=one", { as: MEMBER })).data.people;
   const [a, b] = Object.values(one).filter((p) => !p.private && !p.living).map((p) => p.id);
@@ -388,7 +393,7 @@ test("MCP Apps resource is available and record cards preserve the selected tree
   const person = await tool("get_person", { id: "I4", tree: "one" }, MEMBER);
   assert.equal(person.data.page_url, "https://tree.example.test/?tree=one#/person/I4");
   assert.equal(person.cards[0].page_url, person.data.page_url);
-  assert.equal(person.content.find((item) => item.type === "resource_link").uri, person.data.page_url);
+  assert.ok(!person.content.some((item) => item.type === "resource_link" || item.type === "resource"), "record tools return no file-like content");
   assert.match(person.data.events[0].page_url, /#\/person\/I4\?fact=e\d+$/);
   const restricted = await tool("get_person", { id: "I1" }, NAMES);
   assert.equal(restricted.cards.length, 1);

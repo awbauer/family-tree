@@ -388,6 +388,8 @@ function b64(buf) {
   return btoa(s);
 }
 
+const TEXT_FILE = /\.(txt|text|md|markdown|csv|tsv|json|xml|html?|ged|gedcom|log)$/i;
+
 function documentUrl(x, file) {
   return `${x.c.url.origin}/media/${file}${qs({ tree: x.treeId })}`;
 }
@@ -406,13 +408,20 @@ async function getDocument(x, file, type) {
   const uri = documentUrl(x, file);
   const response = await x.downloadDocument(uri, file);
   if (type === "report") return { file, markdown: await response.text(), download_url: uri };
-  const size = await x.c.env.DB.prepare("SELECT bytes FROM uploads WHERE key = ?").bind(file).first("bytes");
+  const row = await x.c.env.DB.prepare("SELECT bytes, original_name FROM uploads WHERE key = ?").bind(file).first();
+  const size = row && row.bytes, name = (row && row.original_name) || file;
   const mimeType = "application/octet-stream";
   if (size > MEDIA_MAX) {
+    // too big to embed: a plain link in text, not a resource_link the client would try to fetch as a file
     await response.body?.cancel();
-    return { content: [{ type: "resource_link", name: file, uri, mimeType, size }] };
+    return { file, name, size, download_url: uri, note: M.tooLargeToEmbed };
   }
-  return { content: [{ type: "resource", resource: { uri, mimeType, blob: b64(await response.arrayBuffer()) } }] };
+  const bytes = await response.arrayBuffer();
+  // text files come back as text, so the client reads them without saving a file
+  if (TEXT_FILE.test(name)) {
+    try { return { file, name, text: new TextDecoder("utf-8", { fatal: true }).decode(bytes), download_url: uri }; } catch { /* not UTF-8: send as a file */ }
+  }
+  return { content: [{ type: "resource", resource: { uri, mimeType, blob: b64(bytes) } }] };
 }
 
 async function media(x, file) {
@@ -475,9 +484,10 @@ export async function callTool(c, deps, name, rawArgs) {
         ? { ...response, content: [...response.content, { type: "text", text: JSON.stringify({ page_url: result.data.page_url }) }] }
         : response;
     }
-    const links = [...new Map(result.cards.map((card) => [card.page_url, card])).values()].slice(0, 8)
-      .map((card) => ({ type: "resource_link", uri: card.page_url, name: card.title || t.title, mimeType: "text/html" }));
-    return { ...response, content: [...response.content, ...links], structuredContent: { cards: result.cards } };
+    // Cards travel as structuredContent (rendered by the card template); page URLs are already in the text.
+    // No resource_link items: clients such as ChatGPT treat each one as a file to fetch and ask the member to
+    // approve it, on every record tool call.
+    return { ...response, structuredContent: { cards: result.cards } };
   } catch (e) {
     await logCall(c, name, treeId, false);
     if (e instanceof HttpError) {
