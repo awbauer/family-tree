@@ -314,6 +314,21 @@ export const api = {
 
   /** The MCP server (worker/mcp.js): JSON-RPC errors and tool errors an AI client shows its user. */
   mcp: {
+    cards: {
+      title: "Family tree records",
+      open: "Open on family tree",
+      loading: "Loading records…",
+      empty: "No linked records in this result.",
+      failed: "Could not load the records.",
+      cancelled: "Request cancelled.",
+      suggestion: (id: number) => `Suggestion #${id}`,
+      run: (id: string) => `Agent run ${id}`,
+      todo: (id: number) => `To-do #${id}`,
+      report: "Report",
+      attachment: "Attachment",
+      photo: "Photo or scan",
+    },
+    resourceNotFound: "MCP resource not found.",
     parseError: "Parse error: the body must be a JSON-RPC 2.0 message.",
     invalidRequest: "Invalid request: expected a JSON-RPC 2.0 request.",
     unknownMethod: (m: string) => `Method not found: ${m}`,

@@ -2,7 +2,7 @@
 // library review, and follow runs (polled every 8 s while any is queued or running). Sherlock (find relatives) runs
 // start from a person page and show here with their report.
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Link } from "react-router";
+import { useSearchParams, Link } from "react-router";
 import { useData } from "../../data";
 import { isUnknown, PersonLink } from "../../lib";
 import { useWho } from "../../ui";
@@ -138,7 +138,8 @@ function RelativesReport({ r }: { r: any }) {
 const KIND_TXT: Record<string, string> = A.kind;
 
 export function AgentRuns() {
-  const { D, api, people } = useData();
+  const { D, api, people, tree } = useData();
+  const target = useSearchParams()[0].get("section");
   const who = useWho();
   const [state, setState] = useState<{ data?: any; error?: string }>({});
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -148,11 +149,15 @@ export function AgentRuns() {
     clearTimeout(timer.current);
     try {
       const data = await api("GET", "agent/runs");
+      if (target?.startsWith("run-") && !data.runs.some((r: any) => r.id === target)) {
+        const found = await api("GET", `agent/runs/${encodeURIComponent(target)}`).catch(() => null);
+        if (found?.run?.tree === tree) data.runs.unshift(found.run);
+      }
       if (!alive.current) return;
       setState({ data });
       if (data.runs.some((r: any) => ["queued", "running"].includes(r.status))) timer.current = setTimeout(load, 8000);
     } catch (e) { if (alive.current) setState({ error: (e as Error).message }); }
-  }, [api]);
+  }, [api, target, tree]);
   useEffect(() => {
     alive.current = true;
     load();

@@ -13,7 +13,8 @@
     "name": "Sam Hartley",
     "sex": "M",
     "born": 1992,
-    "living": true
+    "living": true,
+    "page_url": "https://tree.example.test/?tree=all#/person/I1"
   },
   "core_people": [
     {
@@ -21,28 +22,32 @@
       "name": "Sam Hartley",
       "sex": "M",
       "born": 1992,
-      "living": true
+      "living": true,
+      "page_url": "https://tree.example.test/?tree=all#/person/I1"
     },
     {
       "id": "I2",
       "name": "Daniel James Hartley",
       "sex": "M",
       "born": 1960,
-      "living": true
+      "living": true,
+      "page_url": "https://tree.example.test/?tree=all#/person/I2"
     },
     {
       "id": "I3",
       "name": "Ana Maria Costa",
       "sex": "F",
       "born": 1963,
-      "living": true
+      "living": true,
+      "page_url": "https://tree.example.test/?tree=all#/person/I3"
     },
     {
       "id": "I16",
       "name": "Lena Hartley",
       "sex": "F",
       "born": 1990,
-      "living": true
+      "living": true,
+      "page_url": "https://tree.example.test/?tree=all#/person/I16"
     }
   ],
   "counts": {
@@ -74,22 +79,26 @@
     {
       "key": "hartley",
       "name": "Hartley",
-      "people": 5
+      "people": 5,
+      "page_url": "https://tree.example.test/?tree=all#/branch/hartley"
     },
     {
       "key": "novak",
       "name": "Novák",
-      "people": 3
+      "people": 3,
+      "page_url": "https://tree.example.test/?tree=all#/branch/novak"
     },
     {
       "key": "costa",
       "name": "Costa",
-      "people": 3
+      "people": 3,
+      "page_url": "https://tree.example.test/?tree=all#/branch/costa"
     },
     {
       "key": "lindqvist",
       "name": "Lindqvist",
-      "people": 3
+      "people": 3,
+      "page_url": "https://tree.example.test/?tree=all#/branch/lindqvist"
     }
   ],
   "methodology": "Every person starts **Unverified**. Mark them **Verified** once independent records (not other people's trees) confirm who they were, and **Disputed** when records contradict the tree.",
@@ -120,5 +129,6 @@
         "costa"
       ]
     }
-  ]
+  ],
+  "page_url": "https://tree.example.test/?tree=all#/"
 }

@@ -52,7 +52,7 @@ async function tool(name, args = {}, as = OWNER) {
   const c = res.content[0];
   let data = c.text;
   if (c.type === "text") try { data = JSON.parse(c.text); } catch { /* plain text */ }
-  return { error: !!res.isError, data, content: res.content };
+  return { error: !!res.isError, data, content: res.content, cards: res.structuredContent?.cards || [] };
 }
 const ids = (list) => list.map((p) => p.id);
 
@@ -202,7 +202,7 @@ test("a names-only view gives living people as names only, through every tool", 
   assert.equal(p.private, true);
   assert.equal(p.events, undefined);
   const s = (await tool("search_people", { query: "Hartley" }, NAMES)).data;
-  assert.deepEqual(s.people.find((x) => x.id === "I2"), { id: "I2", name: "Daniel James Hartley", private: true });
+  assert.deepEqual(s.people.find((x) => x.id === "I2"), { id: "I2", name: "Daniel James Hartley", private: true, page_url: "https://tree.example.test/?tree=all#/person/I2" });
   assert.ok(!(await tool("search_events", {}, NAMES)).data.events.some((e) => e.person && ["I1", "I2", "I3", "I16"].includes(e.person.id)));
   assert.equal((await tool("get_timeline", { id: "I2" }, NAMES)).data.events.length, 0);
   // the owner (full view) sees them in full, living or not
@@ -337,4 +337,31 @@ test("member reports are private until approved and cannot become a portrait", a
   const undo = await tool("revert_change", { batch: remove.data.batch, reason: "test" });
   assert.equal(undo.error, false, undo.data);
   assert.equal((await tool("get_report", { file }, MEMBER)).data.markdown, markdown);
+});
+
+test("MCP Apps resource is available and record cards preserve the selected tree", async () => {
+  const list = await rpc("tools/list", {}, { as: MEMBER });
+  const template = list.body.result.tools.find((item) => item.name === "get_person")._meta.ui.resourceUri;
+  const resource = await rpc("resources/read", { uri: template }, { as: MEMBER });
+  assert.equal(resource.body.result.contents[0].mimeType, "text/html;profile=mcp-app");
+  assert.match(resource.body.result.contents[0].text, /ui\/notifications\/tool-result/);
+  assert.ok((await rpc("resources/read", { uri: template }, { as: STRANGER })).body.error);
+  const person = await tool("get_person", { id: "I4", tree: "one" }, MEMBER);
+  assert.equal(person.data.page_url, "https://tree.example.test/?tree=one#/person/I4");
+  assert.equal(person.cards[0].page_url, person.data.page_url);
+  assert.equal(person.content.find((item) => item.type === "resource_link").uri, person.data.page_url);
+  assert.match(person.data.events[0].page_url, /#\/person\/I4\?fact=e\d+$/);
+  const restricted = await tool("get_person", { id: "I1" }, NAMES);
+  assert.equal(restricted.cards.length, 1);
+  assert.equal(restricted.cards[0].detail, undefined);
+  assert.equal((await tool("get_person", { id: "I1" }, MEMBER)).cards.length, 0);
+  const source = await tool("get_source", { id: "S2" });
+  assert.match(source.cards[0].page_url, /#\/source\/S2$/);
+  const story = await tool("get_story", { slug: "eva-comes-to-england" });
+  assert.match(story.cards[0].page_url, /#\/story\/eva-comes-to-england$/);
+  assert.ok(story.cards[0].detail);
+  const fallback = await rpc("tools/call", { name: "get_person", arguments: { id: "I4" } },
+    { headers: { "MCP-Protocol-Version": "2024-11-05" } });
+  assert.ok(fallback.body.result.content.every((item) => item.type === "text"));
+  assert.match(JSON.parse(fallback.body.result.content[0].text).page_url, /#\/person\/I4$/);
 });

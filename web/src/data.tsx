@@ -44,7 +44,8 @@ async function loadTree(): Promise<Tree> {
     account = me.body;
     if (!account!.trees.length) throw new Error(L.noTrees);
     const saved = store.get("tree");
-    tree = (account!.trees.find((t) => t.id === saved) || account!.trees[0]).id;
+    const linkedTree = new URLSearchParams(location.search).get("tree");
+    tree = linkedTree || (account!.trees.find((t) => t.id === saved) || account!.trees[0]).id;
   } else if (me.status === 403) throw new Error(me.body.error || L.notSignedIn);
   const preview = account && account.isOwner ? store.get("previewView", sessionStorage) : null;
   const r = await getJson(`api/tree${tree ? `?tree=${encodeURIComponent(tree)}` : ""}${preview ? `&preview_view=${encodeURIComponent(preview)}` : ""}`);

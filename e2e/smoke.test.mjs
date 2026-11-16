@@ -141,5 +141,55 @@ test("person attachments download and Markdown reports open in the viewer", asyn
   assert.equal(await report.locator("strong").innerText(), "Evidence");
   assert.equal(await report.locator("script").count(), 0);
   assert.equal(await page.locator("#w-photos").getByText("example.md").count(), 0);
+  const response = await page.request.post(`${srv.url}/mcp`, {
+    data: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list_attachments", arguments: { person: "I4", type: "report" } } },
+  });
+  const result = (await response.json()).result;
+  assert.ok(result);
+  await page.goto(JSON.parse(result.content[0].text).attachments[0].page_url);
+  await page.frameLocator(".report-viewer").getByRole("heading", { name: "Example heading" }).waitFor();
   assert.deepEqual(errors, []);
+});
+
+test("MCP cards render in a sandbox and open a record in the selected tree", async () => {
+  const request = page.request;
+  const mcp = async (method, params) => {
+    const response = await request.post(`${srv.url}/mcp`, { data: { jsonrpc: "2.0", id: 1, method, params } });
+    const payload = await response.json();
+    assert.ok(payload.result, JSON.stringify(payload.error));
+    return payload.result;
+  };
+  const create = await request.put(`${srv.url}/api/admin/trees/mcp-test`, {
+    data: { name: "MCP browser example", definition: { branches: ["hartley"] } },
+  });
+  assert.ok(create.ok());
+  const tools = await mcp("tools/list", {});
+  const uri = tools.tools.find((t) => t.name === "get_person")._meta.ui.resourceUri;
+  const resource = await mcp("resources/read", { uri });
+  const result = await mcp("tools/call", { name: "get_person", arguments: { tree: "mcp-test", id: "I4" } });
+  const preview = await browser.newPage();
+  try {
+    await preview.goto(srv.url);
+    await preview.evaluate(({ html, result }) => {
+      const frame = document.createElement("iframe");
+      frame.title = "MCP card host";
+      frame.sandbox.add("allow-scripts");
+      addEventListener("message", ({ data, source }) => {
+        if (source !== frame.contentWindow) return;
+        if (data.method === "ui/initialize") source.postMessage({ jsonrpc: "2.0", id: data.id, result: { hostCapabilities: { openLinks: {} } } }, "*");
+        if (data.method === "ui/notifications/initialized") source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: result }, "*");
+        if (data.method === "ui/open-link") location.assign(data.params.url);
+      });
+      frame.srcdoc = html;
+      document.body.append(frame);
+    }, { html: resource.contents[0].text, result });
+    const card = preview.frameLocator('iframe[title="MCP card host"]').locator("article").first();
+    await card.getByRole("heading", { name: "George Hartley" }).waitFor();
+    await card.getByRole("link", { name: "Open on family tree" }).click();
+    await preview.waitForURL("**/?tree=mcp-test#/person/I4");
+    await preview.getByRole("heading", { name: "George Hartley" }).waitFor();
+    assert.equal(await preview.locator(".tree-switch").inputValue(), "mcp-test");
+  } finally {
+    await preview.close();
+  }
 });
