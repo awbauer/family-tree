@@ -50,7 +50,9 @@ export class FakeR2 {
   async get(key) {
     const o = this.objects.get(key);
     if (!o) return null;
-    return { body: o.body, httpEtag: `"${key}"`, writeHttpMetadata: (h) => o.httpMetadata.contentType && h.set("Content-Type", o.httpMetadata.contentType) };
+    const blob = new Blob([o.body]);
+    return { body: o.body, size: blob.size, arrayBuffer: () => blob.arrayBuffer(), httpEtag: `"${key}"`,
+      writeHttpMetadata: (h) => o.httpMetadata.contentType && h.set("Content-Type", o.httpMetadata.contentType) };
   }
   async delete(keys) { for (const k of [].concat(keys)) this.objects.delete(k); }
   async list({ prefix = "" } = {}) { return { objects: [...this.objects.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key })), truncated: false }; }

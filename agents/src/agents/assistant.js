@@ -8,11 +8,18 @@ import { useInitialData, useModel, useTool } from "@flue/runtime";
 import * as v from "valibot";
 import { settings, compactAt, modelSpec } from "../../../worker/agent/config.js";
 import { searchPeople, relationship } from "../../../worker/agent/tools.js";
-import { CHAT_SYSTEM, loadChat, chatScope, chatPersonView, proposeChange, recordChatUsage, readPage } from "../../../worker/agent/chat.js";
+import { CHAT_SYSTEM, loadChat, chatScope, chatPersonView, proposeChange, recordChatUsage, readPage, chatFileTarget } from "../../../worker/agent/chat.js";
+import { chatSourceView, recordFiles, readRecordFile } from "../../../worker/agent/chat-files.js";
+import { parse } from "../../../worker/db.js";
 import { useUsage } from "./usage.js";
 
 const S = settings(env);
 const str = (d) => v.pipe(v.string(), v.description(d));
+const offset = v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)));
+const recordTarget = {
+  person: v.optional(str("Person ID; defaults to the current person page")),
+  source: v.optional(str("Catalogued source ID; defaults to the current source page")),
+};
 
 export function Assistant({ id }) {
   // Keep the conversation small (it is re-sent on every model call): older turns are summarised past ~32k tokens.
@@ -37,9 +44,43 @@ export function Assistant({ id }) {
 
   useTool({
     name: "get_person",
-    description: "Everything recorded about one person: names and events with their fact ids (fid), sources, notes, photos, research status, the families they are a child or spouse in (with family ids, spouses and children), open findings and to-dos. Use the fids and family ids in propose_change.",
+    description: "Everything recorded about one person: names and events with their fact ids (fid), sources, notes, a file inventory, research status, the families they are a child or spouse in (with family ids, spouses and children), open findings and to-dos. Use the fids and family ids in propose_change.",
     input: v.object({ id: str("Person id, e.g. I12") }),
     async run({ data }) { return { output: chatPersonView(await tree(), data.id) }; },
+  });
+  useTool({
+    name: "get_source",
+    description: "Read a catalogued source's metadata and available transcription. Lists any photos, documents and reports linked to the source. Use read_record_file to inspect a listed file.",
+    input: v.object({ id: str("Catalogued source ID") }),
+    async run({ data }) { return { output: chatSourceView(await tree(), data.id) }; },
+  });
+  useTool({
+    name: "list_record_files",
+    description: "List photos, attachments and reports on a person or catalogued source in this editor's tree view. Uses the current person or source page when both IDs are omitted. This is an inventory, not file contents.",
+    input: v.object({ ...recordTarget, offset }),
+    async run({ data }) {
+      const c = await chat();
+      const result = recordFiles(await tree(), chatFileTarget(parse(c.page), data));
+      if (result.error) return { output: result };
+      const start = data.offset || 0, end = start + 50;
+      return { output: { files: result.files.slice(start, end), next_offset: end < result.files.length ? end : undefined } };
+    },
+  });
+  useTool({
+    name: "read_record_file",
+    description: "Inspect the actual content of one private file from get_person, get_source or list_record_files. Pass the person or source when it differs from the current page. Reads text/Markdown reports, extracts text from supported documents, or visually transcribes a photograph or scan. Use offset with the returned next_offset for long text and focus for a particular area of an image.",
+    input: v.object({
+      ...recordTarget, file: v.optional(str("Exact file key from the inventory; omit only for a selected attachment on the current page")),
+      offset, focus: v.optional(str("Optional area or lines to inspect in an image")),
+    }),
+    timeoutMs: 90_000,
+    async run({ data }) {
+      const c = await chat();
+      const result = await readRecordFile(env, await tree(), chatFileTarget(parse(c.page), data), {
+        meter: (usage) => recordChatUsage(env, chatId, usage),
+      });
+      return { output: result };
+    },
   });
   useTool({
     name: "read_page",
@@ -48,8 +89,7 @@ export function Assistant({ id }) {
     async run({ data }) {
       await tree();
       const c = await chat();
-      let snap = null; try { snap = c.page ? JSON.parse(c.page) : null; } catch {}
-      return { output: readPage(snap, data.find) };
+      return { output: readPage(parse(c.page), data.find) };
     },
   });
   useTool({

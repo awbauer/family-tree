@@ -187,7 +187,7 @@ export const common = {
 
   // ---------------------------------------------------------------- the assistant panel (web/src/Chat.tsx)
   chat: {
-    tools: { get_person: "Read", search_people: "Searched for", relationship_path: "Traced", person_history: "Read the history of", propose_change: "Drafted a change" },
+    tools: { get_person: "Read", get_source: "Read source", list_record_files: "Listed record files", read_record_file: "Inspected file", search_people: "Searched for", relationship_path: "Traced", person_history: "Read the history of", propose_change: "Drafted a change" },
     heads: { pending: "Proposed change", applied: "Applied", dismissed: "Dismissed", superseded: "Replaced by a newer draft", failed: "Couldn't apply", undone: "Undone" },
     noReply: "The assistant didn't reply. Try again in a moment.",
     unreachable: (err: string) => `Couldn't reach the assistant: ${err}`,
@@ -208,7 +208,7 @@ export const common = {
     replying: "The assistant is replying",
     empty: {
       intro: "Ask about the page you're on, or describe something that needs updating. For example:",
-      examples: ["“What do we know about this person's parents?”", "“She was a schoolteacher from about 1920; add that.”", "“Make the second photo the main one.”"],
+      examples: ["“What evidence connects this person to their parents?”", "“Transcribe the names and dates in the attached image.”", "“Does the report support the date in the tree?”"],
       outro: "The assistant drafts changes; you check each one and press Apply.",
     },
     placeholder: "Ask about this page, or describe a change…",

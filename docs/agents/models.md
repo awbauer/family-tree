@@ -12,6 +12,7 @@ The defaults, prices and context windows are in [`worker/agent/models.js`](../..
 ## Constraints
 
 - **No AI Gateway credits needed by default.** Every default runs on Workers AI and is billed to the Workers plan. Anthropic and OpenAI models through AI Gateway are opt-in, per agent, and need gateway credits or a provider key stored on the gateway.
+- **The page assistant uses Workers AI models.** Its history may contain excerpts from private files, so it uses its Workers AI default when a gateway-provider model is configured. It uses Gemma 4 through the Workers AI binding for visual transcription.
 - **Zero data retention.** Every Workers AI model below is marked zero-data-retention, which matters because the tree includes living people. Gateway models follow their provider's API terms instead.
 - **Tool calling is essential.** Every agent works through tools, so only models with function calling qualify.
 - **The model must be in Pi's catalog.** Flue reads Pi's catalog to learn a model's context window, effort levels and prices. A model the catalog doesn't know still runs, but threshold compaction can't engage and effort settings are ignored. That rules out **Inkling 2 Small** (released 12 Nov 2026, $0.30/$1.00) until Pi is updated.

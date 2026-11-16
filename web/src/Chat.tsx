@@ -198,7 +198,7 @@ function ChatPanel({ D, api, tree }: { D: Tree; api: ReturnType<typeof useData>[
       const k = `${i}.${j}`;
       if (p.type === "text") items.push(<div key={k} className="chat-msg bot"><Md text={p.text} D={D} /></div>);
       else if (p.change) { shown.add(p.change); items.push(<Fragment key={k}>{changeCard(byId[p.change])}</Fragment>); }
-      else items.push(<div key={k} className="chat-tool small muted">{p.state === "running" ? "…" : p.state === "error" ? "⚠" : "·"} {TOOL[p.tool] || p.tool}{p.about && <> <LinkIds text={p.about} D={D} /></>}</div>);
+      else items.push(<div key={k} className="chat-tool small muted">{p.state === "running" ? "…" : p.state === "error" ? "⚠" : "·"} {TOOL[p.tool] || p.tool}{p.about && <> {p.page ? <Link to={p.page}>{p.about}</Link> : <LinkIds text={p.about} D={D} />}</>}</div>);
     });
   });
   // drafts whose message has scrolled out of the window still need an answer

@@ -76,6 +76,11 @@ function viewMessages(snap) {
           if (p.input && typeof p.input === "object") x.about = p.input.id || p.input.query || p.input.summary || (p.input.from && `${p.input.from} → ${p.input.to}`) || undefined;
           const o = p.output && typeof p.output === "object" && (p.output.output || p.output);
           if (p.toolName === "propose_change" && o && o.change) x.change = o.change;
+          if (p.toolName === "get_source" || p.toolName === "read_record_file") {
+            if (o?.title) x.about = o.title;
+            if (o?.error) x.state = "error";
+            else if (typeof o?.page === "string" && /^\/(person|source)\//.test(o.page)) x.page = o.page;
+          }
           parts.push(x);
         }
       }
