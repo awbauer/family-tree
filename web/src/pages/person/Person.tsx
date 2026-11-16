@@ -119,7 +119,7 @@ function Research() {
   const toAct = findings.filter((f: any) => !f.resolution && ACTIONABLE.includes(f.kind)).length;
   const issues = p.issues || [];
   return (
-    <section className="card" style={{ marginTop: 20 }}>
+    <section id="w-research" className="card" style={{ marginTop: 20 }}>
       <h2>{T.research.title}</h2>
       {findings.length ? <><h3>{T.research.findings}{toAct > 0 && <> <span className="count">{T.research.toActOn(toAct)}</span></>}</h3>
         {findings.map((f: any, i: number) => live ? <FindingWithActions key={f.id ?? i} f={f} /> : <Finding key={f.id ?? i} f={f} here={id} />)}</>

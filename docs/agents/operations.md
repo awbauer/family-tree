@@ -247,7 +247,7 @@ Editors get an **Ask** button on every page. It opens a chat with an agent (`age
 
 ## MCP server (members' own AI clients)
 
-`POST /mcp` serves the tree to any MCP client (Claude, ChatGPT, Cursor, Claude Code, …) over MCP's Streamable HTTP transport. It's part of the one Worker (`worker/mcp.js`, read helpers in `worker/mcp-views.js`), stateless (no Durable Object, plain JSON responses, no SSE stream), and has no dependencies.
+`POST /mcp` serves the tree to any MCP client (Claude, ChatGPT, Cursor, Claude Code, …) over MCP's Streamable HTTP transport. It's part of the one Worker (`worker/mcp.js`, read helpers in `worker/mcp-views.js`), stateless (no Durable Object, plain JSON responses, no SSE stream), and has no dependencies. Results include browser links where a relevant site page exists. Those links select the same tree and use normal site sign-in. Clients that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) can show inline cards with record excerpts and photos. Other clients still receive the links in the tool response.
 
 - **Who sees what:** exactly what the site shows the signed-in member. Read tools run over their scoped bundle (their grants and views), so living relatives come through as each member's view shows them (full, names only, anonymous or hidden), like everywhere else. Write tools call the site's own route handlers in-process, so the rules are the same ones: members and agents suggest, editors edit, review and undo, the owner administers. `tools/list` shows each caller only the tools their role can use; the handlers check again, per tree.
 - **What it covers:** everything in the database except running the AI agents (research runs, AI profiles, the page assistant), which stay on the site. 62 tools:

@@ -1,7 +1,7 @@
 // Admin → Audit history (owner only): every change, newest first, with filters, paging, and rows that open to the
 // full detail (diffs, stored values, linked suggestions and runs) and an undo.
 import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { S } from "../../../../strings/index.ts";
 import { useData } from "../../data";
 import { PersonLink } from "../../lib";
@@ -119,11 +119,12 @@ function Batch({ b, open, onToggle, onUndone }: { b: any; open: boolean; onToggl
 }
 
 export function Audit() {
+  const linkedQuery = useSearchParams()[0].get("q") || "";
   const { api } = useData();
   const who = useWho();
-  const [st, setSt] = useState<{ actor: string; type: string; q: string; rows: any[]; next: any; actors: any[]; types: any[] }>({ actor: "", type: "", q: "", rows: [], next: null, actors: [], types: [] });
+  const [st, setSt] = useState<{ actor: string; type: string; q: string; rows: any[]; next: any; actors: any[]; types: any[] }>({ actor: "", type: "", q: linkedQuery, rows: [], next: null, actors: [], types: [] });
   const [loaded, setLoaded] = useState(false), [error, setError] = useState("");
-  const [open, setOpen] = useState<Set<string>>(new Set());
+  const [open, setOpen] = useState<Set<string>>(() => new Set(linkedQuery ? [linkedQuery] : []));
   const alive = useRef(true);
   const stRef = useRef(st);
   stRef.current = st;

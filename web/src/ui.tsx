@@ -53,7 +53,7 @@ export function Finding({ f, here, children }: { f: any; here?: string; children
   const res = f.resolution;
   const elsewhere = f.person !== here;
   return (
-    <div className={`finding${res ? " f-closed" : ""}`} data-finding={f.id != null ? f.id : undefined}>
+    <div id={f.id == null ? undefined : `finding-${f.id}`} className={`finding${res ? " f-closed" : ""}`} data-finding={f.id != null ? f.id : undefined}>
       <div className="f-head">
         <span className={`f-kind k-${f.kind}`}>{FINDING_KINDS[f.kind] || f.kind}</span>
         {res && elsewhere && <span className={`badge st-${res.status === "resolved" ? "verified" : "unverified"}`}>{res.status === "resolved" ? S.common.finding.resolved : S.common.finding.keptAsIs}</span>}
