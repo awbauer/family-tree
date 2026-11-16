@@ -15,15 +15,15 @@ const SITE = resolve(ROOT, process.env.E2E_SITE || "dist/site");
 let srv, browser, page, errors = [];
 
 before(async () => {
-  srv = await startDevServer({ port: 8799, site: SITE, quiet: true });
+  srv = await startDevServer({ port: 0, site: SITE, quiet: true });
   browser = await chromium.launch();
   page = await browser.newPage();
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
   page.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource|tile|leaflet|unpkg|fonts\.g/i.test(m.text())) errors.push(`console: ${m.text()}`); });
   await page.goto(`${srv.url}/#/`);
   await page.waitForSelector("#app h1, #app h2, main h1", { timeout: 15000 });
-});
-after(async () => { await browser?.close(); await srv?.close(); });
+}, { timeout: 90_000 });
+after(async () => { await browser?.close(); await srv?.close(); }, { timeout: 30_000 });
 
 /** Go to a route and wait for text to appear in the page; fail on any script error along the way. */
 async function visit(hash, expect, { selector = "body" } = {}) {
