@@ -77,6 +77,36 @@ test("no page is wider than a 320px screen, even with very long text", async () 
   assert.deepEqual(errors, []);
 });
 
+test("open forms, tab bars, search results and long names stay inside their boxes", async () => {
+  // boxes whose content spills out, or anything past the screen edge, outside deliberate side-scrollers
+  const spills = () => {
+    const out = [];
+    for (const el of document.querySelectorAll("header *, main *")) {
+      if (el.closest("svg, canvas, iframe, .leaflet-container, .graph-wrap, .tree-wrap, .fan-wrap, .table-wrap, pre")) continue;
+      const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+      if (r.width <= 2 || r.height <= 2 || cs.display === "none") continue;
+      if (r.right > innerWidth + 1 || (cs.overflowX === "visible" && el.scrollWidth > el.clientWidth + 2 && el.clientWidth > 0)) out.push(`${el.tagName.toLowerCase()}.${el.className}`);
+    }
+    return [...new Set(out)].slice(0, 5);
+  };
+  const bad = [];
+  for (const page of pages) {
+    const check = async (label) => { await page.waitForTimeout(300); const r = await page.evaluate(spills); if (r.length) bad.push(`${page.engine} ${label}: ${r.join(", ")}`); };
+    await page.evaluate((id) => { location.hash = `#/person/${id}`; }, longId);
+    await page.waitForTimeout(500);
+    await check("person page");
+    for (const name of ["Add an attachment", "Add a report"]) {
+      await page.getByRole("button", { name, exact: true }).click();
+      await check(`person page, ${name}`);
+    }
+    for (const p of ["/research", "/admin"]) { await page.evaluate((h) => { location.hash = h; }, "#" + p); await check(p); }
+    const search = page.locator(".search input").first();
+    if (await search.isVisible()) { await search.fill("Max"); await check("search results"); await search.fill(""); }
+  }
+  assert.deepEqual(bad, []);
+  assert.deepEqual(errors, []);
+});
+
 test("the assistant opens as a full-screen sheet that fits, with 16px input", async () => {
   for (const page of pages) {
   await page.evaluate(() => { location.hash = "#/person/I5"; });
