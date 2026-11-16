@@ -4,7 +4,8 @@
     "name": "Sam Hartley",
     "sex": "M",
     "born": 1992,
-    "living": true
+    "living": true,
+    "page_url": "https://tree.example.test/?tree=all#/person/I1"
   },
   "generations": 3,
   "ancestors": [
@@ -16,7 +17,8 @@
       "sex": "M",
       "born": 1960,
       "living": true,
-      "birthplace": "Leeds, Yorkshire, England"
+      "birthplace": "Leeds, Yorkshire, England",
+      "page_url": "https://tree.example.test/?tree=all#/person/I2"
     },
     {
       "ahnentafel": 3,
@@ -26,7 +28,8 @@
       "sex": "F",
       "born": 1963,
       "living": true,
-      "birthplace": "Fall River, Bristol, Massachusetts, USA"
+      "birthplace": "Fall River, Bristol, Massachusetts, USA",
+      "page_url": "https://tree.example.test/?tree=all#/person/I3"
     },
     {
       "ahnentafel": 4,
@@ -37,7 +40,8 @@
       "born": 1931,
       "died": 2004,
       "birthplace": "Leeds, Yorkshire, England",
-      "deathplace": "Leeds, Yorkshire, England"
+      "deathplace": "Leeds, Yorkshire, England",
+      "page_url": "https://tree.example.test/?tree=all#/person/I4"
     },
     {
       "ahnentafel": 5,
@@ -48,7 +52,8 @@
       "born": 1934,
       "died": 2015,
       "birthplace": "Plzeň, Bohemia, Czechoslovakia",
-      "deathplace": "Leeds, Yorkshire, England"
+      "deathplace": "Leeds, Yorkshire, England",
+      "page_url": "https://tree.example.test/?tree=all#/person/I5"
     },
     {
       "ahnentafel": 6,
@@ -59,7 +64,8 @@
       "born": 1935,
       "died": 2010,
       "birthplace": "Ponta Delgada, São Miguel, Azores, Portugal",
-      "deathplace": "Fall River, Bristol, Massachusetts, USA"
+      "deathplace": "Fall River, Bristol, Massachusetts, USA",
+      "page_url": "https://tree.example.test/?tree=all#/person/I6"
     },
     {
       "ahnentafel": 7,
@@ -70,7 +76,8 @@
       "born": 1938,
       "died": 2020,
       "birthplace": "Duluth, St. Louis, Minnesota, USA",
-      "deathplace": "Fall River, Bristol, Massachusetts, USA"
+      "deathplace": "Fall River, Bristol, Massachusetts, USA",
+      "page_url": "https://tree.example.test/?tree=all#/person/I7"
     },
     {
       "ahnentafel": 8,
@@ -81,7 +88,8 @@
       "born": 1899,
       "died": 1966,
       "birthplace": "Leeds, Yorkshire, England",
-      "deathplace": "Leeds, Yorkshire, England"
+      "deathplace": "Leeds, Yorkshire, England",
+      "page_url": "https://tree.example.test/?tree=all#/person/I8"
     },
     {
       "ahnentafel": 9,
@@ -92,7 +100,8 @@
       "born": 1903,
       "died": 1979,
       "birthplace": "York, Yorkshire, England",
-      "deathplace": "Leeds, Yorkshire, England"
+      "deathplace": "Leeds, Yorkshire, England",
+      "page_url": "https://tree.example.test/?tree=all#/person/I9"
     },
     {
       "ahnentafel": 10,
@@ -103,7 +112,8 @@
       "born": 1905,
       "died": 1944,
       "birthplace": "Plzeň, Bohemia, Czechoslovakia",
-      "deathplace": "Plzeň, Bohemia"
+      "deathplace": "Plzeň, Bohemia",
+      "page_url": "https://tree.example.test/?tree=all#/person/I10"
     },
     {
       "ahnentafel": 11,
@@ -112,7 +122,8 @@
       "name": "Marie Dvořák",
       "sex": "F",
       "born": 1908,
-      "birthplace": "Plzeň, Bohemia, Austria-Hungary"
+      "birthplace": "Plzeň, Bohemia, Austria-Hungary",
+      "page_url": "https://tree.example.test/?tree=all#/person/I11"
     },
     {
       "ahnentafel": 12,
@@ -123,7 +134,8 @@
       "born": 1904,
       "died": 1970,
       "birthplace": "Ponta Delgada, São Miguel, Azores, Portugal",
-      "deathplace": "Ponta Delgada, São Miguel, Azores, Portugal"
+      "deathplace": "Ponta Delgada, São Miguel, Azores, Portugal",
+      "page_url": "https://tree.example.test/?tree=all#/person/I12"
     },
     {
       "ahnentafel": 14,
@@ -134,7 +146,8 @@
       "born": 1910,
       "died": 1975,
       "birthplace": "Kiruna, Norrbotten, Sweden",
-      "deathplace": "Duluth, St. Louis, Minnesota, USA"
+      "deathplace": "Duluth, St. Louis, Minnesota, USA",
+      "page_url": "https://tree.example.test/?tree=all#/person/I13"
     },
     {
       "ahnentafel": 15,
@@ -145,10 +158,12 @@
       "born": 1912,
       "died": 1990,
       "birthplace": "Duluth, St. Louis, Minnesota, USA",
-      "deathplace": "Duluth, St. Louis, Minnesota, USA"
+      "deathplace": "Duluth, St. Louis, Minnesota, USA",
+      "page_url": "https://tree.example.test/?tree=all#/person/I14"
     }
   ],
   "unknown_ancestor_numbers": [
     13
-  ]
+  ],
+  "page_url": "https://tree.example.test/?tree=all#/tree/I1?mode=anc&g=3"
 }

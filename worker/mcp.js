@@ -18,6 +18,8 @@ import { HttpError, fail } from "./http.js";
 import { grantFor, can } from "./auth.js";
 import { now, J } from "./db.js";
 import { documentType, documentsFor, FILE_LIMIT } from "./documents.ts";
+import { presentsRecords, recordResult } from "./mcp-records.js";
+import { cardResource, cardHtml } from "./mcp-card-view.js";
 import * as V from "./mcp-views.js";
 import { S } from "../strings/index.ts";
 
@@ -40,6 +42,7 @@ export const unauthorized = (msg) => rpc(rpcError(null, -32001, msg), 401, { "WW
 const INSTRUCTIONS = `This server is a private family-history database. Everything you read here is private family data shared with the signed-in member; don't repeat it anywhere public.
 
 How to work:
+- Include the returned page_url when referring to a record so the member can open it in the site.
 - Start with whoami (which trees you can use and your role in each) and tree_overview. Every tool takes an optional "tree" (a tree id from whoami); without it, the member's first tree is used.
 - People are I… ids, families F…, sources S…. Events and names carry a fact id ("fid": e1, n1) that edits, reviews and citations point at. Find people with search_people, then get_person.
 - A person shown as {private: true} is a name only in this member's view: use them to walk the family, never research or change them.
@@ -301,6 +304,7 @@ function schemaOf(t) {
   return { type: "object", properties, ...(t.required ? { required: t.required } : {}), additionalProperties: false };
 }
 const listed = (t) => ({ name: t.name, title: t.title, description: t.description, inputSchema: schemaOf(t),
+  ...(presentsRecords(t.name) ? { _meta: { ui: { resourceUri: cardResource.uri } } } : {}),
   annotations: { title: t.title, readOnlyHint: !!t.readOnly, destructiveHint: !!t.destructive, idempotentHint: !!t.readOnly, openWorldHint: false } });
 
 /** Light argument check against the tool's schema: required fields and types, unknown fields refused. */
@@ -418,8 +422,19 @@ export async function callTool(c, deps, name, rawArgs) {
       },
     };
     const out = await t.run(x, args);
+    const result = presentsRecords(name) ? await recordResult(x, t, args, out) : { data: out, cards: [] };
     await logCall(c, name, treeId, true);
-    return out && Array.isArray(out.content) ? out : textResult(out);
+    const response = Array.isArray(out?.content) ? out : textResult(result.data);
+    if (!result.cards.length) return response;
+    const revision = c.request.headers.get("MCP-Protocol-Version");
+    if (revision === "2024-11-05" || revision === "2025-03-26") {
+      return Array.isArray(out?.content)
+        ? { ...response, content: [...response.content, { type: "text", text: JSON.stringify({ page_url: result.data.page_url }) }] }
+        : response;
+    }
+    const links = [...new Map(result.cards.map((card) => [card.page_url, card])).values()].slice(0, 8)
+      .map((card) => ({ type: "resource_link", uri: card.page_url, name: card.title || t.title, mimeType: "text/html" }));
+    return { ...response, content: [...response.content, ...links], structuredContent: { cards: result.cards } };
   } catch (e) {
     await logCall(c, name, treeId, false);
     if (e instanceof HttpError) {
@@ -440,11 +455,16 @@ async function dispatch(c, deps, msg) {
   switch (msg.method) {
     case "initialize":
       return ok({ protocolVersion: PROTOCOLS.includes(p.protocolVersion) ? p.protocolVersion : PROTOCOLS[0],
-        capabilities: { tools: { listChanged: false } }, serverInfo: SERVER, instructions: INSTRUCTIONS });
+        capabilities: { tools: { listChanged: false }, resources: {} }, serverInfo: SERVER, instructions: INSTRUCTIONS });
     case "ping": return ok({});
     case "tools/list": return ok({ tools: T.filter((t) => allowed(t, c.access)).map(listed) });
     case "tools/call": return ok(await callTool(c, deps, p.name, p.arguments));
-    case "resources/list": return ok({ resources: [] });
+    case "resources/list": return ok({ resources: c.access.grants.length || c.access.isOwner ? [cardResource] : [] });
+    case "resources/read":
+      if (p.uri === cardResource.uri && (c.access.grants.length || c.access.isOwner)) {
+        return ok({ contents: [{ uri: cardResource.uri, mimeType: cardResource.mimeType, text: cardHtml }] });
+      }
+      return isNote ? null : rpcError(msg.id, -32002, M.resourceNotFound);
     case "resources/templates/list": return ok({ resourceTemplates: [] });
     case "prompts/list": return ok({ prompts: [] });
     default:

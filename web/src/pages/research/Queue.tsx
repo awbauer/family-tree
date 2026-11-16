@@ -1,6 +1,6 @@
 // The suggestions queue (/api/proposals): research and edits from relatives and agents, waiting for an editor.
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { ApiError, useData } from "../../data";
 import { documentType } from "../../documents";
 import { DocumentLinks } from "../person/Attachments";
@@ -39,7 +39,7 @@ function Card({ pr, onDecide }: { pr: any; onDecide: (id: number, action: string
   const b = pr.payload || {};
   const pl = (id: string) => (D.people[id] ? <PersonLink id={id} /> : <>{id}</>);
   return (
-    <section className="card" style={{ marginBottom: 14 }}>
+    <section id={`proposal-${pr.id}`} className="card" style={{ marginBottom: 14 }}>
       <div className="eyebrow">{C.suggestion(pr.id)} · {who(pr.author)} · {pr.created_at.slice(0, 10)}{pr.todo_id ? C.forTodo(pr.todo_id) : ""}</div>
       {pr.rationale && <p>{pr.rationale}</p>}
       {pr.kind === "edit" && <>
@@ -94,7 +94,9 @@ function Card({ pr, onDecide }: { pr: any; onDecide: (id: number, action: string
 
 export function Queue() {
   const { api } = useData();
-  const [status, setStatus] = useState("open");
+  const linkedStatus = useSearchParams()[0].get("status");
+  const [status, setStatus] = useState(() => linkedStatus === "all" ? "all" : "open");
+  useEffect(() => { if (linkedStatus === "all" || linkedStatus === "open") setStatus(linkedStatus); }, [linkedStatus]);
   const [state, setState] = useState<{ loading?: boolean; proposals?: any[]; error?: string }>({ loading: true });
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);

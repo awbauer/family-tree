@@ -28,7 +28,8 @@
       "type": "Birth",
       "date": "2 Feb 1931",
       "place": "Leeds, Yorkshire, England",
-      "year": 1931
+      "year": 1931,
+      "page_url": "https://tree.example.test/?tree=all#/person/I4?fact=e1"
     },
     {
       "fid": "e2",
@@ -42,7 +43,8 @@
           "title": "England & Wales, Civil Registration Death Index",
           "page": "Vol. 2c, p. 411"
         }
-      ]
+      ],
+      "page_url": "https://tree.example.test/?tree=all#/person/I4?fact=e2"
     },
     {
       "fid": "e3",
@@ -50,7 +52,8 @@
       "date": "1961",
       "place": "Leeds, Yorkshire, England",
       "value": "Tram conductor",
-      "year": 1961
+      "year": 1961,
+      "page_url": "https://tree.example.test/?tree=all#/person/I4?fact=e3"
     }
   ],
   "research_status": "verified",
@@ -159,7 +162,9 @@
           "note": "Illustrative — not a real record"
         }
       ],
-      "status": "open"
+      "status": "open",
+      "page_url": "https://tree.example.test/?tree=all#/person/I4?section=finding-1"
     }
-  ]
+  ],
+  "page_url": "https://tree.example.test/?tree=all#/person/I4"
 }

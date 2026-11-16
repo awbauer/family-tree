@@ -1,6 +1,7 @@
 // The live to-do list (/api/todos): filters, a new to-do form, and claim / assign / status / research / history
 // actions per row.
 import { Fragment, useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { useSearchParams } from "react-router";
 import { useData } from "../../data";
 import { isUnknown, PersonLink } from "../../lib";
 import { Linkify, useWho } from "../../ui";
@@ -33,7 +34,9 @@ export function Todos() {
   const { D, api, editor, ai, people } = useData();
   const who = useWho();
   const me = D.me || null;
-  const [filter, setFilter] = useState("active");
+  const section = useSearchParams()[0].get("section");
+  const [filter, setFilter] = useState(() => section?.startsWith("td-") ? "all" : "active");
+  useEffect(() => { if (section?.startsWith("td-")) setFilter("all"); }, [section]);
   const [state, setState] = useState<{ loading?: boolean; todos?: any[]; error?: string }>({ loading: true });
   const [hist, setHist] = useState<Record<number, any[]>>({});
   const [formOpen, setFormOpen] = useState(false);

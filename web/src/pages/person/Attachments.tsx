@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router";
 import { Marked } from "marked";
 import { S } from "../../../../strings/index.ts";
 import { useData } from "../../data";
@@ -46,14 +47,17 @@ function Report({ url, title }: { url: string; title: string }) {
 export function DocumentLinks({ item, proposal }: { item: DocumentItem; proposal?: number }) {
   const { D, tree } = useData();
   const url = documentUrl(item.file, tree, D.previewView, proposal);
-  const [reading, setReading] = useState(false);
+  const target = useSearchParams()[0].get("attachment");
+  const linked = !proposal && target === item.file;
+  const [reading, setReading] = useState(linked);
+  useEffect(() => { setReading(linked); }, [linked]);
   const report = documentType(item.file) === "report";
   return <>
     <div className="btn-row">
       {report && <button className="btn" aria-expanded={reading} onClick={() => setReading(!reading)}>{reading ? S.person.photos.close : T.read}</button>}
       <a className="btn" href={url} download>{T.download}</a>
     </div>
-    {reading && <Report key={url} url={url} title={item.caption} />}
+    {reading && report && <Report key={url} url={url} title={item.caption} />}
   </>;
 }
 
@@ -94,10 +98,10 @@ export function Attachments() {
     }
   }
   return (
-    <section className="card" style={{ marginTop: 20 }}>
+    <section className="card" id="w-attachments" style={{ marginTop: 20 }}>
       <h2>{T.title}</h2>
       {list.length ? <ul className="attachment-list">{list.map((item) => (
-        <li key={item.file}>
+        <li key={item.file} id={item.file}>
           <strong>{item.caption}</strong> <span className="muted small">{documentType(item.file) === "report" ? T.report : T.attachment}</span>
           <DocumentLinks item={item} />
           {!D.previewView && <button className="btn" onClick={() => {

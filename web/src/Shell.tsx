@@ -74,7 +74,13 @@ function ThemeToggle() {
 function TreeSwitch() {
   const { account, tree } = useData();
   if (!account || account.trees.length < 2) return null;
-  return <select className="tree-switch" aria-label={T.treeSwitch} value={tree || ""} onChange={(e) => { store.set("tree", e.target.value); location.reload(); }}>
+  return <select className="tree-switch" aria-label={T.treeSwitch} value={tree || ""} onChange={(e) => {
+    store.set("tree", e.target.value);
+    const url = new URL(location.href);
+    url.searchParams.delete("tree");
+    history.replaceState(history.state, "", url);
+    location.reload();
+  }}>
     {account.trees.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
   </select>;
 }
@@ -93,6 +99,22 @@ export function Shell({ children }: { children: ReactNode }) {
   const [menu, setMenu] = useState(false);
   const main = useRef<HTMLElement>(null);
   useEffect(() => { setMenu(false); }, [loc.pathname]);
+  useEffect(() => {
+    const section = new URLSearchParams(loc.search).get("section");
+    const content = main.current;
+    if (!section || !content) return;
+    const scroll = () => {
+      const target = document.getElementById(section);
+      if (!target || !content.contains(target)) return false;
+      const header = document.querySelector(".site-header")?.getBoundingClientRect().height || 0;
+      window.scrollTo({ top: window.scrollY + target.getBoundingClientRect().top - header - 12 });
+      return true;
+    };
+    if (scroll()) return;
+    const observer = new MutationObserver(() => { if (scroll()) observer.disconnect(); });
+    observer.observe(content, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [loc.pathname, loc.search]);
   const family = site.familyName.replace(/^The /, "").replace(/ Family$/, "");
   return (
     <>

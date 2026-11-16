@@ -33,7 +33,7 @@ export async function startDevServer({ port = PORT, site = SITE, as = AS, quiet 
   const worker = (await import(join(ROOT, "worker/index.js"))).default;
   const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png", ".ico": "image/x-icon", ".map": "application/json" };
   const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url, "http://localhost");
+    const url = new URL(req.url, `http://localhost:${req.socket.localPort}`);
     try {
       if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/media/") || url.pathname === "/mcp") {
         const chunks = [];

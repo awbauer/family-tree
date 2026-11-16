@@ -27,7 +27,10 @@ function filters(sp) {
   const actor = sp.get("actor"), type = sp.get("type"), q = (sp.get("q") || "").trim();
   if (actor) { where.push("(actor = ? OR on_behalf_of = ?)"); args.push(actor, actor); }
   if (type) { where.push("entity_type = ?"); args.push(type); }
-  if (q) { where.push("(reason LIKE ? OR entity_id LIKE ? OR batch_id = ?)"); args.push(`%${q}%`, `%${q}%`, q); }
+  if (q) {
+    where.push("(reason LIKE ? OR entity_id LIKE ? OR batch_id = ? OR (batch_id IS NULL AND id = ?))");
+    args.push(`%${q}%`, `%${q}%`, q, /^c\d+$/.test(q) ? +q.slice(1) : null);
+  }
   return { where, args };
 }
 
