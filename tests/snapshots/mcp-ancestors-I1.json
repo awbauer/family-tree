@@ -1,0 +1,154 @@
+{
+  "person": {
+    "id": "I1",
+    "name": "Sam Hartley",
+    "sex": "M",
+    "born": 1992,
+    "living": true
+  },
+  "generations": 3,
+  "ancestors": [
+    {
+      "ahnentafel": 2,
+      "generation": 1,
+      "id": "I2",
+      "name": "Daniel James Hartley",
+      "sex": "M",
+      "born": 1960,
+      "living": true,
+      "birthplace": "Leeds, Yorkshire, England"
+    },
+    {
+      "ahnentafel": 3,
+      "generation": 1,
+      "id": "I3",
+      "name": "Ana Maria Costa",
+      "sex": "F",
+      "born": 1963,
+      "living": true,
+      "birthplace": "Fall River, Bristol, Massachusetts, USA"
+    },
+    {
+      "ahnentafel": 4,
+      "generation": 2,
+      "id": "I4",
+      "name": "George Hartley",
+      "sex": "M",
+      "born": 1931,
+      "died": 2004,
+      "birthplace": "Leeds, Yorkshire, England",
+      "deathplace": "Leeds, Yorkshire, England"
+    },
+    {
+      "ahnentafel": 5,
+      "generation": 2,
+      "id": "I5",
+      "name": "Eva Novák",
+      "sex": "F",
+      "born": 1934,
+      "died": 2015,
+      "birthplace": "Plzeň, Bohemia, Czechoslovakia",
+      "deathplace": "Leeds, Yorkshire, England"
+    },
+    {
+      "ahnentafel": 6,
+      "generation": 2,
+      "id": "I6",
+      "name": "Manuel Costa",
+      "sex": "M",
+      "born": 1935,
+      "died": 2010,
+      "birthplace": "Ponta Delgada, São Miguel, Azores, Portugal",
+      "deathplace": "Fall River, Bristol, Massachusetts, USA"
+    },
+    {
+      "ahnentafel": 7,
+      "generation": 2,
+      "id": "I7",
+      "name": "Ingrid Lindqvist",
+      "sex": "F",
+      "born": 1938,
+      "died": 2020,
+      "birthplace": "Duluth, St. Louis, Minnesota, USA",
+      "deathplace": "Fall River, Bristol, Massachusetts, USA"
+    },
+    {
+      "ahnentafel": 8,
+      "generation": 3,
+      "id": "I8",
+      "name": "Arthur Hartley",
+      "sex": "M",
+      "born": 1899,
+      "died": 1966,
+      "birthplace": "Leeds, Yorkshire, England",
+      "deathplace": "Leeds, Yorkshire, England"
+    },
+    {
+      "ahnentafel": 9,
+      "generation": 3,
+      "id": "I9",
+      "name": "Florence Pike",
+      "sex": "F",
+      "born": 1903,
+      "died": 1979,
+      "birthplace": "York, Yorkshire, England",
+      "deathplace": "Leeds, Yorkshire, England"
+    },
+    {
+      "ahnentafel": 10,
+      "generation": 3,
+      "id": "I10",
+      "name": "Josef Novák",
+      "sex": "M",
+      "born": 1905,
+      "died": 1944,
+      "birthplace": "Plzeň, Bohemia, Czechoslovakia",
+      "deathplace": "Plzeň, Bohemia"
+    },
+    {
+      "ahnentafel": 11,
+      "generation": 3,
+      "id": "I11",
+      "name": "Marie Dvořák",
+      "sex": "F",
+      "born": 1908,
+      "birthplace": "Plzeň, Bohemia, Austria-Hungary"
+    },
+    {
+      "ahnentafel": 12,
+      "generation": 3,
+      "id": "I12",
+      "name": "João Costa",
+      "sex": "M",
+      "born": 1904,
+      "died": 1970,
+      "birthplace": "Ponta Delgada, São Miguel, Azores, Portugal",
+      "deathplace": "Ponta Delgada, São Miguel, Azores, Portugal"
+    },
+    {
+      "ahnentafel": 14,
+      "generation": 3,
+      "id": "I13",
+      "name": "Olof Lindqvist",
+      "sex": "M",
+      "born": 1910,
+      "died": 1975,
+      "birthplace": "Kiruna, Norrbotten, Sweden",
+      "deathplace": "Duluth, St. Louis, Minnesota, USA"
+    },
+    {
+      "ahnentafel": 15,
+      "generation": 3,
+      "id": "I14",
+      "name": "Karin Berg",
+      "sex": "F",
+      "born": 1912,
+      "died": 1990,
+      "birthplace": "Duluth, St. Louis, Minnesota, USA",
+      "deathplace": "Duluth, St. Louis, Minnesota, USA"
+    }
+  ],
+  "unknown_ancestor_numbers": [
+    13
+  ]
+}

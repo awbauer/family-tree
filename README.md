@@ -107,6 +107,8 @@ The repo is set up for agents (Claude Code, Codex, Cursor and others) to do both
 - **`.claude/skills/`**: `research` and `publish` skills for Claude Code. **`.claude/settings.json`** asks before remote loads, deploys and pushes.
 - **`tools/check_privacy.py`** runs as a pre-commit and commit-msg hook. It blocks private paths, Cloudflare IDs, and the full name of anyone in your private GEDCOM. Run it on PR text too: `echo "$BODY" | python3 tools/check_privacy.py --file -`.
 
+**Your family's own AI tools:** the site is also an MCP server at `/mcp`. Each relative adds it to Claude (or any MCP client), signs in through Access, and works with the trees they're shared, through their own view and role: search, pedigrees, relationships, timelines, sources, research, suggestions, and for editors, edits. Setup: [operations.md → MCP server](docs/agents/operations.md#mcp-server-members-own-ai-clients).
+
 To run several research agents at once, give each one a branch. Each writes its own `family-data/batches/<date>-<branch>-<agent>.json`, and one person or agent merges them.
 
 ## places.json
