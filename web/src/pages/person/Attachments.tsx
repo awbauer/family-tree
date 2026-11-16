@@ -4,6 +4,7 @@ import { Marked } from "marked";
 import { S } from "../../../../strings/index.ts";
 import { useData } from "../../data";
 import { documentType, documentUrl } from "../../documents";
+import { PersonLink, isUnknown } from "../../lib";
 import { reloadPage, usePerson } from "./context";
 
 const T = S.person.attachments;
@@ -61,6 +62,45 @@ export function DocumentLinks({ item, proposal }: { item: DocumentItem; proposal
   </>;
 }
 
+/** Choose several people from the tree (not private, not "Unknown"), shown as removable chips. */
+function PeoplePicker({ chosen, setChosen, exclude, name }: { chosen: string[]; setChosen: (ids: string[]) => void; exclude: string[]; name: string }) {
+  const { D, people } = useData();
+  const [pick, setPick] = useState("");
+  const add = (value: string) => {
+    const id = (value.match(/\(([^)]+)\)\s*$/) || [])[1];
+    if (id && D.people[id] && !D.people[id].private && !chosen.includes(id) && !exclude.includes(id)) setChosen([...chosen, id]);
+    setPick("");
+  };
+  const list = `${name}-people`;
+  return <div>
+    <div className="filters">
+      <input list={list} name={name} placeholder={T.pickPerson} value={pick} aria-label={T.pickPerson}
+        onChange={(e) => { setPick(e.target.value); if (/\([^)]+\)\s*$/.test(e.target.value)) add(e.target.value); }} />
+      <button type="button" className="btn" onClick={() => add(pick)}>{T.add}</button>
+    </div>
+    <datalist id={list}>{people.filter((p) => !isUnknown(p) && !p.private && !exclude.includes(p.id)).map((p) => <option key={p.id} value={`${p.name} (${p.id})`} />)}</datalist>
+    {chosen.length > 0 && <div className="small">{chosen.map((id) => (
+      <span key={id} className="badge">{D.people[id].name} <button type="button" className="linklike" aria-label={T.removePerson} onClick={() => setChosen(chosen.filter((x) => x !== id))}>✕</button> </span>
+    ))}</div>}
+  </div>;
+}
+
+/** Link a document already on this person to more people. */
+function LinkMore({ item, others }: { item: DocumentItem; others: string[] }) {
+  const { editor } = useData();
+  const { id, change } = usePerson();
+  const [open, setOpen] = useState(false), [chosen, setChosen] = useState<string[]>([]), [sent, setSent] = useState(false);
+  if (!open) return <>{sent && <p role="status" className="small">{T.linkSent}</p>}<button className="btn" onClick={() => { setOpen(true); setSent(false); }}>{T.linkMore}</button></>;
+  return <div className="filters">
+    <PeoplePicker chosen={chosen} setChosen={setChosen} exclude={[id, ...others]} name={`link-${item.file.replace(/\W/g, "-")}`} />
+    <button className="btn primary" disabled={!chosen.length} onClick={async () => {
+      const ops = chosen.map((person) => ({ op: "media.attach", person, file: item.file, caption: item.caption, ...(item.source ? { source: item.source } : {}) }));
+      if (await change(ops, { reason: T.linkReason(item.caption) })) { setOpen(false); setChosen([]); if (!editor) setSent(true); }
+    }}>{editor ? T.link : T.suggestLink}</button>
+    <button className="btn" type="button" onClick={() => { setOpen(false); setChosen([]); }}>{T.cancel}</button>
+  </div>;
+}
+
 export function Attachments() {
   const { D, live, editor, tree } = useData();
   const { id, p, change } = usePerson();
@@ -69,13 +109,17 @@ export function Attachments() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [sent, setSent] = useState(false);
+  const [also, setAlso] = useState<string[]>([]);
+  // everyone else in this view the same file is attached to
+  const linkedTo = (file: string) => Object.entries(((D.research as any).media || {}) as Record<string, DocumentItem[]>)
+    .filter(([pid, items]) => pid !== id && D.people[pid] && !D.people[pid].private && items.some((m) => m.file === file)).map(([pid]) => pid);
   if (!live || p.private || D.scope?.view.media === false) return null;
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const file = data.get("file");
     if (!kind || !(file instanceof File) || busy) return;
-    const params = new URLSearchParams({ person: id, type: kind });
+    const params = new URLSearchParams({ person: [id, ...also].join(","), type: kind });
     if (tree) params.set("tree", tree);
     setBusy(true);
     setError("");
@@ -89,7 +133,7 @@ export function Attachments() {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || T.uploadError);
-      if (result.proposal) { setKind(null); setSent(true); }
+      if (result.proposal) { setKind(null); setAlso([]); setSent(true); }
       else reloadPage();
     } catch (e) {
       setError(e instanceof Error ? e.message : T.uploadError);
@@ -106,10 +150,15 @@ export function Attachments() {
           {item.source && D.sources[item.source] != null && (
             <div className="small"><Link to={`/source/${encodeURIComponent(item.source)}`}>{T.source((D.sources[item.source] as { title?: string }).title || item.source)}</Link></div>
           )}
+          {linkedTo(item.file).length > 0 && <div className="small">{T.alsoOn} {linkedTo(item.file).map((pid, i) => <span key={pid}>{i > 0 && ", "}<PersonLink id={pid} /></span>)}</div>}
           <DocumentLinks item={item} />
-          {!D.previewView && <button className="btn" onClick={() => {
-            if (confirm(T.removeConfirm)) void change([{ op: "media.detach", person: id, file: item.file }], { reason: T.removeReason });
-          }}>{editor ? T.remove : T.suggestRemove}</button>}
+          {!D.previewView && <div className="btn-row">
+            <LinkMore item={item} others={linkedTo(item.file)} />
+            <button className="btn" onClick={() => {
+              const shared = linkedTo(item.file).length > 0;
+              if (confirm(shared ? T.removeHereConfirm : T.removeConfirm)) void change([{ op: "media.detach", person: id, file: item.file }], { reason: T.removeReason });
+            }}>{linkedTo(item.file).length ? (editor ? T.removeHere : T.suggestRemoveHere) : (editor ? T.remove : T.suggestRemove)}</button>
+          </div>}
         </li>
       ))}</ul> : <p className="muted small">{T.none}</p>}
       {!D.previewView && <div className="btn-row">
@@ -119,8 +168,9 @@ export function Attachments() {
       {kind && <form key={kind} className="filters" onSubmit={upload}>
         <label>{kind === "report" ? T.markdownFile : T.chooseFile} <input type="file" name="file" accept={kind === "report" ? ".md,.markdown" : undefined} required disabled={busy} /></label>
         <label>{T.documentTitle} <input name="title" maxLength={1000} disabled={busy} /></label>
+        <div><span className="small">{T.alsoAttach}</span><PeoplePicker chosen={also} setChosen={setAlso} exclude={[id]} name={`also-${kind}`} /></div>
         <button className="btn primary" disabled={busy}>{editor ? T.upload : T.suggest}</button>
-        <button className="btn" type="button" disabled={busy} onClick={() => { setKind(null); setError(""); }}>{T.cancel}</button>
+        <button className="btn" type="button" disabled={busy} onClick={() => { setKind(null); setAlso([]); setError(""); }}>{T.cancel}</button>
       </form>}
       {error && <p role="alert">{error}</p>}
       {sent && <p role="status">{T.sent}</p>}
