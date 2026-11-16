@@ -549,7 +549,10 @@ async function checkEdit(c, g, payload, { uploader = self(c) }) {
       !payload.ops.some((candidate) => candidate.op === "source.upsert" && candidate.id === source)))) {
       fail(403, S.api.edit.sourceNotVisible(source));
     }
-    if (op.op === "media.attach" && uploader) {
+    // a document already attached to someone in this view can be linked to more people by anyone who may edit;
+    // a new upload can only be attached by the person who uploaded it
+    const shared = Object.entries(b.research.media || {}).some(([pid, items]) => canSeeDocuments(b, pid) && items.some((m) => m.file === op.file));
+    if (op.op === "media.attach" && uploader && !shared) {
       const upload = await c.env.DB.prepare("SELECT uploaded_by FROM uploads WHERE key = ?").bind(op.file).first();
       if (upload?.uploaded_by !== uploader) fail(403, S.api.uploads.uploadNotOwned);
     }
@@ -831,12 +834,17 @@ async function readUpload(request, limit, sizeError) {
 async function addDocument(c) {
   const g = grantOrFail(c);
   const sp = c.url.searchParams;
-  const person = sp.get("person"), type = sp.get("type"), source = sp.get("source");
+  const type = sp.get("type"), source = sp.get("source");
+  // one or more people: ?person=I1&person=I2 (or a comma-separated list)
+  const people = [...new Set(sp.getAll("person").flatMap((x) => x.split(",")).map((x) => x.trim()).filter(Boolean))];
+  if (!people.length) fail(400, S.api.uploads.personRequired);
+  if (people.length > 50) fail(400, S.api.uploads.tooManyPeople);
+  const person = people[0];
   const origin = c.request.headers.get("Origin");
   if (origin && origin !== c.url.origin) fail(403, S.api.uploads.crossOrigin);
   if (type !== "attachment" && type !== "report") fail(400, S.api.uploads.documentType);
   const b = await scoped(c, g);
-  if (!canSeeDocuments(b, person)) fail(403, S.api.uploads.documentsHidden);
+  for (const pid of people) if (!canSeeDocuments(b, pid)) fail(403, S.api.uploads.documentsHidden);
   if (source && !Object.hasOwn(b.sources, source)) fail(403, S.api.edit.sourceNotVisible(source));
   if (!c.env.MEDIA) fail(500, S.api.http.noMediaBinding);
 
@@ -862,12 +870,12 @@ async function addDocument(c) {
   await c.env.DB.prepare("INSERT INTO uploads (key, uploaded_by, uploaded_at, content_type, bytes, original_name) VALUES (?, ?, ?, ?, ?, ?)")
     .bind(key, self(c), now(), contentType, bytes.byteLength, name).run();
   const reason = report ? S.api.uploads.addReport : S.api.uploads.addAttachment;
-  const payload = { reason, ops: [{ op: "media.attach", person, file: key, type, caption: title || name, ...(source ? { source } : {}) }] };
+  const payload = { reason, ops: people.map((pid) => ({ op: "media.attach", person: pid, file: key, type, caption: title || name, ...(source ? { source } : {}) })) };
   const direct = can.review(g) && c.access.kind !== "agent";
   const result = direct ? await edit(c, { tree: g.tree_id, ...payload })
     : await createProposal(c, { tree: g.tree_id, kind: "edit", payload, rationale: reason });
   const saved = await result.json();
-  return json({ file: key, type, ...(source ? { source } : {}), ...(direct ? { batch: saved.batch } : { proposal: saved.proposal.id }) }, 201);
+  return json({ file: key, type, people, ...(source ? { source } : {}), ...(direct ? { batch: saved.batch } : { proposal: saved.proposal.id }) }, 201);
 }
 
 // ---------------------------------------------------------------- export (#8)

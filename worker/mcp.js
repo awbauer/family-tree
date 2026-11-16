@@ -187,8 +187,9 @@ tool("list_attachments", { title: "List attachments and reports", description: "
   run: async (x, a) => {
     const b = await x.bundle();
     if (!Object.hasOwn(b.people, a.person) || b.people[a.person].private) fail(404, M.notInTree(a.person));
+    const linkedTo = (file) => Object.entries(b.research.media || {}).filter(([pid, items]) => pid !== a.person && !(b.people[pid] || {}).private && items.some((m) => m.file === file)).map(([pid]) => ({ id: pid, name: b.people[pid] && b.people[pid].name }));
     return { attachments: documentsFor(b, a.person).filter((m) => !a.type || documentType(m.file) === a.type)
-      .map((m) => ({ ...m, download_url: documentUrl(x, m.file) })) };
+      .map((m) => ({ ...m, also_linked_to: linkedTo(m.file), download_url: documentUrl(x, m.file) })) };
   } });
 tool("get_attachment", { title: "Open an attachment", description: "Get a private attachment by its file key. Files up to 8 MB are embedded. Larger files return an authenticated download link.",
   props: { file: str("attachment file key from list_attachments") }, required: ["file"],
@@ -237,16 +238,36 @@ W("upload_media", { title: "Upload a photo or document", description: "Upload a 
     const bytes = uploadBytes(a.data_base64);
     return x.api("POST", `/api/media/upload${qs({ name: a.name || "upload" })}`, bytes, { "Content-Type": a.content_type, "Content-Length": String(bytes.byteLength) });
   } });
-W("add_attachment", { title: "Add an attachment", description: "Upload any file (up to 20 MB) and attach it to a person, optionally linking an existing source. Members submit it for review.",
-  props: { person: str("person id"), name: str("original filename"), title: str("optional display title"), source: str("existing catalogued source id from get_source"), data_base64: str("file bytes as base64") },
+W("add_attachment", { title: "Add an attachment", description: "Upload any file (up to 20 MB) and attach it to a person (and optionally to more people, via also), optionally linking an existing source. Members submit it for review.",
+  props: { person: str("person id"), also: { type: "array", items: { type: "string" }, description: "more person ids to attach the same file to" }, name: str("original filename"), title: str("optional display title"), source: str("existing catalogued source id from get_source"), data_base64: str("file bytes as base64") },
   required: ["person", "name", "data_base64"],
   run: (x, a) => {
     return addDocument(x, a, "attachment", uploadBytes(a.data_base64));
   } });
-W("add_report", { title: "Add a report", description: "Attach UTF-8 Markdown as a report with a built-in viewer and optionally link an existing source. For an already uploaded report, use media.update with set.source. Members submit it for review.",
-  props: { person: str("person id"), name: str("filename ending in .md or .markdown"), title: str("optional display title"), source: str("existing catalogued source id from get_source"), markdown: str("the report in Markdown") },
+W("add_report", { title: "Add a report", description: "Attach UTF-8 Markdown as a report with a built-in viewer, to a person (and optionally to more people, via also), and optionally link an existing source. For an already uploaded report, use media.update with set.source; to link it to someone else later, use link_document. Members submit it for review.",
+  props: { person: str("person id"), also: { type: "array", items: { type: "string" }, description: "more person ids to attach the same report to" }, name: str("filename ending in .md or .markdown"), title: str("optional display title"), source: str("existing catalogued source id from get_source"), markdown: str("the report in Markdown") },
   required: ["person", "name", "markdown"],
   run: (x, a) => addDocument(x, a, "report", new TextEncoder().encode(a.markdown)) });
+W("link_document", { title: "Link an attachment or report to more people", description: "Link an attachment or report that is already attached to someone in your view to more people (one shared file, listed on each person). Editors link directly; members submit it for review. To unlink it from one person, use a media.detach op.",
+  props: { file: str("attachment or report file key from list_attachments"), people: { type: "array", items: { type: "string" }, description: "person ids to link it to" }, reason: str("why (optional)") },
+  required: ["file", "people"],
+  run: async (x, a) => {
+    if (!documentType(a.file)) fail(404, M.notInTree(a.file));
+    const b = await x.bundle();
+    const item = Object.values(b.research.media || {}).flat().find((m) => m && m.file === a.file);
+    if (!item) fail(404, M.notInTree(a.file));
+    const ops = [...new Set(a.people || [])].map((person) => ({ op: "media.attach", person, file: a.file, caption: item.caption, ...(item.source ? { source: item.source } : {}) }));
+    if (!ops.length) fail(400, S.api.uploads.personRequired);
+    const reason = String(a.reason || "").trim() || `Linked "${item.caption || a.file}" to more people`;
+    const g = x.grant();
+    const people = ops.map((o) => o.person);
+    if (can.review(g) && x.c.access.kind !== "agent") {
+      const r = await x.api("POST", "/api/edit", { reason, ops });
+      return { file: a.file, people, batch: r.batch };
+    }
+    const r = await x.api("POST", "/api/proposals", { kind: "edit", payload: { reason, ops }, rationale: reason });
+    return { file: a.file, people, proposal: r.proposal && r.proposal.id };
+  } });
 W("link_my_person", { title: "Link me to my person", description: "Say which person in the tree you are, so relationships are labelled relative to you. null unlinks.",
   props: { person_id: { type: ["string", "null"], description: "person id, or null" } }, required: ["person_id"],
   run: async (x, a) => x.api("PUT", "/api/me/person", { tree: x.treeId, person_id: a.person_id }) });
@@ -370,7 +391,8 @@ function documentUrl(x, file) {
 }
 
 function addDocument(x, args, type, bytes) {
-  return x.api("POST", `/api/attachments${qs({ person: args.person, type, source: args.source })}`, bytes, {
+  const people = [args.person, ...(Array.isArray(args.also) ? args.also : [])].filter(Boolean).join(",");
+  return x.api("POST", `/api/attachments${qs({ person: people, type, source: args.source })}`, bytes, {
     "Content-Length": String(bytes.byteLength),
     "X-Document-Name": enc(args.name),
     "X-Document-Title": enc(args.title || ""),
@@ -436,6 +458,7 @@ export async function callTool(c, deps, name, rawArgs) {
     delete args.tree;
     const x = {
       c, treeId,
+      grant: () => g,
       bundle: () => deps.scoped(c, g),
       downloadDocument: (uri, file) => deps.downloadDocument({ ...c, url: new URL(uri) }, file),
       api: (method, path, body, headers) => {

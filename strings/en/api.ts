@@ -180,6 +180,8 @@ export const api = {
     emptyFile: "Choose a file containing data.",
     crossOrigin: "Upload files from the family tree site.",
     documentsHidden: "Attachments are unavailable for this person in this view.",
+    personRequired: "Say who the file is about (person).",
+    tooManyPeople: "A file can be attached to at most 50 people at once.",
     uploadNotOwned: "You can only attach a file you uploaded.",
     addAttachment: "Add an attachment",
     addReport: "Add a report",
