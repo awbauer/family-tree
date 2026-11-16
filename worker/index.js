@@ -43,6 +43,7 @@ import { exportGedcom } from "./gedcom_export.js";
 import * as Audit from "./audit.js";
 import * as Sites from "./sites.js";
 import * as Mcp from "./mcp.js";
+import { documentType, FILE_LIMIT, REPORT_LIMIT } from "./documents.ts";
 import { S } from "../strings/index.ts";
 
 const TODO_STATUSES = ["open", "in_progress", "needs_review", "done", "wont_do"];
@@ -64,7 +65,7 @@ export default {
       const access = await resolveAccess(env, ident);
       const c = { request, env, ctx, url, access, ident };
       if (isMedia) return await media(c);
-      if (isMcp) return await Mcp.handle(c, { route, scoped, grantOrFail });
+      if (isMcp) return await Mcp.handle(c, { route, scoped, grantOrFail, downloadDocument });
       return await route(c);
     } catch (e) {
       if (e instanceof HttpError) return json({ error: e.message, ...(e.extra || {}) }, e.status);
@@ -108,6 +109,7 @@ async function route(c) {
   if (p === "/api/comments" && m === "GET") return listComments(c);
   if (p === "/api/comments" && m === "POST") return addComment(c);
   if ((r = p.match(/^\/api\/comments\/(\d+)\/resolve$/)) && m === "POST") return resolveComment(c, +r[1]);
+  if (p === "/api/attachments" && m === "POST") return addDocument(c);
   if (p === "/api/media/upload" && m === "POST") return upload(c);
   if ((r = p.match(/^\/api\/graph\/(path|ancestors|descendants)$/)) && m === "GET") return graph(c, r[1]);
   if (p === "/api/me/person" && m === "PUT") return linkMe(c);
@@ -317,11 +319,16 @@ async function listProposals(c) {
   const st = c.url.searchParams.get("status") || "open";
   let rows = (await c.env.DB.prepare("SELECT * FROM proposals WHERE tree_id = ? AND (? = 'all' OR status = ?) ORDER BY id DESC LIMIT 200").bind(g.tree_id, st, st).all()).results;
   if (!can.review(g)) rows = rows.filter((r) => r.author === self(c)); // members see their own suggestions
+  const b = await scoped(c, g);
+  rows = rows.filter((row) => row.kind !== "edit" || (parse(row.payload, {}).ops || []).every((op) => {
+    if (!documentType(op.file)) return true;
+    return canSeeDocuments(b, b.aliases?.[op.person] || op.person);
+  }));
   return json({ proposals: rows.map(proposalOut) });
 }
 
-async function createProposal(c) {
-  const d = await body(c);
+async function createProposal(c, d) {
+  d ??= await body(c);
   const g = grantOrFail(c, d.tree);
   if (!can.propose(g)) fail(403, S.api.proposals.cantSuggest);
   const kind = d.kind || "research";
@@ -372,7 +379,7 @@ async function reviewProposal(c, id, action) {
     // people merged since the suggestion was written: point it at who they became
     let payload = followMerges(parse(row.payload, {}), b.aliases);
     if (row.kind === "edit") {
-      await checkEdit(c, g, payload, { dryRun: true });
+      await checkEdit(c, g, payload, { dryRun: true, uploader: row.author });
       // the tree edit is applied together with closing the proposal (and its to-do) in one batch
       const extra = [];
       extra.push(c.env.DB.prepare("UPDATE proposals SET status = 'approved', reviewed_by = ?, reviewed_at = ?, review_note = ? WHERE id = ? AND status = 'open'").bind(self(c), t, d.note || null, id));
@@ -446,7 +453,7 @@ async function todoCloseStatements(c, row, payload, d, t, id) {
 
 // ---------------------------------------------------------------- editing (#5)
 /** Validate an edit payload against the caller's scope; with dryRun, also apply it in memory. */
-async function checkEdit(c, g, payload, { dryRun }) {
+async function checkEdit(c, g, payload, { dryRun, uploader = self(c) }) {
   if (!payload || !Array.isArray(payload.ops) || !payload.ops.length) fail(400, S.api.edit.opsRequired);
   const b = await scoped(c, g);
   const { people, families } = referencedIds(payload.ops);
@@ -456,6 +463,14 @@ async function checkEdit(c, g, payload, { dryRun }) {
     if (p.private) fail(403, S.api.edit.nameOnly(pid));
   }
   for (const fid of families) if (!b.families[fid]) fail(403, S.api.edit.familyNotVisible(fid));
+  for (const op of payload.ops) {
+    if (typeof op?.op !== "string" || !op.op.startsWith("media.") || !documentType(op.file)) continue;
+    if (!b.scope.view.media) fail(403, S.api.uploads.documentsHidden);
+    if (op.op === "media.attach" && uploader) {
+      const upload = await c.env.DB.prepare("SELECT uploaded_by FROM uploads WHERE key = ?").bind(op.file).first();
+      if (upload?.uploaded_by !== uploader) fail(403, S.api.uploads.uploadNotOwned);
+    }
+  }
   const srcs = sourceIds(payload.ops);
   if (dryRun || srcs.size) {
     const { state } = await loadEditable(c.env);
@@ -470,20 +485,21 @@ async function checkEdit(c, g, payload, { dryRun }) {
       if (x.type === "family" && !b.families[x.id]) fail(403, S.api.edit.sourceCitedOutsideFamilies);
     }
   }
+  return b;
 }
 
-async function edit(c) {
-  const d = await body(c);
+async function edit(c, d) {
+  d ??= await body(c);
   const g = grantOrFail(c, d.tree);
   if (c.access.kind === "agent") fail(403, S.api.edit.agentsSuggest);
   if (!can.review(g)) fail(403, S.api.edit.editorsOnly);
   if (!String(d.reason || "").trim()) fail(400, S.api.edit.reasonRequired);
-  await checkEdit(c, g, d, { dryRun: false });
+  const b = await checkEdit(c, g, d, { dryRun: false });
   const batchId = newBatchId();
   const extra = await resolveStatements(c, g, d.resolves, { batch: batchId, note: d.reason });
   try {
     const res = await applyAndCommit(c.env, d.ops, { actor: self(c), actorKind: "person", reason: d.reason, sources: d.sources, batchId, extra });
-    return json({ ok: true, batch: res.batchId, touched: res.touched, created: res.created, resolved: (d.resolves || []).map(Number) });
+    return json({ ok: true, batch: res.batchId, touched: res.touched.filter((x) => x.type !== "media_map" || canSeeDocuments(b, x.id)), created: res.created, resolved: (d.resolves || []).map(Number) });
   } catch (e) {
     if (e instanceof OpError) fail(422, e.message);
     if (isConflict(e)) fail(409, S.api.edit.conflict);
@@ -496,11 +512,11 @@ async function previewEdit(c) {
   const d = await body(c);
   const g = grantOrFail(c, d.tree);
   if (!can.propose(g)) fail(403, S.api.edit.cantEditOrSuggest);
-  await checkEdit(c, g, d, { dryRun: false });
+  const b = await checkEdit(c, g, d, { dryRun: false, uploader: null });
   const { state } = await loadEditable(c.env);
   try {
     const res = applyOps(state, d.ops, { actor: self(c) });
-    return json({ touched: res.touched.filter((x) => ["person", "family", "media_map", "source"].includes(x.type)) });
+    return json({ touched: res.touched.filter((x) => x.type === "media_map" ? canSeeDocuments(b, x.id) : ["person", "family", "source"].includes(x.type)) });
   } catch (e) { if (e instanceof OpError) fail(422, e.message); throw e; }
 }
 
@@ -558,7 +574,7 @@ async function entityRows(c, g, b, id, { limit = 200 } = {}) {
   const fids = (b.research.findings || []).filter((f) => f.person === id).map((f) => String(f.id));
   const rows = (await c.env.DB.prepare(`SELECT * FROM changes WHERE (entity_id IN (${ids.map(() => "?").join(",")}) AND entity_type IN ('person','family','status'))${fids.length ? ` OR (entity_type = 'finding' AND entity_id IN (${fids.map(() => "?").join(",")}))` : ""} ORDER BY id DESC LIMIT ${limit}`).bind(...ids, ...fids).all()).results;
   // photo changes live in one config record keyed by person: keep this person's slice
-  if (b.people[id]) {
+  if (b.scope.view.media && b.people[id] && !b.people[id].private) {
     const media = (await c.env.DB.prepare(`SELECT * FROM changes WHERE entity_type = 'config' AND entity_id = 'media_map' ORDER BY id DESC LIMIT ${limit}`).all()).results;
     for (const r of media) {
       const bf = parse(r.before, {}) || {}, af = parse(r.after, {}) || {};
@@ -588,10 +604,17 @@ async function history(c) {
   }
   const batches = {};
   for (const r of rows) {
+    const bulkMedia = r.entity_type === "config" && r.entity_id === "media_map";
+    const snapshot = (value) => {
+      const obj = parse(value);
+      return bulkMedia && obj ? Object.fromEntries(Object.entries(obj).filter(([person]) =>
+        b.scope.view.media && Object.hasOwn(b.people, person) && !b.people[person].private)) : obj;
+    };
+    if (bulkMedia && J(snapshot(r.before)) === J(snapshot(r.after))) continue;
     const k = r.batch_id || `c${r.id}`;
     const g0 = (batches[k] = batches[k] || { batch: r.batch_id, at: r.at, actor: r.actor, actor_kind: r.actor_kind, on_behalf_of: r.on_behalf_of || undefined, op: r.op, reason: r.reason, proposal: r.proposal_id, sources: parse(r.sources, undefined), entities: [] });
     if (r.op === "edit" || r.op === "revert") g0.op = r.op; // an edit that also resolved a finding is still an edit
-    g0.entities.push({ type: r.entity_type, id: r.entity_id, change: r.before == null ? "created" : r.after == null ? "deleted" : "updated", before: c.access.isOwner || can.review(g) ? parse(r.before) : undefined, after: c.access.isOwner || can.review(g) ? parse(r.after) : undefined });
+    g0.entities.push({ type: r.entity_type, id: r.entity_id, change: r.before == null ? "created" : r.after == null ? "deleted" : "updated", before: c.access.isOwner || can.review(g) ? snapshot(r.before) : undefined, after: c.access.isOwner || can.review(g) ? snapshot(r.after) : undefined });
   }
   return json({ history: Object.values(batches) });
 }
@@ -683,6 +706,63 @@ async function upload(c) {
   await c.env.MEDIA.put(key, buf, { httpMetadata: { contentType: type } });
   await c.env.DB.prepare("INSERT INTO uploads (key, uploaded_by, uploaded_at, content_type, bytes, original_name) VALUES (?, ?, ?, ?, ?, ?)").bind(key, self(c), now(), type, buf.byteLength, name).run();
   return json({ key, canAttach: can.review(g) }, 201);
+}
+
+async function addDocument(c) {
+  const g = grantOrFail(c);
+  const sp = c.url.searchParams;
+  const person = sp.get("person"), type = sp.get("type");
+  const origin = c.request.headers.get("Origin");
+  if (origin && origin !== c.url.origin) fail(403, S.api.uploads.crossOrigin);
+  if (type !== "attachment" && type !== "report") fail(400, S.api.uploads.documentType);
+  const b = await scoped(c, g);
+  if (!canSeeDocuments(b, person)) fail(403, S.api.uploads.documentsHidden);
+  if (!c.env.MEDIA) fail(500, S.api.http.noMediaBinding);
+
+  let name, title;
+  try {
+    name = decodeURIComponent(c.request.headers.get("X-Document-Name") || "");
+    title = decodeURIComponent(c.request.headers.get("X-Document-Title") || "").trim().slice(0, 1000);
+  } catch { fail(400, S.api.uploads.invalidMetadata); }
+  name = name.split(/[\\/]/).pop().replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(-180).toWellFormed();
+  if (!name) fail(400, S.api.uploads.nameRequired);
+  const report = type === "report", limit = report ? REPORT_LIMIT : FILE_LIMIT;
+  const sizeError = report ? S.api.uploads.reportTooLarge : S.api.uploads.tooLarge;
+  if (report && !/\.(md|markdown)$/i.test(name)) fail(415, S.api.uploads.reportFormat);
+  if (Number(c.request.headers.get("Content-Length")) > limit) fail(413, sizeError);
+
+  const reader = c.request.body?.getReader();
+  if (!reader) fail(400, S.api.uploads.emptyFile);
+  let size = 0;
+  const chunks = [];
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) { await reader.cancel(); fail(413, sizeError); }
+    chunks.push(value);
+  }
+  if (!size) fail(400, S.api.uploads.emptyFile);
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  if (report) {
+    try { new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+    catch { fail(415, S.api.uploads.reportFormat); }
+  }
+
+  const key = `${report ? "reports" : "attachments"}/${crypto.randomUUID()}`;
+  const contentType = report ? "text/markdown; charset=utf-8" : "application/octet-stream";
+  await c.env.MEDIA.put(key, bytes, { httpMetadata: { contentType } });
+  await c.env.DB.prepare("INSERT INTO uploads (key, uploaded_by, uploaded_at, content_type, bytes, original_name) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(key, self(c), now(), contentType, size, name).run();
+  const reason = report ? S.api.uploads.addReport : S.api.uploads.addAttachment;
+  const payload = { reason, ops: [{ op: "media.attach", person, file: key, type, caption: title || name }] };
+  const direct = can.review(g) && c.access.kind !== "agent";
+  const result = direct ? await edit(c, { tree: g.tree_id, ...payload })
+    : await createProposal(c, { tree: g.tree_id, kind: "edit", payload, rationale: reason });
+  const saved = await result.json();
+  return json({ file: key, type, ...(direct ? { batch: saved.batch } : { proposal: saved.proposal.id }) }, 201);
 }
 
 // ---------------------------------------------------------------- export (#8)
@@ -836,6 +916,7 @@ async function media(c) {
   if (!c.env.MEDIA) return json({ error: S.api.http.noMediaBinding }, 404);
   const key = decodeURIComponent(c.url.pathname.slice("/media/".length));
   if (!key || key.includes("..")) return json({ error: S.api.http.badMediaKey }, 400);
+  if (documentType(key)) return downloadDocument(c, key);
   let allowed = false;
   for (const g of c.access.grants) {
     const b = await scoped(c, g);
@@ -852,4 +933,37 @@ async function media(c) {
   obj.writeHttpMetadata(headers);
   headers.set("etag", obj.httpEtag);
   return new Response(obj.body, { headers });
+}
+
+function canSeeDocuments(b, person) {
+  return b.scope.view.media && Object.hasOwn(b.people, person) && !b.people[person].private;
+}
+
+async function downloadDocument(c, key) {
+  const g = grantOrFail(c);
+  const preview = c.url.searchParams.get("preview_view");
+  if (preview && !c.access.isOwner) fail(403, S.api.auth.ownerOnlyPreview);
+  const b = await scoped(c, preview ? { ...g, view_id: preview, role: "member" } : g);
+  const proposal = c.url.searchParams.get("proposal");
+  const linked = Object.values(b.research.media || {}).some((items) => items.some((m) => m.file === key));
+  if (!linked && !(await canReadProposedDocument(c, g, b, key, proposal))) fail(404, S.api.http.notFound);
+  const upload = await c.env.DB.prepare("SELECT original_name FROM uploads WHERE key = ?").bind(key).first();
+  const obj = upload && await c.env.MEDIA.get(key);
+  if (!obj) fail(404, S.api.http.notFound);
+  const filename = encodeURIComponent(upload.original_name).replace(/['()*]/g, (ch) => `%${ch.charCodeAt(0).toString(16)}`);
+  return new Response(obj.body, { headers: {
+    "Content-Type": "application/octet-stream",
+    "Content-Disposition": `attachment; filename*=UTF-8''${filename}`,
+    "Cache-Control": "private, no-store",
+    "X-Content-Type-Options": "nosniff",
+  } });
+}
+
+async function canReadProposedDocument(c, g, b, key, id) {
+  if (!id || !b.scope.view.media || c.url.searchParams.has("preview_view")) return false;
+  const row = await c.env.DB.prepare("SELECT author, payload FROM proposals WHERE id = ? AND tree_id = ? AND kind = 'edit' AND status = 'open'")
+    .bind(id, g.tree_id).first();
+  if (!row || !(can.review(g) || row.author === self(c))) return false;
+  return (parse(row.payload, {}).ops || []).some((op) =>
+    op.op === "media.attach" && op.file === key && canSeeDocuments(b, b.aliases?.[op.person] || op.person));
 }

@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useData } from "../../data";
 import { MEDIA_TYPES, Options } from "../../ops";
 import { mediaUrl } from "../../tree";
+import { documentType } from "../../documents";
 import { usePerson } from "./context";
 import { S } from "../../../../strings/index.ts";
 
@@ -16,7 +17,7 @@ const metaLine = (m: any) => [MEDIA_TYPES[m.type], m.date, m.place].filter(Boole
 export function Photos() {
   const { D, live, editor } = useData();
   const { id, p, openForm } = usePerson();
-  const list: any[] = (((D.research as any).media || {})[id] || []).slice();
+  const list: any[] = (((D.research as any).media || {})[id] || []).filter((m: { file: string }) => !documentType(m.file));
   const [open, setOpen] = useState<any | null>(null);
   if (!live) return ( // the static preview (tools/serve.py): no API, nothing to change
     <section className="card" id="w-photos" style={{ marginTop: 20 }}>

@@ -2,6 +2,7 @@
 // Vocabularies mirror worker/ops.js.
 import { Fragment, type ReactNode } from "react";
 import { Link } from "react-router";
+import { documentType } from "./documents";
 import { useData } from "./data";
 import { PersonLink } from "./lib";
 import type { Tree } from "./types";
@@ -123,6 +124,7 @@ export function OpText({ o }: { o: any }) {
   const { D } = useData();
   const W = (id?: string | null) => <WhoLink id={id} />;
   const onWhom = o.entity === "person" ? W(o.id) : <>{O.family(o.id)}</>;
+  const document = documentType(o.file);
   const fact = (fid: string) => (o.entity === "person" ? factName(D, o.id, fid) : fid);
   switch (o.op) {
     case "person.create": return <>{O.personCreate((o.names || []).map((n: any) => `${n.given} ${n.surname}`).join(" / "))}</>;
@@ -154,8 +156,8 @@ export function OpText({ o }: { o: any }) {
     }
     case "source.merge": return parts(O.sourceMerge(<SourceLink id={o.drop} />, <SourceLink id={o.keep} />));
     case "source.delete": return parts(O.sourceDelete(<SourceLink id={o.id} />));
-    case "media.attach": return parts(O.mediaAttach(W(o.person), o.caption));
-    case "media.detach": return parts(O.mediaDetach(W(o.person)));
+    case "media.attach": return parts(document ? O.documentAttach(S.person.attachments[document], W(o.person), o.caption) : O.mediaAttach(W(o.person), o.caption));
+    case "media.detach": return parts(document ? O.documentDetach(S.person.attachments[document], W(o.person)) : O.mediaDetach(W(o.person)));
     case "media.update": return parts(O.mediaUpdate(W(o.person), Object.entries(o.set || {}).filter(([, v]) => v).map(([k, v]) => O.mediaSet(k, String(v))).join(", ") || O.clearDetails));
     case "media.set_primary": return parts(O.mediaSetPrimary(W(o.person)));
     default: return <>{o.op}</>;
@@ -195,13 +197,14 @@ function factsDiff(D: Tree, a: any[] = [], b: any[] = [], text: (x: any) => stri
 function mediaDiff(a: any[] = [], b: any[] = []) {
   const out: ReactNode[] = [], A = new Map((a || []).map((m) => [m.file, m])), B = new Map((b || []).map((m) => [m.file, m]));
   const label = (m: any) => m.caption || m.file.split("/").pop();
-  for (const [f, m] of B) if (!A.has(f)) out.push(<Add label={X.photo}>{label(m) + (m.portrait ? X.mainPhotoSuffix : "")}</Add>);
-  for (const [f, m] of A) if (!B.has(f)) out.push(<Del label={X.photo}>{label(m)}</Del>);
+  const kind = (f: string) => { const type = documentType(f); return type ? S.person.attachments[type] : X.photo; };
+  for (const [f, m] of B) if (!A.has(f)) out.push(<Add label={kind(f)}>{label(m) + (m.portrait ? X.mainPhotoSuffix : "")}</Add>);
+  for (const [f, m] of A) if (!B.has(f)) out.push(<Del label={kind(f)}>{label(m)}</Del>);
   for (const [f, m] of B) {
     const o = A.get(f);
     if (!o) continue;
     if (!o.portrait && m.portrait) out.push(<li className="d-chg"><b>{X.mainPhoto}</b> → {label(m)}</li>);
-    for (const k of ["caption", "date", "place", "type", "note", "source"]) if ((o[k] || "") !== (m[k] || "")) out.push(<Chg label={X.field(X.photo, k)} from={o[k]} to={m[k]} />);
+    for (const k of ["caption", "date", "place", "type", "note", "source"]) if ((o[k] || "") !== (m[k] || "")) out.push(<Chg label={X.field(kind(f), k)} from={o[k]} to={m[k]} />);
   }
   return out;
 }

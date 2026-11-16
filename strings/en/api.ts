@@ -166,6 +166,17 @@ export const api = {
   uploads: {
     fileType: "Upload a JPEG, PNG, WebP, GIF or PDF.",
     tooLarge: "Files are limited to 20 MB.",
+    reportTooLarge: "Markdown reports are limited to 1 MB.",
+    documentType: "Choose attachment or report.",
+    reportFormat: "Choose a UTF-8 Markdown file ending in .md or .markdown.",
+    invalidMetadata: "The filename or title is invalid.",
+    nameRequired: "A filename is required.",
+    emptyFile: "Choose a file containing data.",
+    crossOrigin: "Upload files from the family tree site.",
+    documentsHidden: "Attachments are unavailable for this person in this view.",
+    uploadNotOwned: "You can only attach a file you uploaded.",
+    addAttachment: "Add an attachment",
+    addReport: "Add a report",
   },
 
   /** Exports and imports (worker/index.js). */
@@ -198,6 +209,7 @@ export const api = {
   sites: {
     ownerOnly: "Only the owner can change the research sites.",
     readersOnly: "Only editors and research agents can see the research sites.",
+    invalidMetadata: "The filename or title is invalid.",
     nameRequired: "name is required",
     urlInvalid: "url must be the site's address, starting with https:// (or http://)",
     searchUrlInvalid: "search_url must start with https:// (or http://)",

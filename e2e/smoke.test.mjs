@@ -115,3 +115,31 @@ test("about and not found", async () => {
   await visit("#/about", ["How this site works"]);
   await visit("#/no-such-page", ["Not found"]);
 });
+
+test("person attachments download and Markdown reports open in the viewer", async () => {
+  await visit("#/person/I4", ["Attachments", "Add a report"]);
+  await page.getByRole("button", { name: "Add an attachment" }).click();
+  await page.getByLabel("File", { exact: true }).setInputFiles({
+    name: "example.zip", mimeType: "application/zip", buffer: Buffer.from([0x50, 0x4b, 0, 0xff]),
+  });
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const archive = page.locator(".attachment-list li").filter({ hasText: "example.zip" });
+  await archive.waitFor();
+  const download = page.waitForEvent("download");
+  await archive.getByRole("link", { name: "Download", exact: true }).click();
+  assert.equal((await download).suggestedFilename(), "example.zip");
+
+  await page.getByRole("button", { name: "Add a report" }).click();
+  await page.getByLabel("Markdown file").setInputFiles({
+    name: "example.md", mimeType: "text/markdown",
+    buffer: Buffer.from("# Example heading\n\n**Evidence**\n\n<script>window.top.reportRan = true</script>"),
+  });
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  await page.getByRole("button", { name: "Read report" }).click();
+  const report = page.frameLocator(".report-viewer");
+  await report.getByRole("heading", { name: "Example heading" }).waitFor();
+  assert.equal(await report.locator("strong").innerText(), "Evidence");
+  assert.equal(await report.locator("script").count(), 0);
+  assert.equal(await page.locator("#w-photos").getByText("example.md").count(), 0);
+  assert.deepEqual(errors, []);
+});

@@ -12,6 +12,8 @@ import { PersonProvider, usePerson } from "./context";
 import { FindingWithActions } from "./Findings";
 import { Graph } from "./Graph";
 import { FactsChip, LifeEvents, Sources } from "./LifeEvents";
+import { Attachments } from "./Attachments";
+import { documentType } from "../../documents";
 import { Photos } from "./Photos";
 import { Todos } from "./Todos";
 import { Work } from "./Work";
@@ -136,7 +138,8 @@ function PersonPage() {
   useTitle(p.name);
   const stories = storiesFor(D, id), mentions = mentionsFor(D, id);
   const media: any[] = ((D.research as any).media || {})[id] || [];
-  const portrait = media.find((m) => m.portrait) || media[0];
+  const images = media.filter((m) => !documentType(m.file) && !/\.pdf$/i.test(m.file));
+  const portrait = images.find((m) => m.portrait) || images[0];
   const alt = p.names.slice(1).map((n: any) => `${n.given} ${n.surname}`.trim()).filter((n: string) => n && n !== p.name);
   const dup: string[] = p.duplicateOf || [];
   return (
@@ -167,6 +170,7 @@ function PersonPage() {
           <LifeEvents />
           <Research />
           <Photos />
+          <Attachments />
           <Sources />
         </div>
       </div>

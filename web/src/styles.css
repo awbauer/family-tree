@@ -502,3 +502,8 @@ table.audit .audit-row:focus-visible { outline: 2px solid var(--accent); outline
 .hidden-story { margin-bottom: 16px; }
 .hidden-story h3 { margin-top: 0; }
 .hidden-story ul { padding-left: 1.2em; }
+
+.attachment-list { list-style: none; padding: 0; }
+.attachment-list > li { border-bottom: 1px solid var(--line); padding: 0.8rem 0; overflow-wrap: anywhere; }
+.attachment-list .btn-row { margin: 0.4rem 0; }
+.report-viewer { display: block; width: 100%; height: min(65vh, 38rem); border: 1px solid var(--line); border-radius: 6px; margin: 0.5rem 0; }

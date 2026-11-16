@@ -2,6 +2,8 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { ApiError, useData } from "../../data";
+import { documentType } from "../../documents";
+import { DocumentLinks } from "../person/Attachments";
 import { PersonLink } from "../../lib";
 import { Diff, OpText } from "../../ops";
 import { Inline } from "../../StoryText";
@@ -42,7 +44,9 @@ function Card({ pr, onDecide }: { pr: any; onDecide: (id: number, action: string
       {pr.rationale && <p>{pr.rationale}</p>}
       {pr.kind === "edit" && <>
         <h4>{C.proposedChanges}{b.origin && <> <span className="small muted">({b.origin})</span></>}</h4>
-        <ol>{(b.ops || []).map((o: any, i: number) => <li key={i}><OpText o={o} /></li>)}</ol>
+        <ol>{(b.ops || []).map((o: any, i: number) => <li key={i}><OpText o={o} />
+          {pr.status === "open" && o.op === "media.attach" && documentType(o.file) && <DocumentLinks item={o} proposal={pr.id} />}
+        </li>)}</ol>
         {b.reason && <p className="small"><b>{C.why}</b> {b.reason}</p>}
         {(b.sources || []).map((s: any, i: number) => <p key={i} className="small">{C.source} {s.url ? <a href={s.url} target="_blank" rel="noopener">{s.title}</a> : s.title}</p>)}
         {(b.resolves || []).length > 0 && <p className="small">{C.resolves(b.resolves)}</p>}
