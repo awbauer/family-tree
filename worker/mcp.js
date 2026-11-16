@@ -18,6 +18,7 @@ import { HttpError, fail } from "./http.js";
 import { grantFor, can } from "./auth.js";
 import { now, J } from "./db.js";
 import { PERSON_STATUSES } from "./ops.js";
+import { safeMediaType } from "./media-types.js";
 import { documentType, documentsFor, FILE_LIMIT } from "./documents.ts";
 import { presentsRecords, recordResult } from "./mcp-records.js";
 import { cardResource, cardHtml } from "./mcp-card-view.js";
@@ -27,6 +28,7 @@ import { S } from "../strings/index.ts";
 const M = S.api.mcp;
 const PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const SERVER = { name: "family-tree", title: "Family tree", version: "1.0.0" };
+const MAX_RPC_BYTES = 30 * 1024 * 1024;
 const MEDIA_MAX = 8 * 1024 * 1024;
 
 export const isMcpPath = (p) => p === "/mcp" || p === "/mcp/";
@@ -116,7 +118,7 @@ tool("get_person", { title: "Get person", description: "One person in full: name
   props: { id: str("person id, e.g. I12"), include_comments: bool("also the discussion comments on this person") }, required: ["id"],
   run: async (x, a) => {
     const b = await x.bundle();
-    const comments = a.include_comments && b.people[a.id] ? (await x.api("GET", `/api/comments?type=person&id=${enc(a.id)}`)).comments : undefined;
+    const comments = a.include_comments && b.people[a.id] && !b.people[a.id].private && b.scope.view.notes ? (await x.api("GET", `/api/comments?type=person&id=${enc(a.id)}`)).comments : undefined;
     return V.person(b, a.id, { comments }) || fail(404, M.notInTree(a.id));
   } });
 tool("get_family", { title: "Get family", description: "A family by its F id (couple, children, family events), or a person's immediate family by their I id: parents, full and half siblings, spouses with marriage, children.",
@@ -232,19 +234,14 @@ W("resolve_comment", { title: "Resolve a comment", description: "Mark a comment 
 W("upload_media", { title: "Upload a photo or document", description: "Upload a photo (JPEG, PNG, WebP, GIF) or PDF, up to 20 MB, base64-encoded. Returns its file key; attach it to someone with a media.attach op (edit_tree, or suggest_edit for members).",
   props: { name: str("file name"), content_type: en(["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"], "file type"), data_base64: str("the file, base64") }, required: ["content_type", "data_base64"],
   run: async (x, a) => {
-    let bytes;
-    try { bytes = Uint8Array.from(atob(String(a.data_base64).replace(/\s+/g, "")), (ch) => ch.charCodeAt(0)); } catch { fail(400, M.badBase64); }
+    const bytes = uploadBytes(a.data_base64);
     return x.api("POST", `/api/media/upload${qs({ name: a.name || "upload" })}`, bytes, { "Content-Type": a.content_type, "Content-Length": String(bytes.byteLength) });
   } });
 W("add_attachment", { title: "Add an attachment", description: "Upload any file (up to 20 MB) and attach it to a person, optionally linking an existing source. Members submit it for review.",
   props: { person: str("person id"), name: str("original filename"), title: str("optional display title"), source: str("existing catalogued source id from get_source"), data_base64: str("file bytes as base64") },
   required: ["person", "name", "data_base64"],
   run: (x, a) => {
-    const data = a.data_base64.replace(/\s+/g, "");
-    if (data.length > Math.ceil(FILE_LIMIT / 3) * 4) fail(413, S.api.uploads.tooLarge);
-    let bytes;
-    try { bytes = Uint8Array.from(atob(data), (ch) => ch.charCodeAt(0)); } catch { fail(400, M.badBase64); }
-    return addDocument(x, a, "attachment", bytes);
+    return addDocument(x, a, "attachment", uploadBytes(a.data_base64));
   } });
 W("add_report", { title: "Add a report", description: "Attach UTF-8 Markdown as a report with a built-in viewer and optionally link an existing source. For an already uploaded report, use media.update with set.source. Members submit it for review.",
   props: { person: str("person id"), name: str("filename ending in .md or .markdown"), title: str("optional display title"), source: str("existing catalogued source id from get_source"), markdown: str("the report in Markdown") },
@@ -360,12 +357,13 @@ async function callRoute(c, route, method, path, body, headers = {}) {
   return data;
 }
 
-function b64(buf) {
-  const u = new Uint8Array(buf);
-  let s = "";
-  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000));
-  return btoa(s);
+function uploadBytes(encoded) {
+  const data = encoded.replace(/\s+/g, "");
+  if (data.length > Math.ceil(FILE_LIMIT / 3) * 4) fail(413, S.api.uploads.tooLarge);
+  try { return Uint8Array.fromBase64(data); } catch { fail(400, M.badBase64); }
 }
+
+const b64 = (buffer) => new Uint8Array(buffer).toBase64();
 
 function documentUrl(x, file) {
   return `${x.c.url.origin}/media/${file}${qs({ tree: x.treeId })}`;
@@ -402,14 +400,18 @@ async function media(x, file) {
   if (!x.c.env.MEDIA || !files.has(file)) fail(404, M.notInTree(file));
   const obj = await x.c.env.MEDIA.get(file);
   if (!obj) fail(404, M.notInTree(file));
+  if (obj.size > MEDIA_MAX) {
+    await obj.body?.cancel?.();
+    fail(413, M.mediaTooLarge(MEDIA_MAX / 1024 / 1024));
+  }
   const buf = await new Response(obj.body).arrayBuffer();
   if (buf.byteLength > MEDIA_MAX) fail(413, M.mediaTooLarge(MEDIA_MAX / 1024 / 1024));
   const h = new Headers();
   if (obj.writeHttpMetadata) obj.writeHttpMetadata(h);
-  const type = h.get("Content-Type") || (/\.pdf$/i.test(file) ? "application/pdf" : /\.png$/i.test(file) ? "image/png" : "image/jpeg");
+  const type = safeMediaType(h.get("Content-Type"));
   const data = b64(buf);
   return { content: [type.startsWith("image/") ? { type: "image", data, mimeType: type }
-    : { type: "resource", resource: { uri: `${x.c.url.origin}/media/${file.split("/").map(enc).join("/")}`, mimeType: type, blob: data } }] };
+    : { type: "resource", resource: { uri: `${x.c.url.origin}/media/${file.split("/").map(enc).join("/")}${qs({ tree: x.treeId })}`, mimeType: type, blob: data } }] };
 }
 
 const textResult = (v) => ({ content: [{ type: "text", text: typeof v === "string" ? v : JSON.stringify(v) }] });
@@ -468,7 +470,10 @@ export async function callTool(c, deps, name, rawArgs) {
 
 // ---------------------------------------------------------------- JSON-RPC
 async function dispatch(c, deps, msg) {
-  if (!msg || msg.jsonrpc !== "2.0" || typeof msg.method !== "string") return msg && "id" in msg && !("result" in msg || "error" in msg) ? rpcError(msg.id, -32600, M.invalidRequest) : null;
+  if (!msg || typeof msg !== "object" || Array.isArray(msg)) return rpcError(null, -32600, M.invalidRequest);
+  if (msg.jsonrpc !== "2.0" || typeof msg.method !== "string") {
+    return "result" in msg || "error" in msg ? null : rpcError(msg.id, -32600, M.invalidRequest);
+  }
   const isNote = !("id" in msg);
   const ok = (result) => (isNote ? null : { jsonrpc: "2.0", id: msg.id, result });
   const p = msg.params || {};
@@ -478,7 +483,7 @@ async function dispatch(c, deps, msg) {
         capabilities: { tools: { listChanged: false }, resources: {} }, serverInfo: SERVER, instructions: INSTRUCTIONS });
     case "ping": return ok({});
     case "tools/list": return ok({ tools: T.filter((t) => allowed(t, c.access)).map(listed) });
-    case "tools/call": return ok(await callTool(c, deps, p.name, p.arguments));
+    case "tools/call": return isNote ? null : ok(await callTool(c, deps, p.name, p.arguments));
     case "resources/list": return ok({ resources: c.access.grants.length || c.access.isOwner ? [cardResource] : [] });
     case "resources/read":
       if (p.uri === cardResource.uri && (c.access.grants.length || c.access.isOwner)) {
@@ -499,11 +504,28 @@ export async function handle(c, deps) {
   const origins = String(env.MCP_ALLOWED_ORIGINS || "").split(",").map((s) => s.trim()).filter(Boolean);
   if (origin && origin !== url.origin && !origins.includes(origin)) return rpc(rpcError(null, -32002, M.badOrigin), 403);
   if (request.method !== "POST") return rpc(rpcError(null, -32000, M.postOnly), 405, { Allow: "POST" });
+  if (Number(request.headers.get("Content-Length")) > MAX_RPC_BYTES) return rpc(rpcError(null, -32600, M.requestTooLarge), 413);
   let body;
-  try { body = await request.json(); } catch { return rpc(rpcError(null, -32700, M.parseError), 400); }
+  try {
+    const reader = request.body?.getReader();
+    if (!reader) return rpc(rpcError(null, -32700, M.parseError), 400);
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let bytes = 0, data = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_RPC_BYTES) {
+        await reader.cancel();
+        return rpc(rpcError(null, -32600, M.requestTooLarge), 413);
+      }
+      data += decoder.decode(value, { stream: true });
+    }
+    body = JSON.parse(data + decoder.decode());
+  } catch { return rpc(rpcError(null, -32700, M.parseError), 400); }
   const batch = Array.isArray(body);
   const msgs = batch ? body : [body];
-  if (!msgs.length) return rpc(rpcError(null, -32600, M.invalidRequest), 400);
+  if (!msgs.length || msgs.length > 25) return rpc(rpcError(null, -32600, M.invalidRequest), 400);
   const out = [];
   for (const m of msgs) { const r = await dispatch(c, deps, m); if (r) out.push(r); }
   if (!out.length) return rpc(null, 202);

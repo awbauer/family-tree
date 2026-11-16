@@ -20,6 +20,9 @@ export async function meta(env, key) {
   return r ? r.value : null;
 }
 
+// A failed precondition aborts every statement in a D1 batch, including audit rows.
+export const guard = (env, condition, ...args) => env.DB.prepare(`INSERT INTO _guard (x) SELECT NULL WHERE ${condition}`).bind(...args);
+
 export const bumpVersion = (env) =>
   env.DB.prepare("UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key = 'data_version'");
 

@@ -14,7 +14,9 @@
 //   POST /api/agent/runs               {tree, kind: "relatives", person, looking_for?, named?, hints?, depth?}  Sherlock (#44)
 //   POST /api/profiles/:id/refresh     queue a rewrite of one person's AI profile (editors)
 //   POST /api/content/refresh          run the content job now (owner)
-import { J, now, parse, write } from "../db.js";
+import { J, now, parse, write, guard } from "../db.js";
+import { canReadDisclosure, disclosureScope, scopeFor } from "../bundle.js";
+import { isConflict } from "../store.js";
 import { can, grantFor } from "../auth.js";
 import { fail, json } from "../http.js";
 import { settings, agentsEnabled, checkDaily, recordUsage, usageToday, BudgetError } from "./config.js";
@@ -77,9 +79,10 @@ export async function startRun(c, d, { grantOrFail, scoped, loadTodo }) {
   if (d.kind === "relatives") return startRelatives(c, d, g, { scoped });
   if (d.kind && d.kind !== "research") fail(400, S.api.agentRuns.kindInvalid);
   const env = c.env, s = settings(env), b = await scoped(c, g);
+  if (!b.scope.view.research) fail(403, S.api.agentRuns.editorsOnly);
   let todo = null;
   if (d.todo_id) {
-    todo = (await loadTodo(c, d.todo_id)).row;
+    todo = (await loadTodo(c, d.todo_id, g)).row;
     if (["done", "wont_do"].includes(todo.status)) fail(409, S.api.agentRuns.todoClosed);
     if (todo.assignee === AGENT) fail(409, S.api.agentRuns.todoBusy);
     if (todo.assignee && todo.assignee !== c.access.principal) fail(409, S.api.agentRuns.todoAssigned(todo.assignee));
@@ -97,19 +100,17 @@ export async function startRun(c, d, { grantOrFail, scoped, loadTodo }) {
   const id = `run-${now().slice(0, 10).replace(/-/g, "")}-${crypto.randomUUID().slice(0, 8)}`;
   const t = now();
   const st = [
-    env.DB.prepare("INSERT INTO agent_runs (id, todo_id, person_id, tree_id, started_by, instructions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind(id, todo ? todo.id : null, person, g.tree_id, c.access.principal, instructions, t),
+    env.DB.prepare("INSERT INTO agent_runs (id, todo_id, person_id, tree_id, started_by, instructions, created_at, scope_access) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, todo ? todo.id : null, person, g.tree_id, c.access.principal, instructions, t, disclosureScope(b)),
     recordUsage(env, { runs: 1 }),
   ];
   if (todo) {
+    st.push(guard(env, "NOT EXISTS (SELECT 1 FROM todos WHERE id = ? AND version = ?)", todo.id, todo.version));
     st.push(env.DB.prepare("UPDATE todos SET assignee = ?, status = 'in_progress', updated_at = ?, updated_by = ?, version = version + 1 WHERE id = ? AND version = ?").bind(AGENT, t, c.access.principal, todo.id, todo.version));
     st.push(env.DB.prepare("INSERT INTO todo_events (todo_id, at, actor, kind, data) VALUES (?, ?, ?, 'assigned', ?)").bind(todo.id, t, c.access.principal, J({ from: todo.assignee, to: AGENT, run: id })));
   }
-  const res = await write(env, st);
-  if (todo && res[2].meta && res[2].meta.changes === 0) {
-    await endRun(env, id, "the to-do changed while starting", "cancelled");
-    fail(409, S.api.agentRuns.todoChanged);
-  }
+  try { await write(env, st); }
+  catch (e) { if (isConflict(e)) fail(409, S.api.agentRuns.todoChanged); throw e; }
   // Hand the run to its own Flue agent conversation (one Durable Object per run, id = run id). Admission is durable:
   // once this returns, the agent owes the run an outcome even across restarts.
   try {
@@ -135,10 +136,12 @@ export async function listRuns(c, { grantOrFail }) {
   await sweepStale(c.env);
   const rows = (await c.env.DB.prepare("SELECT * FROM agent_runs WHERE tree_id = ? ORDER BY created_at DESC LIMIT 50").bind(g.tree_id).all()).results;
   const person = c.url.searchParams.get("person");
+  const b = await scopeFor(c.env, c.access, g);
+  const allowed = await Promise.all(rows.map((r) => canReadDisclosure(c.env, b, r.scope_access)));
   const u = await usageToday(c.env).catch(() => null);
   const s = settings(c.env);
   return json({
-    runs: rows.filter((r) => !person || r.person_id === person).map(runOut),
+    runs: rows.filter((r, i) => allowed[i] && (!person || r.person_id === person)).map(runOut),
     today: u && { runs: u.runs, usd: u.cost_usd || 0, tokens: u.input_tokens + u.output_tokens },
     limits: { runs_per_day: s.maxRunsPerDay, usd_per_day: s.dailyUsd, usd_per_run: s.runUsd, searches_per_run: s.maxSearches, minutes_per_run: s.maxMinutes, agents: s.agents },
   });
@@ -147,8 +150,10 @@ export async function listRuns(c, { grantOrFail }) {
 async function runFor(c, id) {
   const r = await c.env.DB.prepare("SELECT * FROM agent_runs WHERE id = ?").bind(id).first();
   const g = r && grantFor(c.access, r.tree_id);
-  if (!r || !g) fail(404, S.api.agentRuns.noSuchRun);
+  const selected = c.url.searchParams.get("tree");
+  if (!r || !g || (selected && selected !== r.tree_id)) fail(404, S.api.agentRuns.noSuchRun);
   editorOnly(c, g);
+  if (!(await canReadDisclosure(c.env, await scopeFor(c.env, c.access, g), r.scope_access))) fail(404, S.api.agentRuns.noSuchRun);
   return r;
 }
 
@@ -173,6 +178,7 @@ export async function refreshProfileRoute(c, id, { grantOrFail, scoped }) {
   const p = b.people[id];
   if (!p) fail(404, S.api.http.notFoundDot);
   if (p.private) fail(400, S.api.agentRuns.profileLiving);
+  if (!(await canReadDisclosure(c.env, b, null))) fail(403, S.api.agentRuns.editorsOnly);
   try { await checkDaily(c.env); } catch (e) { if (e instanceof BudgetError) fail(429, e.message); throw e; }
   const r = await agentsFetch(c.env, "/internal/profiles", { person: id, force: true });
   return json({ ok: true, queued: r }, 202);
@@ -187,6 +193,7 @@ export async function refreshContent(c) {
 // ---------------------------------------------------------------- data quality review (#31)
 async function startQuality(c, d, g, { scoped }) {
   const env = c.env, s = settings(env), b = await scoped(c, g);
+  if (!b.scope.view.research) fail(403, S.api.agentRuns.editorsOnly);
   const scope = Quality.SCOPES.includes(d.scope) ? d.scope : "both";
   const person = d.person ? String(d.person) : null;
   if (person && !b.people[person]) fail(404, S.api.agentRuns.personNotInTree);
@@ -198,8 +205,8 @@ async function startQuality(c, d, g, { scoped }) {
   const id = `run-${now().slice(0, 10).replace(/-/g, "")}-${crypto.randomUUID().slice(0, 8)}`;
   const options = { scope, person, limit, dry_run: dryRun, items };
   await write(env, [
-    env.DB.prepare("INSERT INTO agent_runs (id, kind, person_id, tree_id, started_by, instructions, options, report, created_at) VALUES (?, 'quality', ?, ?, ?, ?, ?, '[]', ?)")
-      .bind(id, person, g.tree_id, c.access.principal, `Data quality review of ${items.length} item${items.length === 1 ? "" : "s"}${dryRun ? " (dry run)" : ""}`, J(options), now()),
+    env.DB.prepare("INSERT INTO agent_runs (id, kind, person_id, tree_id, started_by, instructions, options, report, created_at, scope_access) VALUES (?, 'quality', ?, ?, ?, ?, ?, '[]', ?, ?)")
+      .bind(id, person, g.tree_id, c.access.principal, `Data quality review of ${items.length} item${items.length === 1 ? "" : "s"}${dryRun ? " (dry run)" : ""}`, J(options), now(), disclosureScope(b)),
     recordUsage(env, { runs: 1 }),
   ]);
   try {
@@ -224,6 +231,7 @@ export async function applyRun(c, id) {
 // ---------------------------------------------------------------- stories (#33)
 async function startStory(c, d, g, { scoped }) {
   const env = c.env, s = settings(env), b = await scoped(c, g);
+  if (!b.scope.view.research) fail(403, S.api.agentRuns.editorsOnly);
   const mode = d.mode === "review" ? "review" : d.mode === "draft" ? "draft" : fail(400, S.api.agentRuns.storyMode);
   const instructions = String(d.instructions || "").trim().slice(0, 2000) || null;
   const o = { mode, instructions };
@@ -246,8 +254,8 @@ async function startStory(c, d, g, { scoped }) {
   const id = `run-${now().slice(0, 10).replace(/-/g, "")}-${crypto.randomUUID().slice(0, 8)}`;
   const label = mode === "review" ? `Review the story “${(b.research.stories.find((x) => x.slug === o.slug) || {}).title}”` : `Draft a ${o.length} story about ${o.people.map((x) => b.people[x].name).join(", ")}`;
   await write(env, [
-    env.DB.prepare("INSERT INTO agent_runs (id, kind, person_id, tree_id, started_by, instructions, options, created_at) VALUES (?, 'story', ?, ?, ?, ?, ?, ?)")
-      .bind(id, mode === "draft" ? o.people[0] : null, g.tree_id, c.access.principal, `${label}${instructions ? `: ${instructions}` : ""}`, J(o), now()),
+    env.DB.prepare("INSERT INTO agent_runs (id, kind, person_id, tree_id, started_by, instructions, options, created_at, scope_access) VALUES (?, 'story', ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, mode === "draft" ? o.people[0] : null, g.tree_id, c.access.principal, `${label}${instructions ? `: ${instructions}` : ""}`, J(o), now(), disclosureScope(b)),
     recordUsage(env, { runs: 1 }),
   ]);
   try {
@@ -262,6 +270,7 @@ async function startStory(c, d, g, { scoped }) {
 // ---------------------------------------------------------------- the stories librarian (#36)
 async function startLibrary(c, d, g, { scoped }) {
   const env = c.env, s = settings(env), b = await scoped(c, g);
+  if (!b.scope.view.research) fail(403, S.api.agentRuns.editorsOnly);
   const raw = d.n === undefined || d.n === null || d.n === "" ? Library.DEFAULT_N : parseInt(d.n, 10);
   if (!Number.isFinite(raw) || raw < 0 || raw > Library.MAX_N) fail(400, S.api.agentRuns.libraryN(Library.MAX_N));
   const instructions = String(d.instructions || "").trim().slice(0, 2000) || null;
@@ -271,8 +280,8 @@ async function startLibrary(c, d, g, { scoped }) {
   const id = `run-${now().slice(0, 10).replace(/-/g, "")}-${crypto.randomUUID().slice(0, 8)}`;
   const label = `Review the story library: ${plan.stories.length} stor${plan.stories.length === 1 ? "y" : "ies"}, up to ${raw} new`;
   await write(env, [
-    env.DB.prepare("INSERT INTO agent_runs (id, kind, tree_id, started_by, instructions, options, report, created_at) VALUES (?, 'library', ?, ?, ?, ?, ?, ?)")
-      .bind(id, g.tree_id, c.access.principal, `${label}${instructions ? `: ${instructions}` : ""}`, J({ ...plan, instructions }), J({ checked: [], children: [] }), now()),
+    env.DB.prepare("INSERT INTO agent_runs (id, kind, tree_id, started_by, instructions, options, report, created_at, scope_access) VALUES (?, 'library', ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, g.tree_id, c.access.principal, `${label}${instructions ? `: ${instructions}` : ""}`, J({ ...plan, instructions }), J({ checked: [], children: [] }), now(), disclosureScope(b)),
     recordUsage(env, { runs: 1 }),
   ]);
   try {
@@ -287,6 +296,7 @@ async function startLibrary(c, d, g, { scoped }) {
 // ---------------------------------------------------------------- Sherlock, the relatives finder (#44)
 async function startRelatives(c, d, g, { scoped }) {
   const env = c.env, s = settings(env), b = await scoped(c, g);
+  if (!b.scope.view.research) fail(403, S.api.agentRuns.editorsOnly);
   const person = d.person ? String(d.person) : null;
   if (!person) fail(400, S.api.agentRuns.relativesPerson);
   const p = b.people[person];
@@ -299,8 +309,8 @@ async function startRelatives(c, d, g, { scoped }) {
   const want = o.looking_for === "named" ? o.named : o.looking_for === "any" ? "any relatives" : o.looking_for;
   const label = `Find relatives of ${p.name}: ${want}${o.depth === 2 ? ", two generations" : ""}${o.hints ? `. Hints: ${o.hints}` : ""}`;
   await write(env, [
-    env.DB.prepare("INSERT INTO agent_runs (id, kind, person_id, tree_id, started_by, instructions, options, created_at) VALUES (?, 'relatives', ?, ?, ?, ?, ?, ?)")
-      .bind(id, person, g.tree_id, c.access.principal, label.slice(0, 2000), J(o), now()),
+    env.DB.prepare("INSERT INTO agent_runs (id, kind, person_id, tree_id, started_by, instructions, options, created_at, scope_access) VALUES (?, 'relatives', ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, person, g.tree_id, c.access.principal, label.slice(0, 2000), J(o), now(), disclosureScope(b)),
     recordUsage(env, { runs: 1 }),
   ]);
   try {

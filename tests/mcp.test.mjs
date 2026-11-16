@@ -444,3 +444,14 @@ test("reports link existing sources on upload or through a later media edit", as
   assert.equal((await tool("revert_change", { batch: edit.data.batch }, EDITOR)).error, false);
   assert.equal((await tool("get_report", { file: existing.data.file })).data.source, undefined);
 });
+
+test("malformed RPC messages and tool notifications cannot perform writes", async () => {
+  const scalar = await rpc(null, null, { raw: '"invalid request"' });
+  assert.equal(scalar.body.error.code, -32600);
+  const noId = await rpc(null, null, { raw: JSON.stringify({
+    jsonrpc: "2.0", method: "tools/call", params: { name: "create_todo", arguments: { task: "Example notification task" } },
+  }) });
+  assert.equal(noId.status, 202);
+  const todos = (await tool("list_todos")).data.todos;
+  assert.ok(!todos.some((todo) => todo.task === "Example notification task"));
+});

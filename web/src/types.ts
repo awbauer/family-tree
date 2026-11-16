@@ -31,6 +31,6 @@ export interface Tree {
   generated: string; home: string; people: Record<string, Person>; families: Record<string, Family>;
   sources: Record<string, unknown>; media: Record<string, unknown>; aliases?: Record<string, string>;
   research: Research; me?: { principal: string; role: string; tree: string; isOwner: boolean } | null;
-  scope?: { view: { media: boolean } };
+  scope?: { view: { media: boolean; research?: boolean; notes?: boolean; sources?: boolean } };
   account?: Account | null; previewView?: string | null; issues?: any[]; places?: Record<string, any>;
 }

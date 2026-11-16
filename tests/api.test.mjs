@@ -204,3 +204,119 @@ test("approving a suggestion written before a merge follows the merge; items abo
   assert.ok(R.findings.some((f) => f.person === "I9" && f.finding === "Baptism entry matches."), "the finding moved to the kept person");
   assert.ok(!R.findings.some((f) => f.person === gone), "nothing about the removed person");
 });
+
+test("names-only grants keep a living person's queue, discussion, and history private", async () => {
+  const living = Object.values(ex.bundle.people).find((p) => p.living);
+  const member = "limited@example.test";
+  await call("PUT", "/api/admin/views/limited", { body: { name: "Names only, research visible", filter: { living: "names-only" } } });
+  await call("PUT", "/api/admin/grants", { body: { principal: member, tree_id: "all", role: "member", view_id: "limited" } });
+  const todo = (await call("POST", "/api/todos", { body: { person: living.id, task: "Example private task" } })).data.todo;
+  await call("POST", "/api/comments", { body: { id: living.id, body: "Example private discussion" } });
+  const list = await call("GET", "/api/todos?tree=all", { as: member });
+  assert.ok(!list.data.todos.some((t) => t.id === todo.id));
+  assert.equal((await call("GET", `/api/todos/${todo.id}/events?tree=all`, { as: member })).status, 404);
+  assert.equal((await call("GET", `/api/comments?id=${living.id}&tree=all`, { as: member })).status, 404);
+  assert.equal((await call("GET", `/api/history?id=${living.id}&tree=all`, { as: member })).status, 404);
+});
+
+test("selected tree limits to-do and undo operations even with grants to another tree", async () => {
+  const editor = "branch-editor@example.test";
+  await call("PUT", "/api/admin/grants", { body: { principal: editor, tree_id: "one", role: "editor" } });
+  await call("PUT", "/api/admin/grants", { body: { principal: editor, tree_id: "all", role: "member" } });
+  const todo = (await call("POST", "/api/todos", { body: { tree: "all", task: "Example whole-tree task" } })).data.todo;
+  assert.equal((await call("POST", `/api/todos/${todo.id}/claim?tree=one`, { as: editor })).status, 404);
+  assert.equal((await call("POST", "/api/proposals?tree=one", { as: editor, body: { payload: { todo_done: [{ id: todo.id }] } } })).status, 404);
+
+  const one = (await call("GET", "/api/tree?tree=one", { as: editor })).data.people;
+  const outside = Object.keys(ex.bundle.people).find((id) => !Object.hasOwn(one, id));
+  const result = await call("POST", "/api/edit", { body: { reason: "Example edit", ops: [{ op: "person.update", id: outside, set: { notes: ["Example"] } }] } });
+  assert.equal(result.status, 200);
+  assert.equal((await call("POST", `/api/changes/${result.data.batch}/revert?tree=one`, { as: editor })).status, 404);
+  assert.equal((await call("POST", `/api/changes/${result.data.batch}/revert?tree=all`)).status, 200);
+});
+
+test("concurrent claims and approvals commit one transition and one set of side effects", async () => {
+  const todo = (await call("POST", "/api/todos", { body: { task: "Example concurrent task" } })).data.todo;
+  const claims = await Promise.all([OWNER, AGENT].map((as) => call("POST", `/api/todos/${todo.id}/claim?tree=all`, { as })));
+  assert.deepEqual(claims.map((r) => r.status).sort(), [200, 409]);
+  const log = await call("GET", `/api/todos/${todo.id}/events?tree=all`);
+  assert.equal(log.data.events.filter((row) => row.kind === "assigned").length, 1);
+
+  const entry = "Example single submission";
+  const proposal = (await call("POST", "/api/proposals", { as: AGENT, body: { tree: "all", payload: { log: [{ searched: entry, result: "nil" }] } } })).data.proposal;
+  const decisions = await Promise.all([0, 1].map(() => call("POST", `/api/proposals/${proposal.id}/approve?tree=all`, { body: {} })));
+  assert.deepEqual(decisions.map((r) => r.status).sort(), [200, 409]);
+  const state = (await call("GET", "/api/tree?tree=all")).data;
+  assert.equal(state.research.research_log.filter((row) => row.searched === entry).length, 1);
+});
+
+test("legacy media uses the selected tree and cannot serve active content inline", async () => {
+  const one = (await call("GET", "/api/tree?tree=one")).data.people;
+  const outside = Object.keys(ex.bundle.people).find((id) => !Object.hasOwn(one, id));
+  const file = "qa-example/archive.bin";
+  const edit = await call("POST", "/api/edit", { body: { reason: "Fictional archival media", ops: [{ op: "media.attach", person: outside, file }] } });
+  assert.equal(edit.status, 200);
+  await env.MEDIA.put(file, "Example archival bytes", { httpMetadata: { contentType: "text/html" } });
+  const read = (tree) => worker.fetch(new Request(`https://tree.example.test/media/${file}?tree=${tree}`), env, {});
+  assert.equal((await read("one")).status, 404);
+  const allowed = await read("all");
+  assert.equal(allowed.status, 200);
+  assert.equal(allowed.headers.get("Content-Type"), "application/octet-stream");
+  assert.equal(allowed.headers.get("Content-Disposition"), "attachment");
+  assert.equal(allowed.headers.get("Cache-Control"), "private, no-store");
+});
+
+test("browser writes require the app origin and malformed research is rejected", async () => {
+  const foreign = await worker.fetch(new Request("https://tree.example.test/api/todos", {
+    method: "POST", headers: { Origin: "https://other.example.test" }, body: JSON.stringify({ task: "Example task" }),
+  }), env, {});
+  assert.equal(foreign.status, 403);
+  assert.equal((await call("POST", "/api/proposals", { body: { payload: { findings: [null] } } })).status, 422);
+  assert.equal((await call("PUT", "/api/admin/views/invalid-qa", { body: { name: "Invalid", filter: { media: "false" } } })).status, 400);
+});
+
+test("a personal home link cannot move the boundary of a generation-limited view", async () => {
+  const viewer = "rooted@example.test";
+  const home = ex.bundle.home;
+  const elsewhere = Object.keys(ex.bundle.people).find((id) => id !== home && !ex.bundle.people[id].fams.length);
+  await call("PUT", "/api/admin/trees/qa-root", { body: { name: "Fixed root", definition: { root: home } } });
+  await call("PUT", "/api/admin/views/qa-root", { body: { name: "Root household", filter: { max_generations: 0 } } });
+  await call("PUT", "/api/admin/grants", { body: { principal: viewer, tree_id: "qa-root", role: "member", view_id: "qa-root" } });
+  await call("PUT", "/api/admin/grants", { body: { principal: viewer, tree_id: "all", role: "member" } });
+  const before = (await call("GET", "/api/tree?tree=qa-root", { as: viewer })).data.people;
+  assert.ok(!Object.hasOwn(before, elsewhere));
+  assert.equal((await call("PUT", "/api/me/person", { as: viewer, body: { tree: "all", person_id: elsewhere } })).status, 200);
+  assert.deepEqual(Object.keys((await call("GET", "/api/tree?tree=qa-root", { as: viewer })).data.people), Object.keys(before));
+});
+
+test("a service identity never inherits editor or owner authority", async () => {
+  await call("PUT", "/api/admin/grants", { body: { principal: AGENT, tree_id: "all", role: "editor" } });
+  const me = await call("GET", "/api/me", { as: AGENT });
+  assert.equal(me.data.kind, "agent");
+  assert.equal(me.data.trees[0].role, "agent");
+  assert.equal((await call("GET", "/api/export.ged?tree=all", { as: AGENT })).status, 403);
+  await call("PUT", "/api/admin/grants", { body: { principal: AGENT, tree_id: "all", role: "agent" } });
+});
+
+test("Access authentication requires signed tokens with a future expiration", async () => {
+  const { identify } = await import("../worker/auth.js");
+  const keys = await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", hash: "SHA-256", modulusLength: 2048, publicExponent: Uint8Array.of(1, 0, 1) }, true, ["sign", "verify"]);
+  const publicKey = await crypto.subtle.exportKey("jwk", keys.publicKey);
+  const fetchBefore = globalThis.fetch;
+  const team = "access-test.example.test", aud = "example-audience";
+  globalThis.fetch = async () => Response.json({ keys: [{ ...publicKey, kid: "example-key" }] });
+  try {
+    async function authenticate(exp) {
+      const header = Buffer.from(JSON.stringify({ alg: "RS256", kid: "example-key" })).toString("base64url");
+      const payload = Buffer.from(JSON.stringify({ exp, iss: `https://${team}`, aud, email: MEMBER })).toString("base64url");
+      const signed = `${header}.${payload}`;
+      const sig = Buffer.from(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", keys.privateKey, Buffer.from(signed))).toString("base64url");
+      const request = new Request("https://tree.example.test/api/me", { headers: { "Cf-Access-Jwt-Assertion": `${signed}.${sig}` } });
+      return identify(request, { ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: aud });
+    }
+    const now = Math.floor(Date.now() / 1000);
+    assert.equal((await authenticate(now + 60)).ok, true);
+    assert.equal((await authenticate(now - 1)).ok, false);
+    assert.equal((await authenticate(undefined)).ok, false);
+  } finally { globalThis.fetch = fetchBefore; }
+});

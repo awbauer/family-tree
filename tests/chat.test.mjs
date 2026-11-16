@@ -319,3 +319,14 @@ test("the assistant cannot read unlinked, hidden, external, or oversized evidenc
   assert.match((await readRecordFile(storage, b, { person: "I4", file: "scan.pdf" })).error, /too large/);
   assert.equal(reads, 1);
 });
+
+test("narrowing an editor's view hides prior conversation output and drafts", async () => {
+  const id = await newChat();
+  await call("PUT", "/api/admin/views/chat-limited", { body: { name: "Reduced chat view", filter: { media: false } } });
+  await call("PUT", "/api/admin/grants", { body: { principal: EDITOR, tree_id: "all", role: "editor", view_id: "chat-limited" } });
+  assert.equal((await call("GET", `/api/chat/${id}`, { as: EDITOR })).status, 404);
+  assert.ok(!(await call("GET", "/api/chat?tree=all", { as: EDITOR })).data.chats.some((chat) => chat.id === id));
+  const fresh = await newChat();
+  assert.equal((await call("GET", `/api/chat/${fresh}`, { as: EDITOR })).status, 200);
+  await call("PUT", "/api/admin/grants", { body: { principal: EDITOR, tree_id: "all", role: "editor" } });
+});

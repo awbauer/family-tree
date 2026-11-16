@@ -15,7 +15,7 @@ const label = (m: any) => m.caption || MEDIA_TYPES[m.type] || T.photo;
 const metaLine = (m: any) => [MEDIA_TYPES[m.type], m.date, m.place].filter(Boolean).join(" · ");
 
 export function Photos() {
-  const { D, live, editor } = useData();
+  const { D, live, editor, tree } = useData();
   const { id, p, openForm } = usePerson();
   const list: any[] = (((D.research as any).media || {})[id] || []).filter((m: { file: string }) => !documentType(m.file));
   const [open, setOpen] = useState<any | null>(null);
@@ -23,7 +23,7 @@ export function Photos() {
     <section className="card" id="w-photos" style={{ marginTop: 20 }}>
       <h2>{T.title}</h2>
       {list.length ? <div className="photo-grid">{list.map((m, i) => (
-        <figure key={i} className={`photo${m.portrait ? " main" : ""}`}>{isPdf(m.file) ? <div className="doc">{T.pdf}</div> : <img loading="lazy" src={mediaUrl(m.file)} alt={m.caption || p.name} />}<figcaption>{m.caption || ""}</figcaption></figure>
+        <figure key={i} className={`photo${m.portrait ? " main" : ""}`}>{isPdf(m.file) ? <div className="doc">{T.pdf}</div> : <img referrerPolicy="no-referrer" loading="lazy" src={mediaUrl(m.file, tree, D.previewView)} alt={m.caption || p.name} />}<figcaption>{m.caption || ""}</figcaption></figure>
       ))}</div> : <p className="muted small">{T.none}</p>}
     </section>
   );
@@ -34,7 +34,7 @@ export function Photos() {
       {list.length ? <div className="photo-grid">{list.map((m, i) => (
         <figure key={i} className={`photo${m.portrait ? " main" : ""}`} data-i={i} tabIndex={0} role="button" aria-label={T.open(label(m))}
           onClick={() => setOpen(m)} onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setOpen(m); } }}>
-          {isPdf(m.file) ? <div className="doc">{T.pdf}</div> : <img loading="lazy" src={mediaUrl(m.file)} alt={label(m)} />}
+          {isPdf(m.file) ? <div className="doc">{T.pdf}</div> : <img referrerPolicy="no-referrer" loading="lazy" src={mediaUrl(m.file, tree, D.previewView)} alt={label(m)} />}
           <figcaption>{m.portrait && <><span className="badge st-verified">{T.mainPhoto}</span> </>}{label(m)}<br /><span className="muted small">{metaLine(m)}</span></figcaption>
         </figure>
       ))}</div> : <p className="muted small">{T.none}</p>}
@@ -46,7 +46,7 @@ export function Photos() {
 }
 
 function Lightbox({ m, onClose }: { m: any; onClose: () => void }) {
-  const { D, editor } = useData();
+  const { D, editor, tree } = useData();
   const { id, change } = usePerson();
   const dlg = useRef<HTMLDialogElement>(null);
   const [editing, setEditing] = useState(false);
@@ -59,7 +59,7 @@ function Lightbox({ m, onClose }: { m: any; onClose: () => void }) {
   return createPortal(
     <dialog className="lightbox" ref={dlg} onClose={onClose}>
       <form method="dialog" className="lb-close"><button className="icon-btn" aria-label={T.close}>✕</button></form>
-      {pdf ? <p><a className="btn" href={mediaUrl(m.file)} target="_blank" rel="noopener">{T.openPdf}</a></p> : <img src={mediaUrl(m.file)} alt={m.caption || ""} />}
+      {pdf ? <p><a className="btn" href={mediaUrl(m.file, tree, D.previewView)} target="_blank" rel="noopener">{T.openPdf}</a></p> : <img referrerPolicy="no-referrer" src={mediaUrl(m.file, tree, D.previewView)} alt={m.caption || ""} />}
       <div className="lb-meta"><b>{m.caption || T.untitled}</b>{m.portrait && <> <span className="badge st-verified">{T.mainPhoto}</span></>}
         <div className="small muted">{metaLine(m)}</div>
         {m.note && <p className="small">{m.note}</p>}{m.source && <p className="small">{T.source(((D.sources as any)[m.source] || {}).title || m.source)}</p>}

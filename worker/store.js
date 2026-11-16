@@ -3,7 +3,7 @@
 // Reverting a batch restores the "before" snapshots if nothing has changed those entities since.
 
 import { applyOps } from "./ops.js";
-import { J, now, parse, bumpVersion } from "./db.js";
+import { J, now, parse, bumpVersion, guard } from "./db.js";
 import { readTree, writeRecord, restoreRecord, mode as storageMode } from "./storage.js";
 import { S as Strings } from "../strings/index.ts";
 
@@ -23,8 +23,6 @@ export async function loadEditable(env) {
     versions, mode: tree.mode,
   };
 }
-
-const guard = (env, sql, ...args) => env.DB.prepare(`INSERT INTO _guard (x) SELECT NULL WHERE ${sql}`).bind(...args);
 
 /** Statements that write `touched` (from applyOps) with version guards and audit rows. */
 export function commitStatements(env, { touched, versions, state, actor, actorKind, reason, sources, proposalId, batchId, op = "edit", mode = "working", onBehalfOf = null, via = null }) {
@@ -78,7 +76,11 @@ export const newBatchId = () => `b${Date.now().toString(36)}${Math.random().toSt
 export async function applyAndCommit(env, ops, meta) {
   const { state, versions, mode } = await loadEditable(env);
   const res = applyOps(state, ops, { actor: meta.actor, knower: meta.onBehalfOf || meta.actor });
-  if (!res.touched.length) return { batchId: null, touched: [], created: res.created };
+  meta.checkTouched?.(res);
+  if (!res.touched.length) {
+    if (meta.onNoChanges?.length) await env.DB.batch(meta.onNoChanges);
+    return { batchId: null, touched: [], created: res.created };
+  }
   const batchId = meta.batchId || newBatchId();
   const st = commitStatements(env, { ...meta, touched: res.touched, versions, state: res.state, batchId, mode });
   if (meta.extra) st.push(...meta.extra);
@@ -130,7 +132,7 @@ export async function settledFindings(env, ops, { actor, actorKind, batchId, onB
 export const isConflict = (e) => /NOT NULL constraint failed: _guard/i.test(String(e && (e.message || e)));
 
 /** Revert a batch: restore every entity's "before", only if each is still at the version that batch left it. */
-export async function revertBatch(env, batchId, { actor, actorKind, reason }) {
+export async function revertBatch(env, batchId, { actor, actorKind, reason, extra = [] }) {
   const rows = (await env.DB.prepare("SELECT * FROM changes WHERE batch_id = ? ORDER BY id").bind(batchId).all()).results;
   if (!rows.length) return null;
   const t = now(), nb = newBatchId(), st = [];
@@ -174,7 +176,7 @@ export async function revertBatch(env, batchId, { actor, actorKind, reason }) {
     st.push(env.DB.prepare("INSERT INTO changes (at, actor, actor_kind, entity_type, entity_id, op, before, after, reason, batch_id, version_after) VALUES (?, ?, ?, ?, ?, 'revert', ?, ?, ?, ?, ?)")
       .bind(t, actor, actorKind, r.entity_type, r.entity_id, r.after, r.before, reason || `revert ${batchId}`, nb, before == null ? null : (after == null ? 1 : r.version_after + 1)));
   }
-  st.push(bumpVersion(env));
+  st.push(...extra, bumpVersion(env));
   await env.DB.batch(st);
   return { batchId: nb, reverted: batchId, entities: rows.length };
 }

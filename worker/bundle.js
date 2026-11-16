@@ -2,8 +2,8 @@
 // background work (agent runs, the content job), which has no request: scopedFor() resolves a principal's access
 // the same way a request would, so an agent never sees more than the person who started it.
 import * as Derive from "./derive.js";
-import { resolveAccess, grantFor } from "./auth.js";
-import { scopeBundle } from "./scope.js";
+import { resolveAccess, grantFor, can } from "./auth.js";
+import { scopeBundle, validTreeDefinition, validViewFilter } from "./scope.js";
 import { now, parse, dataVersion, loadState } from "./db.js";
 import { fail } from "./http.js";
 import { S } from "../strings/index.ts";
@@ -32,14 +32,18 @@ export async function fullBundle(env) {
 /** The bundle as `access` sees it under `grant` (cached). */
 export async function scopeFor(env, access, grant) {
   const { version, full } = await fullBundle(env);
-  const key = `${version}|${derivedCache.db === env.DB ? "" : "x"}|${access.principal}|${grant.tree_id}|${grant.view_id || ""}|${access.personId || ""}|${access.isOwner}|${grant.role}`;
+  const key = JSON.stringify([version, access.principal, grant.tree_id, grant.view_id, access.personId, access.isOwner, grant.role, access.treeById[grant.tree_id]?.definition]);
   if (scopedCache.has(key)) return scopedCache.get(key);
   const t = access.treeById[grant.tree_id];
-  const tree = { id: t.id, name: t.name, definition: parse(t.definition, { branches: ["*"] }) };
+  const definition = parse(t.definition);
+  if (!validTreeDefinition(definition)) fail(403, S.api.auth.noTreeAccess);
+  const tree = { id: t.id, name: t.name, definition };
   let view = null;
   if (grant.view_id) {
     const vr = await env.DB.prepare("SELECT filter FROM views WHERE id = ?").bind(grant.view_id).first();
-    view = vr ? parse(vr.filter, {}) : { living: "hidden", research: false, notes: false, media: false, sources: false }; // missing view fails closed
+    const filter = parse(vr?.filter);
+    if (!validViewFilter(filter)) fail(403, S.api.auth.noTreeAccess);
+    view = filter;
   }
   const out = scopeBundle(full, {
     tree, view, viewerPersonId: access.personId, isOwner: access.isOwner,
@@ -53,8 +57,42 @@ export async function scopeFor(env, access, grant) {
 
 /** For background work: what `principal` can see of `treeId`, or null if they no longer have access. */
 export async function scopedFor(env, principal, treeId) {
-  const access = await resolveAccess(env, { principal, kind: "person" });
+  const access = await resolveAccess(env, { principal, kind: /^(service|agent):/.test(principal) ? "agent" : "person" });
   const grant = grantFor(access, treeId);
   if (!grant) return null;
   return { access, grant, bundle: await scopeFor(env, access, grant) };
+}
+
+
+// Conversation and run outputs can contain private free text. Preserve access after a view expands, but only if
+// everything the earlier run was permitted to read is still visible now.
+const disclosureFields = ["notes", "sources", "research", "media"];
+function disclosureLevel(bundle, person) {
+  return person.private ? (bundle.scope.view.living === "anonymous" ? 1 : 2) : 3;
+}
+
+export function disclosureScope(bundle) {
+  return JSON.stringify({
+    fields: disclosureFields.filter((field) => bundle.scope.view[field]),
+    people: Object.entries(bundle.people).map(([id, person]) => [id, disclosureLevel(bundle, person)]),
+  });
+}
+
+export async function canReadDisclosure(env, bundle, saved) {
+  const before = parse(saved);
+  if (!before) {
+    // Legacy rows have no record of who could be read. Only a viewer with the full tree can read them.
+    const { full } = await fullBundle(env);
+    return disclosureFields.every((field) => bundle.scope.view[field]) &&
+      Object.keys(full.people).every((id) => Object.hasOwn(bundle.people, id) && !bundle.people[id].private);
+  }
+  if (!Array.isArray(before.fields) || !Array.isArray(before.people)) return false;
+  return before.fields.every((field) => bundle.scope.view[field]) &&
+    before.people.every(([id, level]) => Object.hasOwn(bundle.people, id) && disclosureLevel(bundle, bundle.people[id]) >= level);
+}
+
+export async function scopedForRun(env, run) {
+  const sc = await scopedFor(env, run.started_by, run.tree_id);
+  if (!sc || !can.review(sc.grant) || !sc.bundle.scope.view.research || (run.scope_access && !(await canReadDisclosure(env, sc.bundle, run.scope_access)))) return null;
+  return sc;
 }

@@ -5,5 +5,5 @@ export class HttpError extends Error {
 export const fail = (status, message, extra) => { throw new HttpError(status, message, extra); };
 
 export function json(obj, status = 200, extra = {}) {
-  return new Response(JSON.stringify(obj), { status, headers: Object.assign({ "Content-Type": "application/json; charset=utf-8", "X-Robots-Tag": "noindex" }, extra) });
+  return new Response(JSON.stringify(obj), { status, headers: Object.assign({ "Content-Type": "application/json; charset=utf-8", "X-Robots-Tag": "noindex", "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" }, extra) });
 }

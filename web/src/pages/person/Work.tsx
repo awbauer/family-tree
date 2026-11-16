@@ -18,13 +18,13 @@ const el = (f: F, k: string) => f.elements.namedItem(k) as HTMLInputElement | nu
 const val = (f: F, k: string) => (el(f, k)?.value) || "";
 
 export function Work() {
-  const { ai, people } = useData();
+  const { ai, people, D } = useData();
   const { p } = usePerson();
   return (
     <div className="work-grid">
       <Related />
       <Editor />
-      <Comments />
+      {D.scope?.view.notes !== false && <Comments />}
       <History />
       {ai && !p.private && <AiResearch />}
       {ai && !p.private && <FindRelatives />}

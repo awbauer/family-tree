@@ -15,10 +15,13 @@ export {
 } from "../agents/dist/agents_bundle/index.js";
 
 /** env as the site sees it: the bindings plus AGENTS, a fetch() straight into the agents' router. */
-const withAgents = (env, ctx) => ({ ...env, AGENTS: { fetch: (input, init) => agents.fetch(new Request(input, init), env, ctx) } });
+const withAgents = (env, ctx, request) => ({
+  ...env,
+  ALLOW_UNAUTHENTICATED: ["localhost", "127.0.0.1", "[::1]"].includes(new URL(request.url).hostname) ? env.ALLOW_UNAUTHENTICATED : undefined,
+  AGENTS: { fetch: (input, init) => agents.fetch(new Request(input, init), env, ctx) } });
 
 export default {
-  fetch: (request, env, ctx) => site.fetch(request, withAgents(env, ctx), ctx),
+  fetch: (request, env, ctx) => site.fetch(request, withAgents(env, ctx, request), ctx),
   // the weekly content job (AI profiles; triggers.crons in wrangler.jsonc)
   scheduled: (controller, env, ctx) => (agents.scheduled ? agents.scheduled(controller, env, ctx) : undefined),
 };
