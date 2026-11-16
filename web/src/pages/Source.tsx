@@ -4,11 +4,13 @@
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import { S } from "../../../strings/index.ts";
+import { documentType } from "../documents";
 import { useData } from "../data";
 import { PersonLink, useTitle, years } from "../lib";
 import { INFORMATION, EVIDENCE, pickedSource, SOURCE_KINDS, SOURCE_TYPES, SourceList } from "../ops";
 import { apidLink, citeCount, mediaUrl, sourceUses, type SourceUse } from "../tree";
 import { Linkify } from "../ui";
+import { DocumentLinks } from "./person/Attachments";
 import { SourceForm, useSourceChange } from "./sourceEdit";
 
 const T = S.admin.sources.page;
@@ -47,7 +49,8 @@ export function Source() {
     for (const u of uses) if (!u.file) m.set(u.person, [...(m.get(u.person) || []), u]);
     return [...m.entries()].sort((a, b) => (D.people[a[0]]?.name || "").localeCompare(D.people[b[0]]?.name || ""));
   }, [uses, D]);
-  const photos = uses.filter((u) => u.file);
+  const photos = uses.filter((u) => u.file && !documentType(u.file));
+  const attachments = uses.filter((u) => documentType(u.file));
   if (!s) return (
     <div className="wrap page"><h1>{T.notFound.heading}</h1>
       <p>{T.notFound.before}<code>{id}</code>{T.notFound.after}</p>
@@ -82,6 +85,18 @@ export function Source() {
               <figcaption>{u.fact.replace(/^photo: /, "")}<br /><span className="small"><PersonLink id={u.person} /></span></figcaption>
             </figure>
           ))}</div>
+        </section>
+      )}
+
+      {attachments.length > 0 && (
+        <section className="card" style={{ marginTop: 16 }}>
+          <h2>{S.person.attachments.title}</h2>
+          <ul className="attachment-list">{attachments.map((u) => (
+            <li key={`${u.person}/${u.file}`}>
+              <strong>{u.caption}</strong> <span className="small"><PersonLink id={u.person} /></span>
+              <DocumentLinks item={{ file: u.file!, caption: u.caption || u.fact }} />
+            </li>
+          ))}</ul>
         </section>
       )}
 

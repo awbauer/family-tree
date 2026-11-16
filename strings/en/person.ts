@@ -249,6 +249,7 @@ export const person = {
     loading: "Loading report…",
     loadError: "The report could not be opened.",
     uploadError: "The file could not be uploaded.",
+    source: (title: string) => `Source: ${title}`,
     remove: "Remove",
     suggestRemove: "Suggest removing",
     removeConfirm: "Remove this file from the person's page?",

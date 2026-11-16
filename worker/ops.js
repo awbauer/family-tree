@@ -1,6 +1,7 @@
 // The edit engine: apply a list of ops (docs/design/edit-ops.md) to the raw tree, in memory, atomically.
 // Returns the touched entities with before/after snapshots, so the caller can write them with version checks
 // and record an audit trail that can be reverted.
+import { RANK } from "./research.js";
 import { documentType } from "./documents.ts";
 import { S as Strings } from "../strings/index.ts";
 
@@ -11,6 +12,15 @@ export class OpError extends Error {
 }
 
 const clone = (x) => (x === undefined ? undefined : structuredClone(x));
+export const PERSON_STATUSES = Object.keys(RANK);
+const PERSON_UPDATE_FIELDS = new Set(["sex", "notes", "research_status", "status_note"]);
+export const editsPersonStatus = (op) => op?.op === "person.update" && op.set &&
+  (Object.hasOwn(op.set, "research_status") || Object.hasOwn(op.set, "status_note"));
+
+export const documentSource = (op) => documentType(op?.file)
+  ? op.op === "media.attach" ? op.source : op.op === "media.update" ? op.set?.source : null
+  : null;
+
 const SEX = new Set(["M", "F", "U", ""]);
 const EVENT_FIELDS = ["type", "date", "place", "note", "value", "age", "subtype", "address"];
 const NAME_FIELDS = ["given", "surname", "suffix", "type"];
@@ -62,7 +72,7 @@ function maxFid(list, p) {
 }
 
 /**
- * state: {people, families, sources, media_map, aliases} (raw; not mutated).
+ * state: {people, families, sources, statuses, media_map, aliases} (raw; not mutated).
  * Returns {state: newState, touched: [{type, id, before, after}], created: {tempId: realId}}.
  */
 // `knower` is who personal knowledge is credited to: the person the change is made for (an agent applying a change on
@@ -70,10 +80,10 @@ function maxFid(list, p) {
 export function applyOps(state, ops, { actor = "unknown", knower = actor, now = new Date().toISOString(), newId } = {}) {
   if (!Array.isArray(ops) || !ops.length) throw new OpError(M.opsRequired);
   if (ops.length > 500) throw new OpError(M.tooMany);
-  const S = { people: { ...state.people }, families: { ...state.families }, sources: { ...state.sources }, media_map: { ...(state.media_map || {}) }, aliases: { ...(state.aliases || {}) } };
+  const S = { people: { ...state.people }, families: { ...state.families }, sources: { ...state.sources }, statuses: { ...state.statuses }, media_map: { ...(state.media_map || {}) }, aliases: { ...(state.aliases || {}) } };
   const before = new Map(); // key -> snapshot before first touch
   const key = (t, id) => `${t}:${id}`;
-  const coll = { person: "people", family: "families", source: "sources", media_map: "media_map" };
+  const coll = { person: "people", family: "families", source: "sources", status: "statuses", media_map: "media_map" };
   const touch = (t, id) => {
     const k = key(t, id), c = S[coll[t]];
     if (!before.has(k)) before.set(k, { type: t, id, before: clone(c[id]) });
@@ -134,7 +144,10 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
   const cleanMedia = (o, m, i) => {
     for (const k of MEDIA_FIELDS) if (k in o) { if (o[k] == null || o[k] === "") delete m[k]; else m[k] = String(o[k]).slice(0, 1000); }
     const document = documentType(m.file);
-    if (document) m.type = document;
+    if (document) {
+      if (o.source != null && o.source !== "" && !Object.hasOwn(S.sources, o.source)) throw new OpError(M.noSource(o.source), i);
+      m.type = document;
+    }
     else if ("type" in o && o.type != null && o.type !== "") {
       if (!MEDIA_TYPES.includes(o.type)) throw new OpError(M.mediaType(MEDIA_TYPES), i);
       m.type = o.type;
@@ -167,10 +180,29 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
         break;
       }
       case "person.update": {
-        const id = P(o.id, i), p = touch("person", id);
-        const set = o.set || {};
-        if ("sex" in set) { if (!SEX.has(set.sex)) throw new OpError(M.sexInvalid, i); p.sex = set.sex; }
-        if ("notes" in set) p.notes = [].concat(set.notes || []).map((x) => String(x).slice(0, 8000));
+        const id = P(o.id, i), set = o.set;
+        if (!set || typeof set !== "object" || Array.isArray(set) || !Object.keys(set).length) throw new OpError(M.personSetRequired, i);
+        const unknown = Object.keys(set).filter((field) => !PERSON_UPDATE_FIELDS.has(field));
+        if (unknown.length) throw new OpError(M.personSetUnknown(unknown), i);
+        if ("sex" in set || "notes" in set) {
+          const p = touch("person", id);
+          if ("sex" in set) { if (!SEX.has(set.sex)) throw new OpError(M.sexInvalid, i); p.sex = set.sex; }
+          if ("notes" in set) p.notes = [].concat(set.notes || []).map((x) => String(x).slice(0, 8000));
+        }
+        if (editsPersonStatus(o)) {
+          const status = touch("status", id) || { status: "unverified" };
+          if ("research_status" in set) {
+            if (!PERSON_STATUSES.includes(set.research_status)) throw new OpError(M.personStatus(PERSON_STATUSES), i);
+            status.status = set.research_status;
+          }
+          if ("status_note" in set) {
+            if (set.status_note !== null && typeof set.status_note !== "string") throw new OpError(M.personStatusNote, i);
+            const note = set.status_note?.trim();
+            if (note) status.note = note.slice(0, 8000);
+            else delete status.note;
+          }
+          S.statuses[id] = status;
+        }
         break;
       }
       case "person.delete": {
@@ -178,6 +210,7 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
         if ((p.famc || []).length || (p.fams || []).length) throw new OpError(M.unlinkFirst, i);
         touch("person", id);
         delete S.people[id];
+        if (S.statuses[id]) { touch("status", id); delete S.statuses[id]; }
         if (S.media_map[id]) { touch("media_map", id); delete S.media_map[id]; }
         break;
       }
@@ -199,6 +232,11 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
         S.aliases[drop] = keep;
         for (const [a, b] of Object.entries(S.aliases)) if (b === drop) S.aliases[a] = keep;
         before.set("aliases:*", before.get("aliases:*") || { type: "aliases", id: "*", before: clone(state.aliases || {}) });
+        if (S.statuses[drop]) {
+          const status = touch("status", drop);
+          if (!S.statuses[keep]) { touch("status", keep); S.statuses[keep] = status; }
+          delete S.statuses[drop];
+        }
         if (S.media_map[drop]) {
           touch("media_map", drop); touch("media_map", keep);
           S.media_map[keep] = (S.media_map[keep] || []).concat(S.media_map[drop]);

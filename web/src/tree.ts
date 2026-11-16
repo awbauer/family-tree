@@ -1,4 +1,5 @@
 // Pure helpers over the tree data (/api/tree). No React here; components use these through useData().
+import { documentType } from "./documents";
 import type { Family, Person, Story, Tree } from "./types";
 import { S } from "../../strings/index.ts";
 
@@ -31,7 +32,7 @@ export const linkedIn = (D: Tree, s: Story) => new Set([...String(s.body || "").
 export const mentionsFor = (D: Tree, id: string) => (D.research.stories || []).filter((s) => !(s.people || []).includes(id) && linkedIn(D, s).has(id));
 
 /** One fact (or person, or photo) that cites a catalogued source, with the citations of it there. */
-export interface SourceUse { person: string; family?: string; fid?: string; fact: string; citations: any[]; file?: string }
+export interface SourceUse { person: string; family?: string; fid?: string; fact: string; citations: any[]; file?: string; caption?: string }
 /**
  * Every use of every catalogued source, by source id: facts on people (events and names), the person as a whole,
  * family events (listed under each spouse), review evidence and photos. One entry per fact, so a fact that cites a
@@ -60,7 +61,10 @@ export function sourceUses(D: Tree): Record<string, SourceUse[]> {
     for (const e of f.events || []) for (const s of sp) fact(e, { person: s, family: f.id, fid: e.fid, fact: label(e) });
   }
   for (const [pid, list] of Object.entries(((D.research as any).media || {}) as Record<string, any[]>)) {
-    for (const m of list || []) if (m && m.source && D.people[pid]) add(m.source, { person: pid, file: m.file, fact: S.common.facts.photo(m.caption || m.file.split("/").pop()) }, null);
+    for (const m of list || []) if (m && m.source && D.people[pid]) {
+      const caption = m.caption || m.file.split("/").pop();
+      add(m.source, { person: pid, file: m.file, caption, fact: documentType(m.file) ? caption : S.common.facts.photo(caption) }, null);
+    }
   }
   return out;
 }

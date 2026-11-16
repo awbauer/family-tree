@@ -346,7 +346,7 @@ function citationsOf(b, sid) {
     scan(o, p.citations, "person");
     for (const n of p.names || []) scan(o, n.citations, "name", n.fid);
     for (const e of p.events || []) { scan(o, e.citations, e.type, e.fid); if (e.review) scan(o, e.review.evidence, `${e.type} review`, e.fid); }
-    for (const m of ((b.research && b.research.media) || {})[p.id] || []) if (m && m.source === sid) out.push({ ...o, where: "photo", file: m.file });
+    for (const m of ((b.research && b.research.media) || {})[p.id] || []) if (m && m.source === sid) out.push({ ...o, where: documentType(m.file) || "photo", file: m.file, ...(documentType(m.file) ? { caption: m.caption } : {}) });
   }
   for (const [fid, f] of Object.entries(b.families)) for (const e of f.events || []) scan({ family: fid }, e.citations, e.type, e.fid);
   return out;

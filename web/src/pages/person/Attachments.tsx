@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { Marked } from "marked";
 import { S } from "../../../../strings/index.ts";
 import { useData } from "../../data";
@@ -8,7 +8,7 @@ import { reloadPage, usePerson } from "./context";
 
 const T = S.person.attachments;
 type DocumentType = NonNullable<ReturnType<typeof documentType>>;
-type DocumentItem = { file: string; caption: string };
+type DocumentItem = { file: string; caption: string; source?: string };
 
 const markdown = new Marked({
   async: false,
@@ -103,6 +103,9 @@ export function Attachments() {
       {list.length ? <ul className="attachment-list">{list.map((item) => (
         <li key={item.file} id={item.file}>
           <strong>{item.caption}</strong> <span className="muted small">{documentType(item.file) === "report" ? T.report : T.attachment}</span>
+          {item.source && D.sources[item.source] != null && (
+            <div className="small"><Link to={`/source/${encodeURIComponent(item.source)}`}>{T.source((D.sources[item.source] as { title?: string }).title || item.source)}</Link></div>
+          )}
           <DocumentLinks item={item} />
           {!D.previewView && <button className="btn" onClick={() => {
             if (confirm(T.removeConfirm)) void change([{ op: "media.detach", person: id, file: item.file }], { reason: T.removeReason });

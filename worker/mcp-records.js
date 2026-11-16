@@ -73,7 +73,7 @@ export async function recordResult(x, tool, args, output) {
   const doc = (d, owner) => card(url(personPath(owner), { section: d.file, attachment: d.file }), d.caption || d.file.split("/").pop(),
     documentType(d.file) === "report" ? L.report : L.attachment, d.markdown);
   const edited = (entity) => entity.type === "source" && entity.after ? source({ id: entity.id, ...entity.after }) :
-    ["person", "media_map"].includes(entity.type) && entity.after ? card(url(personPath(entity.id)), entity.id) : null;
+    ["person", "status", "media_map"].includes(entity.type) && entity.after ? card(url(personPath(entity.id)), entity.id) : null;
   const section = sections[name];
   let data = output;
   let main = section && (name !== "list_research_sites" || x.c.access.isOwner) ? card(url(section), tool.title) : null;
@@ -152,7 +152,7 @@ export async function recordResult(x, tool, args, output) {
       break;
     case "get_source":
       main = source(data);
-      set("cited_by", (c) => c.person && card(url(personPath(c.person), c.fid?.startsWith("e") ? { fact: c.fid } : undefined), c.person.name, line(c.where, c.page)));
+      set("cited_by", (c) => c.person && (documentType(c.file) ? doc(c, c.person) : card(url(personPath(c.person), c.fid?.startsWith("e") ? { fact: c.fid } : undefined), c.person.name, line(c.where, c.page))));
       break;
     case "list_stories":
       set("stories", story);
@@ -214,9 +214,16 @@ export async function recordResult(x, tool, args, output) {
       const b = await x.bundle();
       const attached = Object.entries(b.research.media || {}).find(([, files]) => files.some((m) => m.file === args.file));
       const item = attached?.[1].find((m) => m.file === args.file);
-      if (item) main = documentType(item.file) ? doc({ ...item, markdown: data.markdown }, attached[0])
-        : card(url(...personSection(attached[0], "w-photos")), item.caption || args.file.split("/").pop(), L.photo);
-      else {
+      if (item && documentType(item.file)) {
+        main = doc({ ...item, markdown: data.markdown }, attached[0]);
+        if (item.source && Object.hasOwn(b.sources, item.source)) {
+          const linkedSource = source({ ...b.sources[item.source], id: item.source });
+          data = { ...data, source: item.source, source_url: linkedSource.page_url };
+          add(linkedSource);
+        }
+      } else if (item) {
+        main = card(url(...personSection(attached[0], "w-photos")), item.caption || args.file.split("/").pop(), L.photo);
+      } else {
         const ids = new Set(Object.entries(b.media || {}).filter(([, m]) => m.file === args.file).map(([id]) => id));
         const owner = Object.values(b.people).find((p) => (p.media || []).some((id) => ids.has(id)));
         if (owner) main = card(url(...personSection(owner, "w-photos")), args.file.split("/").pop(), L.photo);

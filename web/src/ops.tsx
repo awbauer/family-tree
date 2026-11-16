@@ -213,7 +213,10 @@ export function diffItems(D: Tree, ch: any): ReactNode[] {
   const a = ch.before, b = ch.after, t = ch.type;
   if (t === "media" || t === "media_map") return mediaDiff(a, b);
   if (t === "finding") return [b ? <li className="d-chg"><b>{X.finding}</b> {b.status}{b.note ? X.note(b.note) : ""}</li> : <li className="d-chg"><b>{X.finding}</b> {X.reopened}</li>];
-  if (t === "status") return [<Chg label={X.researchStatus} from={a && a.status} to={b && b.status} />];
+  if (t === "status") return [
+    ...((a?.status || "unverified") !== (b?.status || "unverified") ? [<Chg label={X.researchStatus} from={a?.status || "unverified"} to={b?.status || "unverified"} />] : []),
+    ...((a?.note || "") !== (b?.note || "") ? [<Chg label={X.statusNote} from={a?.note} to={b?.note} />] : []),
+  ];
   if (t === "source" && !(a && b)) return [b ? <Add label={X.sourceLabel}>{b.title || ch.id}</Add> : <Del label={X.sourceLabel}>{(a && a.title) || ch.id}</Del>];
   if (!a && b) return [<Add label={t === "family" ? X.family : X.person}>{t === "family" ? [b.husband, b.wife].filter(Boolean).map((x: string) => whoName(D, x)).join(" & ") : (b.names || []).map(nameText).join(" / ")}</Add>];
   if (a && !b) return [<Del label={t === "family" ? X.family : X.person}>{t === "family" ? ch.id : (a.names || []).map(nameText).join(" / ")}</Del>];
