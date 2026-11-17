@@ -17,7 +17,7 @@ const LINK = "https://records.example.org/collections/parish-registers/volume-12
 let srv, browsers = [], pages = [], longId, errors = [];
 
 before(async () => {
-  srv = await startDevServer({ port: 8797, site: SITE, quiet: true });
+  srv = await startDevServer({ port: 0, site: SITE, quiet: true });
   const api = async (m, p, b) => {
     const r = await fetch(`${srv.url}/api/${p}`, { method: m, headers: { "Content-Type": "application/json" }, body: b ? JSON.stringify(b) : undefined });
     const j = await r.json(); if (!r.ok) throw new Error(`${p}: ${j.error}`); return j;
@@ -46,8 +46,8 @@ before(async () => {
     pages.push(page);
     await setUp(page);
   }
-});
-after(async () => { for (const b of browsers) await b.close(); await srv?.close(); });
+}, { timeout: 90_000 });
+after(async () => { for (const b of browsers) await b.close(); await srv?.close(); }, { timeout: 30_000 });
 
 async function setUp(page) {
   page.on("pageerror", (e) => errors.push(`${page.engine}: ${e.message}`));
@@ -66,7 +66,7 @@ async function setUp(page) {
 test("no page is wider than a 320px screen, even with very long text", async () => {
   const wide = [];
   for (const page of pages)
-  for (const p of ["/", "/people", `/person/${longId}`, "/person/I5", `/tree/${longId}`, "/branch/novak", "/stories", "/map", "/timeline",
+  for (const p of ["/", "/people", `/person/${longId}`, "/person/I5", `/tree/${longId}`, "/branch/novak", "/stories", "/map", "/timeline", "/search?q=England", "/search?q=Hartlee",
     "/research", "/research/todo", "/research/queue", "/sources", "/source/S99", "/admin", "/admin/sites", "/admin/stories", "/admin/audit", "/about"]) {
     await page.evaluate((h) => { location.hash = h; }, "#" + p);
     await page.waitForTimeout(500);
@@ -74,6 +74,36 @@ test("no page is wider than a 320px screen, even with very long text", async () 
     if (w > 320) wide.push(`${page.engine}: ${p} is ${w}px wide`);
   }
   assert.deepEqual(wide, []);
+  assert.deepEqual(errors, []);
+});
+
+test("open forms, tab bars, search results and long names stay inside their boxes", async () => {
+  // boxes whose content spills out, or anything past the screen edge, outside deliberate side-scrollers
+  const spills = () => {
+    const out = [];
+    for (const el of document.querySelectorAll("header *, main *")) {
+      if (el.closest("svg, canvas, iframe, .leaflet-container, .graph-wrap, .tree-wrap, .fan-wrap, .table-wrap, pre")) continue;
+      const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+      if (r.width <= 2 || r.height <= 2 || cs.display === "none") continue;
+      if (r.right > innerWidth + 1 || (cs.overflowX === "visible" && el.scrollWidth > el.clientWidth + 2 && el.clientWidth > 0)) out.push(`${el.tagName.toLowerCase()}.${el.className}`);
+    }
+    return [...new Set(out)].slice(0, 5);
+  };
+  const bad = [];
+  for (const page of pages) {
+    const check = async (label) => { await page.waitForTimeout(300); const r = await page.evaluate(spills); if (r.length) bad.push(`${page.engine} ${label}: ${r.join(", ")}`); };
+    await page.evaluate((id) => { location.hash = `#/person/${id}`; }, longId);
+    await page.waitForTimeout(500);
+    await check("person page");
+    for (const name of ["Add an attachment", "Add a report"]) {
+      await page.getByRole("button", { name, exact: true }).click();
+      await check(`person page, ${name}`);
+    }
+    for (const p of ["/research", "/admin"]) { await page.evaluate((h) => { location.hash = h; }, "#" + p); await check(p); }
+    const search = page.locator(".search input").first();
+    if (await search.isVisible()) { await search.fill("Max"); await check("search results"); await search.fill(""); }
+  }
+  assert.deepEqual(bad, []);
   assert.deepEqual(errors, []);
 });
 

@@ -4,6 +4,7 @@
 import { documentType, documentsFor } from "./documents.ts";
 import * as Graph from "./graph.js";
 import { relationship } from "./agent/tools.js";
+import * as TS from "./textsearch.ts";
 
 const norm = (x) => String(x || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const has = (v) => v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && !v.length);
@@ -59,12 +60,14 @@ export function overview(b) {
 /** Name search plus filters. Every filter given must match. */
 export function search(b, q = {}) {
   const terms = norm(q.query).split(/\s+/).filter(Boolean);
+  // With sounds_like, the name words come from the shared search: spelling variants and sound-alikes count too.
+  const alike = q.sounds_like && terms.length ? new Set(TS.search(index(b), q.query, { kinds: ["person"], namesOnly: true }).map((h) => h.id)) : null;
   const inRange = (y, from, to) => (from == null || (y != null && y >= +from)) && (to == null || (y != null && y <= +to));
   const place = norm(q.place);
   const out = [];
   for (const p of Object.values(b.people)) {
     const names = [p.name, ...(p.names || []).map((n) => `${n.given || ""} ${n.surname || ""}`)];
-    if (terms.length && !terms.every((t) => norm(names.join(" | ")).includes(t))) continue;
+    if (alike ? !alike.has(p.id) : terms.length && !terms.every((t) => norm(names.join(" | ")).includes(t))) continue;
     if (q.surname && !(p.names || []).some((n) => norm(n.surname) === norm(q.surname)) && norm(p.surname) !== norm(q.surname)) continue;
     if (q.given && !norm([p.given, ...(p.names || []).map((n) => n.given)].join(" ")).includes(norm(q.given))) continue;
     if (p.private && (q.born_from != null || q.born_to != null || q.died_from != null || q.died_to != null || place || q.status)) continue;
@@ -84,6 +87,25 @@ export function search(b, q = {}) {
     total: out.length, offset,
     people: out.slice(offset, offset + limit).map((p) => (p.private ? brief(b, p.id)
       : compact({ ...brief(b, p.id), birthplace: p.birth && p.birth.place, deathplace: p.death && p.death.place, relation: p.relation, branch: p.branch, status: p.status }))),
+  };
+}
+
+// ---------------------------------------------------------------- searching everything
+const indexes = new WeakMap();
+const index = (b) => { if (!indexes.has(b)) indexes.set(b, TS.buildIndex(b)); return indexes.get(b); };
+
+/** Full-text search over everything the caller's view shows (worker/textsearch.ts), with what matched in each record. */
+export function searchText(b, q = {}) {
+  const kinds = Array.isArray(q.kinds) && q.kinds.length ? q.kinds : undefined;
+  const hits = TS.search(index(b), q.query || "", { kinds, variants: q.variants !== false });
+  const limit = clampInt(q.limit, 25, 1, 100), offset = clampInt(q.offset, 0, 0, 1e6);
+  return {
+    total: hits.length, offset,
+    results: hits.slice(offset, offset + limit).map((h) => compact({
+      kind: h.kind, id: h.id, title: h.title, person: h.kind === "person" ? undefined : h.person && brief(b, h.person),
+      private: h.private, score: Math.round(h.score * 10) / 10,
+      matched: h.matches.map((m) => compact({ in: m.field, text: m.snippet, how: m.how === "exact" ? undefined : m.how === "sounds" ? "sounds like" : "spelled close to", word: m.word })),
+    })),
   };
 }
 

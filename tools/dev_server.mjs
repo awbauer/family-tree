@@ -56,9 +56,12 @@ export async function startDevServer({ port = PORT, site = SITE, as = AS, quiet 
       res.writeHead(500); res.end(String(e && e.stack || e));
     }
   });
-  await new Promise((ok) => server.listen(port, ok));
-  if (!quiet) console.log(`Example family site on http://localhost:${port} (serving ${site}, as ${as})`);
-  return { server, env, url: `http://localhost:${port}`, close: () => new Promise((ok) => server.close(ok)) };
+  // Fail at once if the port is taken (rather than waiting forever for a listen that never happens). Port 0 picks a
+  // free one, which is what the browser tests use so that two runs at the same time can't collide.
+  await new Promise((ok, fail) => { server.once("error", fail); server.listen(port, () => { server.off("error", fail); ok(); }); });
+  const actual = server.address().port;
+  if (!quiet) console.log(`Example family site on http://localhost:${actual} (serving ${site}, as ${as})`);
+  return { server, env, url: `http://localhost:${actual}`, close: () => new Promise((ok) => { server.closeAllConnections?.(); server.close(ok); }) };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) startDevServer();

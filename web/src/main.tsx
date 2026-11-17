@@ -23,6 +23,7 @@ const Research = lazy(() => import("./pages/research/Research"), "Research");
 const Admin = lazy(() => import("./pages/admin/Admin"), "Admin");
 const Sources = lazy(() => import("./pages/Sources"), "Sources");
 const Source = lazy(() => import("./pages/Source"), "Source");
+const Search = lazy(() => import("./pages/Search"), "Search");
 
 function Layout() {
   return <DataProvider><Shell><Outlet /></Shell></DataProvider>;
@@ -45,6 +46,7 @@ const router = createHashRouter([{
     { path: "/admin/:tab", lazy: Admin },
     { path: "/sources", lazy: Sources },
     { path: "/source/:id", lazy: Source },
+    { path: "/search", lazy: Search },
     { path: "/stories", element: <Stories /> },
     { path: "/story/:slug", element: <Story /> },
     { path: "/about", element: <About /> },

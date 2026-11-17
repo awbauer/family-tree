@@ -15,15 +15,15 @@ const SITE = resolve(ROOT, process.env.E2E_SITE || "dist/site");
 let srv, browser, page, errors = [];
 
 before(async () => {
-  srv = await startDevServer({ port: 8799, site: SITE, quiet: true });
+  srv = await startDevServer({ port: 0, site: SITE, quiet: true });
   browser = await chromium.launch();
   page = await browser.newPage();
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
   page.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource|tile|leaflet|unpkg|fonts\.g/i.test(m.text())) errors.push(`console: ${m.text()}`); });
   await page.goto(`${srv.url}/#/`);
   await page.waitForSelector("#app h1, #app h2, main h1", { timeout: 15000 });
-});
-after(async () => { await browser?.close(); await srv?.close(); });
+}, { timeout: 90_000 });
+after(async () => { await browser?.close(); await srv?.close(); }, { timeout: 30_000 });
 
 /** Go to a route and wait for text to appear in the page; fail on any script error along the way. */
 async function visit(hash, expect, { selector = "body" } = {}) {
@@ -47,6 +47,21 @@ test("people list and search", async () => {
   await page.fill("#search", "Eva");
   await page.waitForFunction(() => document.querySelector("#search-results").innerText.includes("Eva Novák"), null, { timeout: 5000 });
   await page.fill("#search", "");
+});
+test("search: name variants in the header, everything on the search page", async () => {
+  await visit("#/", ["Hartley"]);
+  await page.fill("#search", "Hartlee");
+  await page.waitForFunction(() => /Daniel James Hartley/.test(document.querySelector("#search-results").innerText), null, { timeout: 5000 });
+  await page.press("#search", "ArrowDown");
+  for (let i = 0; i < 12; i++) await page.press("#search", "ArrowDown"); // the last row searches every record
+  await page.press("#search", "Enter");
+  await page.waitForFunction(() => location.hash.startsWith("#/search?q=Hartlee"), null, { timeout: 5000 });
+  await visit("#/search?q=portland", ["Daniel James Hartley", "Portland"]);
+  assert.ok(await page.locator(".search-hits mark").count() >= 1);
+  await visit("#/search?q=England", ["Eva comes to England"]);
+  await page.getByRole("button", { name: /^Stories/ }).click();
+  await page.waitForFunction(() => location.hash.includes("kind=story") && ![...document.querySelectorAll(".search-hits .badge")].some((b) => b.textContent === "Person"), null, { timeout: 5000 });
+  assert.ok((await page.locator(".search-hits > li").count()) >= 1);
 });
 test("person page", async () => {
   await visit("#/person/I5", ["Eva Novák", "Life events", "Eva comes to England"]);

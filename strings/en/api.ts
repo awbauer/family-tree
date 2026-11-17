@@ -338,6 +338,7 @@ export const api = {
 
   /** The MCP server (worker/mcp.js): JSON-RPC errors and tool errors an AI client shows its user. */
   mcp: {
+    tooLargeToEmbed: "This file is larger than 8 MB, so it isn't embedded. The member can open it from download_url while signed in to the site.",
     cards: {
       title: "Family tree records",
       open: "Open on family tree",

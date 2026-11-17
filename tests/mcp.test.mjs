@@ -188,6 +188,18 @@ test("search, person, family, timeline, events, surnames, places, sources", asyn
   assert.ok((await tool("list_data_issues")).data.total >= 1);
 });
 
+test("search_text finds facts, stories and name variants, and links each result", async () => {
+  const r = await tool("search_text", { query: "portland" });
+  assert.ok(r.data.results.some((h) => h.kind === "person" && h.id === "I2" && h.matched.some((m) => m.in === "fact")));
+  const st = (await tool("search_text", { query: "England", kinds: ["story"] })).data;
+  assert.ok(st.results.length && st.results.every((h) => h.kind === "story" && h.page_url.includes("#/story/")));
+  const alike = (await tool("search_text", { query: "Hartlee", kinds: ["person"] })).data.results;
+  assert.ok(alike.some((h) => h.id === "I2" && h.matched[0].how));
+  assert.equal((await tool("search_text", { query: "Hartlee", kinds: ["person"], variants: false })).data.total, 0);
+  assert.ok((await tool("search_people", { query: "Hartlee", sounds_like: true })).data.people.some((p) => p.id === "I2"));
+  assert.equal((await tool("search_people", { query: "Hartlee" })).data.total, 0);
+});
+
 // ---------------------------------------------------------------- scope: grants and views
 test("a member sees only their tree", async () => {
   const s = (await tool("search_people", {}, MEMBER)).data;
@@ -205,6 +217,9 @@ test("a names-only view gives living people as names only, through every tool", 
   assert.deepEqual(s.people.find((x) => x.id === "I2"), { id: "I2", name: "Daniel James Hartley", private: true, page_url: "https://tree.example.test/?tree=all#/person/I2" });
   assert.ok(!(await tool("search_events", {}, NAMES)).data.events.some((e) => e.person && ["I1", "I2", "I3", "I16"].includes(e.person.id)));
   assert.equal((await tool("get_timeline", { id: "I2" }, NAMES)).data.events.length, 0);
+  // text search finds them by name only, never by a fact their view hides
+  assert.ok(!(await tool("search_text", { query: "portland" }, NAMES)).data.results.some((h) => h.id === "I2"));
+  assert.deepEqual((await tool("search_text", { query: "Daniel Hartley" }, NAMES)).data.results.find((h) => h.id === "I2")?.private, true);
   // the owner (full view) sees them in full, living or not
   assert.ok((await tool("get_person", { id: "I1" })).data.birth);
 });
@@ -359,6 +374,11 @@ test("one report or attachment can be linked to several people, and unlinked fro
   assert.equal(off.error, false, JSON.stringify(off.data));
   assert.ok(!(await tool("list_attachments", { person: "I1" }, EDITOR)).data.attachments.some((m) => m.file === file));
   assert.equal((await tool("get_report", { file }, EDITOR)).data.markdown, markdown);
+  // text files come back as text, not as an embedded file
+  const note = await tool("add_attachment", { person: "I2", name: "Example notes.csv", data_base64: Buffer.from("a,b\n1,2\n").toString("base64") }, EDITOR);
+  const read = await tool("get_attachment", { file: note.data.file }, EDITOR);
+  assert.equal(read.content[0].type, "text");
+  assert.equal(read.data.text, "a,b\n1,2\n");
   // a member can suggest linking a shared document they can see; it waits for review
   const one = (await call("GET", "/api/tree?tree=one", { as: MEMBER })).data.people;
   const [a, b] = Object.values(one).filter((p) => !p.private && !p.living).map((p) => p.id);
@@ -388,7 +408,7 @@ test("MCP Apps resource is available and record cards preserve the selected tree
   const person = await tool("get_person", { id: "I4", tree: "one" }, MEMBER);
   assert.equal(person.data.page_url, "https://tree.example.test/?tree=one#/person/I4");
   assert.equal(person.cards[0].page_url, person.data.page_url);
-  assert.equal(person.content.find((item) => item.type === "resource_link").uri, person.data.page_url);
+  assert.ok(!person.content.some((item) => item.type === "resource_link" || item.type === "resource"), "record tools return no file-like content");
   assert.match(person.data.events[0].page_url, /#\/person\/I4\?fact=e\d+$/);
   const restricted = await tool("get_person", { id: "I1" }, NAMES);
   assert.equal(restricted.cards.length, 1);
