@@ -1,126 +1,144 @@
-# Family Tree App
+# Family Tree
 
-A private family-history site you run on your own Cloudflare account. You keep your tree in Ancestry, Gramps or anything else that exports **GEDCOM**. This project turns that export, plus your own research notes, into an interactive site:
+**A private family-history site that runs on your own Cloudflare account.** Bring a GEDCOM export from Ancestry, Gramps, MyHeritage or FamilySearch. You get an interactive tree, a page for every person, stories, a map, and a research workflow that tracks what's actually been proven, all visible only to the relatives you invite.
 
-- **Interactive tree:** pan and zoom through ancestor and descendant charts, plus a fan chart on the home page.
-- **Person pages:** life timeline with historical context, family links, footnoted sources, and research findings.
-- **Verification tracking:** each person is *verified*, *partly verified*, *unverified* or *disputed*, with notes.
-- **Automatic data checks:** duplicates, people attached to two sets of parents, impossible ages, misfiled Ancestry events, anachronistic places, malformed dates.
-- **Stories, a map of where everyone lived, a timeline, a research to-do list, and a source index.** Each source has its own page with every fact that cites it; editors can correct, merge or remove sources there.
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/awbauer/family-tree)
 
-**Your family data never goes in this repository.** The repo holds only code and a fictional example family. Your GEDCOM and research files live in a git-ignored folder on your machine. The built data is loaded into a **Cloudflare D1** database, and photos go into **R2**. The Worker serves data only to people signed in through **Cloudflare Access**, and without Access configured it refuses.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/home-dark.png">
+  <img alt="Home page of the fictional Hartley family: a five-generation fan chart beside the family's four grandparent lines" src="docs/screenshots/home.png">
+</picture>
 
-```
-web/             the web app: React + TypeScript (Vite), built to dist/site; contains no family data
-worker/          Cloudflare Worker: serves /api/tree from D1, /media/* from R2, checks Access JWTs
-tools/
-  build.py       GEDCOM + research.json → build/family.json + build/seed.sql
-  serve.py       local preview (http://localhost:8000) without Cloudflare
-  merge_research.py  validate + merge a research batch into research.json
-  check_privacy.py   pre-commit guard against leaking family data
-AGENTS.md, docs/agents/  instructions for AI agents (CLAUDE.md imports AGENTS.md)
-example/         a fictional family to try it out and to copy from
-family-data/     ← YOUR private data (git-ignored): *.ged, research.json, places.json, media/
-```
+<sub>Every screenshot shows the fictional example family in [`example/`](example). No real people appear in this repository.</sub>
 
-## Try it
+## What you get
+
+- **Explore the family.** A fan chart, pan-and-zoom ancestor and descendant charts, a page per person with a life timeline and footnoted sources, plus stories, a map of where everyone lived, and a timeline set against history.
+- **Research you can trust.** Every person is *verified*, *partly verified*, *unverified* or *disputed*. Findings carry their sources and a confidence level, and searches that found nothing are logged too. Automatic checks catch duplicates, people with two sets of parents, impossible ages, misfiled Ancestry events and anachronistic places.
+- **Edit together, safely.** Editors change the tree in the app. Every change records who, why and its sources, and can be undone. Relatives without edit rights suggest changes for review. Each relative gets a *view*, which decides how much of living people they see (full, names only, anonymous or hidden).
+- **Search built for genealogy.** Search every name, fact, note, citation and story. Name matching handles spelling variants and sound-alikes (Daitch–Mokotoff Soundex), which helps with Central and Eastern European names.
+- **AI that helps without inventing.** There are optional research agents, a page assistant, and an MCP server so relatives can use the tree from their own AI clients. They work through the same permissions as people do, and their work goes to review rather than straight into the tree.
+- **Your data stays yours.** It lives in your D1 database and R2 bucket. You can export it as GEDCOM 5.5.1, GEDCOM X or JSON at any time.
+
+## A closer look
+
+| | |
+|---|---|
+| ![Ancestor chart: five generations from Sam Hartley, colour-coded by grandparent line](docs/screenshots/tree.png) | ![Person page for Eva Novák: vital facts, family and a family graph](docs/screenshots/person.png) |
+| **Tree.** Pan, zoom and re-centre on anyone; colours follow the four grandparent lines. | **Person.** Facts, family, story links, a family graph, then life events, research and sources. |
+| ![A story page: "Eva comes to England", with linked people and a sources list](docs/screenshots/story.png) | ![Map of where the family lived, with journeys drawn between birth and death places](docs/screenshots/map.png) |
+| **Stories.** Narratives that link people and list the sources they rest on. | **Map.** Where everyone lived, and the journeys between birth and death places. |
+| ![Research findings: a conflict, a new fact and a confirmation, each with confidence and sources](docs/screenshots/research.png) | ![Search results for "novak" across people, stories and to-dos](docs/screenshots/search.png) |
+| **Research.** Findings, data problems, to-dos, suggestions and verification in one place. | **Search.** Across everything you can see, with matches highlighted. |
+
+<p align="center">
+  <img alt="Home page on a phone" src="docs/screenshots/mobile-home.png" width="260">
+  &nbsp;&nbsp;
+  <img alt="Person page on a phone" src="docs/screenshots/mobile-person.png" width="260">
+</p>
+
+## Try it locally (two minutes)
+
+You need **Node 26** (25 or later works) and **Python 3.9+**. No Cloudflare account is needed.
 
 ```sh
-python3 tools/build.py --data example      # builds build/ from the fictional family
-python3 tools/serve.py --data example      # http://localhost:8000
+git clone https://github.com/awbauer/family-tree && cd family-tree
+npm install
+npm run build:web
+npm run dev:example          # http://localhost:8790, the real Worker on the fictional family, signed in as the owner
 ```
-
-Requires Python 3.9+ only. No pip packages.
-
-## Use it for your family
-
-1. Export a GEDCOM from your tree software (Ancestry: *Trees → Tree settings → Export tree*).
-2. `mkdir family-data` and put the `.ged` file in it. Copy `example/research.json` and `example/places.json` alongside it and edit them: set `home_person` (your GEDCOM ID, e.g. `I123`), name your grandparent `branches`, and set the `site` title.
-3. `python3 tools/build.py && python3 tools/serve.py`. The build prints places missing from the map and a summary of data problems.
-
-`family-data/` and `build/` are git-ignored. Keep a backup of `family-data/` somewhere private (a private repo, iCloud/Drive, or R2), because it's the only copy of your research.
 
 ## Deploy to Cloudflare
 
-You need a Cloudflare account, a domain on Cloudflare, and Node 18+.
+### One click
+
+The **Deploy to Cloudflare** button above:
+
+- copies this repository into your GitHub or GitLab account;
+- creates the D1 database, the R2 bucket and the Durable Objects for the agents;
+- builds the site and deploys the Worker;
+- connects your copy to Workers Builds, so every push to your copy redeploys and applies new database migrations (`npm run deploy`).
+
+The site starts **locked**. Until Cloudflare Access is set up, the Worker refuses to serve any family data, and it has no public `workers.dev` URL. Then do this once:
+
+1. **Give it a hostname.** In Workers & Pages → *family-tree* (or the name you chose) → Settings → Domains & Routes, add a custom domain such as `family.example.com`. The domain must be on Cloudflare.
+2. **Turn on Access.** In Workers & Pages → *family-tree* → **Access**, add a policy that allows your family's email addresses. Copy the application's **AUD tag**. (A self-hosted Access application for the hostname also works: see [Which Access setup](docs/agents/operations.md#deployment-considerations-how-the-worker-checks-access).)
+3. **Tell the Worker.** In Settings → Variables and Secrets, add three text variables:
+   - `ACCESS_TEAM_DOMAIN`: your team domain, `<team>.cloudflareaccess.com`
+   - `ACCESS_AUD`: the AUD tag
+   - `OWNER_EMAIL`: your email address
+
+   Deploys keep these, because `keep_vars` is on.
+4. **Load your tree** (below), then open your hostname and sign in.
+
+### Load your tree
+
+Run the import once from your own copy of the repo. Afterwards the app is the source of truth: you edit there, and changes from a later Ancestry export arrive as suggestions (`tools/import_hints.py`).
 
 ```sh
-npm install                                   # also enables the privacy git hooks
+git clone <your copy> && cd family-tree && npm install
 npx wrangler login
-cp wrangler.jsonc wrangler.local.jsonc        # git-ignored; your real IDs go here, never in wrangler.jsonc
-npx wrangler d1 create family-tree            # copy the database_id into wrangler.local.jsonc
-npx wrangler r2 bucket create family-tree-media   # optional, for photos
-python3 tools/build.py
-npm run db:load                                # loads build/seed.sql into D1 (full replace)
-npm run db:counts                              # check people / families / findings
+cp wrangler.jsonc wrangler.local.jsonc          # your copy already has your database id; npm scripts read this file
+mkdir family-data                               # git-ignored: your private data lives here
+cp example/research.json example/places.json family-data/
+# put your .ged export in family-data/, then edit research.json: site title, home_person (your GEDCOM id), branches
+python3 tools/build.py --raw-out build/raw.json # prints counts, unmatched places and data problems
+python3 tools/seed_app.py --owner you@example.com --cutover
+npm run db:import                               # loads into D1; refuses once the app owns the data
 ```
 
-All npm scripts pass `-c wrangler.local.jsonc`, so the tracked `wrangler.jsonc` stays a placeholder template. To deploy automatically on every push from Cloudflare (Workers Builds), see [operations.md → Automatic deploys](docs/agents/operations.md#automatic-deploys-from-github-workers-builds). Runtime variables (Access settings, owner email) are set in the dashboard and survive deploys.
+The file formats are in [docs/data-format.md](docs/data-format.md). Photos go in the R2 bucket; see [Photos](docs/agents/operations.md#photos-r2).
 
-Then protect it with **Cloudflare Access** (Zero Trust → Access → Applications → *Self-hosted*):
+### By hand
 
-1. Create an application for the hostname you'll use (e.g. `family.example.com`) and add a policy allowing your family's emails.
-2. Copy the application's **Audience (AUD) tag** and your **team domain** (`<team>.cloudflareaccess.com`) into the `ACCESS_AUD` and `ACCESS_TEAM_DOMAIN` variables in the dashboard (Workers & Pages → family-tree → Settings → Variables and Secrets). Deploys keep them (`keep_vars`).
-3. Add the hostname as a custom domain for the Worker (Workers → family-tree → Settings → Domains), then run `npm run deploy`.
+Prefer the command line, or want to deploy from the original repository? [docs/agents/operations.md](docs/agents/operations.md) covers manual setup with `wrangler.local.jsonc`, automatic deploys with Workers Builds, migrations, invites, backups and restore.
 
-Prefer **Worker-level Access** (Workers & Pages → family-tree → Access), which covers every domain and preview URL the Worker has. Why the Worker still checks the JWT itself instead of using `ctx.access` is explained in [docs/agents/operations.md → Deployment considerations](docs/agents/operations.md#deployment-considerations-how-the-worker-checks-access).
+### What it costs
 
-`workers_dev` is off, so the only way in is the Access-protected domain. Even if it were on, the Worker verifies the Access JWT itself (signature, audience, issuer, expiry) and answers **403** to anything else. The static app shell is public-safe because it contains no data.
+A family-sized tree fits comfortably within Cloudflare's free allowances for Workers, D1 and R2. The AI features are optional and run on Workers AI, billed to your account; some of the default models need the Workers Paid plan. Model choices and prices are in [docs/agents/models.md](docs/agents/models.md).
 
-**Making the app the source of truth (recommended once you're happy with the import):** see [docs/agents/operations.md → Cutover](docs/agents/operations.md#cutover-the-app-becomes-the-source-of-truth-one-time). After cutover, people edit, assign to-dos and review suggestions in the app; the steps below are for the import phase only.
+## How it fits together
 
-**Updating (import phase):** re-export the GEDCOM → `python3 tools/build.py` → `npm run db:load`. The load replaces everything, and research survives because it lives in `research.json`, keyed by GEDCOM IDs (Ancestry keeps them stable across exports). If you merge two people in your tree software, move research from the vanished ID to the survivor.
+```
+ browser ──▶ Cloudflare Access ──▶ Worker (worker/)
+                 (who you are)        ├─ site: React app (web/ → dist/site), static, holds no data
+                                      ├─ /api, /media, /mcp: checks the Access token itself, then your grants
+                                      ├─ D1: the tree, research, edit history      (migrations/)
+                                      ├─ R2: photos, documents, reports
+                                      └─ Durable Objects + Workers AI: the agents  (agents/)
+```
 
-**Photos:** `npx wrangler r2 object put family-tree-media/photos/grandma.jpg --file grandma.jpg --remote`, then add `"I123": [{"file": "photos/grandma.jpg", "portrait": true, "caption": "…"}]` under `media` in `research.json`. For local preview, put the same files in `family-data/media/photos/`.
+- **Fails closed.** The Worker verifies the Access JWT itself (signature, audience, issuer, expiry), so a missing or misconfigured Access policy publishes nothing. Without `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`, every data request gets a 403.
+- **Per-person permissions.** Owners see everything. Everyone else needs a grant to a tree, as an editor, member or agent, with a view that decides how much of living people they see.
+- **Private by design.** Living relatives' details never leave your account. This repository holds code and a fictional family only, and a pre-commit hook (`tools/check_privacy.py`) blocks private data from being committed.
 
-**Local Worker:** `npm run db:load:local` then `npm run dev`. Create a git-ignored `.dev.vars` containing `ALLOW_UNAUTHENTICATED=true` to skip the Access check locally. Never set that in production.
+## Documentation
 
-## research.json
-
-| key | what |
+| | |
 |---|---|
-| `site` | `title`, `familyName`, `mark` (logo letter), `eyebrow`, `lede` |
-| `home_person`, `core_people` | whose tree it is; the people (you, parents, siblings) who sit above the branches |
-| `branches` | `[{key, root, label, tagline, color, intro, inLaw?}]`: one per grandparent line, rooted at the grandparent. `inLaw: true` for a spouse's family |
-| `people_status` | `{id: {status: verified / partly-verified / unverified / disputed, note}}` |
-| `findings` | `{person, kind: confirmed / correction / conflict / data-error / new-fact / new-person, field, claim, finding, confidence, sources: [{title, url, note}]}` |
-| `stories` | `{slug, title, branch, era, people, body, sources}`. In `body`, paragraphs are separated by blank lines; `[[I123\|label]]` links a person, and `**bold**`, `*italic*` and `## heading` work |
-| `todo` | `{person, task, where, priority: high / medium / low}` |
-| `context` | historical events for timelines: `{year, month, title, text, branches?, places?}` |
-| `duplicates` | `[{ids: [a, b], note}]` flags probable duplicates on each profile |
-| `overrides` | display-only fixes `{id: {sex, name: {given, surname}, living}}`. Prefer fixing the tree itself |
-| `place_rules` | `[{pattern, before, message}]` flags anachronistic place names |
-| `methodology` | text for the Research overview |
+| [docs/agents/operations.md](docs/agents/operations.md) | Setup, deploys, Access, invites, migrations, photos, export, restore |
+| [docs/data-format.md](docs/data-format.md) | `research.json` and `places.json` |
+| [docs/agents/research-protocol.md](docs/agents/research-protocol.md) | How research is done, weighed, cited and recorded |
+| [docs/agents/models.md](docs/agents/models.md) | Which AI model each agent uses, and why |
+| [docs/design/](docs/design) | Data model and standards (GEDCOM X), edit operations, source of truth |
+| [AGENTS.md](AGENTS.md) | Rules for AI coding and research agents working in this repo |
 
-| `todo_done` | closed to-dos with their `outcome` (written by `merge_research.py`) |
-| `research_log` | every search tried, including nil results, so nobody repeats it (written by `merge_research.py`) |
+## Working on the code
 
-Don't hand-edit findings, statuses, to-dos or media. Write a **batch** file (see `example/batch-example.json`) and run `tools/merge_research.py --check batch.json`, then `tools/merge_research.py batch.json`. The merge checks that every person ID exists in your GEDCOM and every finding has a citation, and it's safe to re-run.
+```sh
+npm run dev:example     # the Worker on the fictional family (port 8790)
+npm run dev:web         # Vite with hot reload on http://localhost:5173, proxying /api to the line above
+npm test                # unit tests (also: npm run test:gedcomx, npm run eval:agents)
+npm run typecheck
+npm run test:e2e        # every page in a real browser (Playwright)
+npm run screenshots     # regenerate docs/screenshots from the example family
+```
 
-## Working with AI agents
-
-The repo is set up for agents (Claude Code, Codex, Cursor and others) to do both code work and research:
-
-- **[AGENTS.md](AGENTS.md)**: the rules every agent follows (privacy, no invented records, what needs your OK). `CLAUDE.md` imports it.
-- **[docs/agents/research-protocol.md](docs/agents/research-protocol.md)**: how to research, weigh evidence, cite, and record results as batches.
-- **[docs/agents/operations.md](docs/agents/operations.md)**: build, load, deploy, Access, photos, restore.
-- **`.claude/skills/`**: `research` and `publish` skills for Claude Code. **`.claude/settings.json`** asks before remote loads, deploys and pushes.
-- **`tools/check_privacy.py`** runs as a pre-commit and commit-msg hook. It blocks private paths, Cloudflare IDs, and the full name of anyone in your private GEDCOM. Run it on PR text too: `echo "$BODY" | python3 tools/check_privacy.py --file -`.
-
-**Your family's own AI tools:** the site is also an MCP server at `/mcp`. Each relative adds it to Claude (or any MCP client), signs in through Access, and works with the trees they're shared, through their own view and role: search, pedigrees, relationships, timelines, sources, research, suggestions, and for editors, edits. Setup: [operations.md → MCP server](docs/agents/operations.md#mcp-server-members-own-ai-clients).
-
-To run several research agents at once, give each one a branch. Each writes its own `family-data/batches/<date>-<branch>-<agent>.json`, and one person or agent merges them.
-
-## places.json
-
-The map groups raw GEDCOM place strings into canonical places using regexes: `{"key", "name", "lat", "lng", "match": ["regex", …]}`, where the first match wins. The build lists any places that didn't match.
-
-## Privacy notes
-
-- The site shows living people. Access is what protects them; `noindex` is just belt and braces.
-- `web/public/.assetsignore` keeps a stray `family.json` from being uploaded as a public static file.
-- GEDCOM, `family-data/`, `build/`, `wrangler.local.jsonc` and `.dev.vars` are git-ignored, and the pre-commit hook blocks them even with `git add -f`. Check `git status` before you push anyway.
+- The site is React and TypeScript in `web/src`. The Worker is plain ES modules in `worker/`. The Python tools in `tools/` use only the standard library.
+- All user-facing text lives in `strings/` (`npm run check:strings`).
+- Test against the fictional family in `example/`, never against real data. [AGENTS.md](AGENTS.md) has the full conventions.
+- `npm install` turns on git hooks that block private data from commits. Don't bypass them.
 
 ## License
 
-MIT
+[MIT](LICENSE)

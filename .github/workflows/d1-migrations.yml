@@ -49,8 +49,8 @@ jobs:
       - name: Generate Wrangler config
         run: node tools/ci_config.mjs
       - name: Pending migrations
-        run: npx wrangler d1 migrations list family-tree -c wrangler.ci.jsonc --remote
+        run: npx wrangler d1 migrations list DB -c wrangler.ci.jsonc --remote
       - name: Apply migrations
-        run: npx wrangler d1 migrations apply family-tree -c wrangler.ci.jsonc --remote
+        run: npx wrangler d1 migrations apply DB -c wrangler.ci.jsonc --remote
         env:
           CI: "true"

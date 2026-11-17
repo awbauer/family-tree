@@ -21,7 +21,7 @@ export function classify(code, text) {
 
 const started = Date.now();
 for (;;) {
-  const r = spawnSync(bin, [...args, "d1", "migrations", "list", "family-tree", "-c", config, "--remote"], { encoding: "utf8", env: { ...process.env, CI: "true" } });
+  const r = spawnSync(bin, [...args, "d1", "migrations", "list", "DB", "-c", config, "--remote"], { encoding: "utf8", env: { ...process.env, CI: "true" } });
   const out = `${r.stdout || ""}\n${r.stderr || ""}`;
   const state = classify(r.status, out);
   if (state === "none") { console.log("wait_migrations: database schema is current"); process.exit(0); }

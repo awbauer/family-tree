@@ -256,7 +256,7 @@ test("stories: an out-of-date story becomes a suggested revision; approving it u
   const up = await Content.saveStoryVerdict(env, story.slug, { hash: prep.hash, up_to_date: true, reason: "", title: story.title, body: story.body });
   assert.equal(up.up_to_date, true);
   assert.ok(!(await Content.planContent(env, { limit: 500 })).some((i) => i.kind === "story" && i.id === story.slug), "checked stories leave the plan");
-  const body = story.body.replace("This is an example story.", "This is an example story, revised.");
+  const body = `${story.body}\n\nThis paragraph was revised after a date changed.`;
   const r = await Content.saveStoryVerdict(env, story.slug, { hash: prep.hash, up_to_date: false, reason: "A date changed.", title: story.title, body });
   assert.ok(r.proposal);
   assert.ok((await Content.prepareStory(env, story.slug)).skipped, "no second revision while one is waiting");
