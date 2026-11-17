@@ -4,6 +4,8 @@ Everything here runs from the repo root. Commands marked **⚠ ask** change shar
 
 ## One-time setup (per machine)
 
+Deployed with the **Deploy to Cloudflare** button? Your copy of the repo already has your database id in `wrangler.jsonc`, so `cp wrangler.jsonc wrangler.local.jsonc` is all the filling-in it needs. See [Deploy to Cloudflare button](#deploy-to-cloudflare-button) for what the button set up.
+
 ```sh
 npm install                       # installs wrangler and enables the privacy git hooks
 npx wrangler login
@@ -57,7 +59,32 @@ If you ever move off Static Assets (for example, the Worker serves the built `di
 - **Hostname-based Access** (Zero Trust → Access → Applications → Self-hosted) protects only the hostnames you list. Use it if you need WebSockets: Worker-level policies currently reject WebSocket upgrades with 403, which matters if you later add a live agent chat to the site.
 - Either way, keep the JWT check in the Worker. Access at the edge is the gate, and the Worker's own check is defense in depth that fails closed.
 
+## Deploy to Cloudflare button
+
+The README's button copies the repo into the user's GitHub or GitLab account, provisions the D1 database, the R2 bucket and the agents' Durable Objects from `wrangler.jsonc`, writes the new database id into **their copy** of `wrangler.jsonc`, and connects that copy to Workers Builds with:
+
+- **Build command:** `npm run build` (the site and the agents)
+- **Deploy command:** `npm run deploy`, which runs `tools/deploy.mjs`
+
+`tools/deploy.mjs` chooses what to do from where it runs:
+
+| Where | What `npm run deploy` does |
+|---|---|
+| Your machine, with `wrangler.local.jsonc` | Builds, then `wrangler deploy -c wrangler.local.jsonc`. Migrations stay a separate, deliberate step (`npm run db:migrate`). |
+| A button copy in Workers Builds (no `wrangler.local.jsonc`) | `wrangler d1 migrations apply DB --remote`, then `wrangler deploy`. Every push applies its own migrations, so no GitHub Action is needed. |
+| Neither (the template's all-zero placeholder id, no local config) | Stops with instructions instead of deploying. |
+
+How the template keeps this working:
+- The tracked `wrangler.jsonc` keeps `database_id` set to the all-zero UUID, which the button replaces. The privacy hook allows exactly that value.
+- Scripts address the database by its binding, `DB`, never by name, so a database renamed on the button's configure page still works.
+- `package.json → cloudflare.bindings` holds the descriptions shown on that page.
+- `tests/deploy.test.mjs` checks all of this.
+
+After deploying, the site is locked until Access and the variables are set; the README lists the four steps.
+
 ## Automatic deploys from GitHub (Workers Builds)
+
+(This section is for a Worker you connected to Workers Builds yourself. A copy made by the Deploy button is already connected and uses `npm run deploy`, described above.)
 
 Cloudflare builds and deploys the Worker on every push to `main`; no GitHub Actions. **Status: connected** (trigger on `main` only, build command empty, deploy command `npm run deploy:ci`, `D1_DATABASE_ID` build variable set). Check builds in Workers & Pages → family-tree → Deployments. The repo holds no account IDs, so the build generates its config: `npm run deploy:ci` runs `tools/ci_config.mjs`, which writes `wrangler.ci.jsonc` (git-ignored) from the `wrangler.jsonc` template with your D1 id. It never includes `vars` and always sets `keep_vars`, so **variables you set in the dashboard survive every deploy**. Secrets are never touched by deploys either way.
 

@@ -14,7 +14,7 @@ import sys
 
 def main(argv):
     where = "--local" if "--local" in argv else "--remote"
-    cmd = ["npx", "wrangler", "d1", "execute", "family-tree", "-c", "wrangler.local.jsonc", where, "--json",
+    cmd = ["npx", "wrangler", "d1", "execute", "DB", "-c", "wrangler.local.jsonc", where, "--json",
            "--command", "SELECT key, value FROM meta WHERE key IN ('source_of_truth', 'storage')"]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=120)

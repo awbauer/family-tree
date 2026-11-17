@@ -12,7 +12,7 @@ Inputs (in the --data folder; keep it OUT of git):
 Outputs (in --out):
   family.json     the whole bundle the app renders (used by tools/serve.py for local preview)
   seed.sql        full-replace load for Cloudflare D1:
-                  npx wrangler d1 execute family-tree --remote --file build/seed.sql
+                  npm run db:load
 """
 import json
 import re

@@ -43,6 +43,8 @@ ID_PATTERNS = [
     (re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I), "UUID (D1 database_id?)"),
     (re.compile(r"\b[0-9a-f]{64}\b", re.I), "64-hex string (Access AUD tag?)"),
 ]
+# The all-zero UUID is the template's placeholder database_id (wrangler.jsonc): obviously not a real account's id.
+PLACEHOLDER_IDS = {"00000000-0000-0000-0000-000000000000"}
 # Files whose content is allowed to contain hashes/ids (lockfiles carry integrity hashes, not UUIDs, but be safe).
 CONTENT_EXEMPT = re.compile(r"(^|/)package-lock\.json$")
 
@@ -174,6 +176,8 @@ def scan_text(text, where, names_re, places=None):
             problems.append(f"{where}: ID (or ID prefix) from your private tree: {tok!r}")
     for pat, why in ID_PATTERNS:
         for m in pat.finditer(text):
+            if m.group(0) in PLACEHOLDER_IDS:
+                continue
             problems.append(f"{where}: {why}: {m.group(0)[:12]}…")
     if names_re:
         for m in names_re.finditer(text):

@@ -47,10 +47,11 @@ jobs:
             [ -n "${!v}" ] || { echo "::error::Missing repository secret $v"; exit 1; }
           done
       - name: Generate Wrangler config
-        run: node tools/ci_config.mjs
+        # --d1-only: this token can only touch D1, and Durable Object migrations don't apply here.
+        run: node tools/ci_config.mjs --d1-only
       - name: Pending migrations
-        run: npx wrangler d1 migrations list family-tree -c wrangler.ci.jsonc --remote
+        run: npx wrangler d1 migrations list DB -c wrangler.ci.jsonc --remote
       - name: Apply migrations
-        run: npx wrangler d1 migrations apply family-tree -c wrangler.ci.jsonc --remote
+        run: npx wrangler d1 migrations apply DB -c wrangler.ci.jsonc --remote
         env:
           CI: "true"

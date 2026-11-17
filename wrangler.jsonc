@@ -22,7 +22,9 @@
       "binding": "DB",
       "database_name": "family-tree",
       "migrations_dir": "migrations",
-      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+      // Placeholder. The Deploy to Cloudflare button creates a database and writes its id into your copy of the
+      // repo; manual setups put the real id in the git-ignored wrangler.local.jsonc instead.
+      "database_id": "00000000-0000-0000-0000-000000000000"
     }
   ],
   "r2_buckets": [

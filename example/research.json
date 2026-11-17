@@ -37,8 +37,8 @@
   ],
   "stories": [
     {"slug": "eva-comes-to-england", "title": "Eva comes to England", "branch": "novak", "era": "1948", "people": ["I5", "I10", "I11"],
-     "body": "This is an example story. Stories are plain paragraphs separated by blank lines, and can link people like [[I5|Eva Novák]] or [[I4]].\n\n## Headings work too\n\nUse **bold** and *italic* for emphasis. List the sources you relied on in the story's sources array.",
-     "sources": [{"title": "Interview with Ana Costa, 2019 (example)"}]}
+     "body": "[[I5|Eva Novák]] was fourteen when she left Plzeň in the spring of 1948, a few weeks after the February coup that brought the Communist Party to power in Czechoslovakia. She travelled alone, with an address in Leeds written inside the cover of her school atlas.\n\nHer mother, [[I11|Marie Dvořák]], stayed behind. What happened to her father, [[I10|Josef Novák]], is the open question of this branch: the family has always said he died in 1944, but a letter Eva kept, dated 1946, speaks of him as alive.\n\n## A new life in Yorkshire\n\nIn Leeds Eva lodged with a family from the same parish, learned English from the wireless and found work in a clothing factory. In 1958 she married [[I4|George Hartley]], a tram conductor, and she never went back to Plzeň.\n\n*This family is fictional.* The story shows how a page reads: people are linked, the open question points at a to-do, and every story lists the sources it rests on.",
+     "sources": [{"title": "Interview with Ana Costa, 2019 (example)", "note": "Eva's journey, her lodgings and work in Leeds"}, {"title": "Letter from Plzeň, 1946 (example)", "note": "Mentions Josef as living; see the conflict finding on his page"}]}
   ],
   "todo": [
     {"person": "I10", "task": "Find Josef Novák's death record in the Plzeň parish or civil registers.", "where": "Czech regional archive online registers (e.g. https://www.portafontium.eu/)", "priority": "high"},
