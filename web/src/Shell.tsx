@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router";
 import { store, useData } from "./data";
 import { Chat } from "./Chat";
-import { isUnknown, norm, useSite, years } from "./lib";
+import { isUnknown, useSite, years } from "./lib";
+import { indexFor, search } from "./search";
 import { S } from "../../strings/index.ts";
 
 const T = S.common.shell;
@@ -24,37 +25,39 @@ function BranchColors() {
 }
 
 function Search() {
-  const { people, branches } = useData();
+  const { D, branches } = useData();
   const [q, setQ] = useState(""), [open, setOpen] = useState(false), [sel, setSel] = useState(-1);
   const navigate = useNavigate();
   const box = useRef<HTMLDivElement>(null);
-  const index = useMemo(() => people.filter((p) => !isUnknown(p)).map((p) => ({ p, key: norm(p.names.map((n) => `${n.given} ${n.surname}`).join(" | ")) })), [people]);
-  const hits = useMemo(() => {
-    const t = norm(q.trim());
-    if (!t) return [];
-    const terms = t.split(/\s+/);
-    return index.filter((x) => terms.every((w) => x.key.includes(w))).slice(0, 12).map((x) => x.p);
-  }, [q, index]);
+  // Names first, including alternate names, spelling variants and sound-alikes; the last row searches every record.
+  const hits = useMemo(() => (q.trim() ? search(indexFor(D), q, { kinds: ["person"], namesOnly: true }) : [])
+    .filter((h) => !isUnknown(D.people[h.id])).slice(0, 10), [q, D]);
+  const allPath = `/search?q=${encodeURIComponent(q.trim())}`;
   useEffect(() => {
     const close = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false); };
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, []);
-  const go = (id: string) => { setQ(""); setOpen(false); setSel(-1); navigate(`/person/${id}`); };
+  const go = (path: string) => { setQ(""); setOpen(false); setSel(-1); navigate(path); };
   return (
     <div className="search" ref={box}>
       <input id="search" type="search" placeholder={T.search.placeholder} autoComplete="off" aria-label={T.search.label} value={q}
         onChange={(e) => { setQ(e.target.value); setOpen(true); setSel(-1); }}
         onKeyDown={(e) => {
-          if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setSel((s) => Math.max(0, Math.min(hits.length - 1, s + (e.key === "ArrowDown" ? 1 : -1)))); }
-          else if (e.key === "Enter" && hits.length) { go(hits[Math.max(0, sel)].id); (e.target as HTMLInputElement).blur(); }
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setSel((s) => Math.max(0, Math.min(hits.length, s + (e.key === "ArrowDown" ? 1 : -1)))); }
+          else if (e.key === "Enter" && q.trim()) { go(sel === hits.length || !hits.length ? allPath : `/person/${hits[Math.max(0, sel)].id}`); (e.target as HTMLInputElement).blur(); }
           else if (e.key === "Escape") setOpen(false);
         }} />
       <ul id="search-results" className="search-results" role="listbox" hidden={!open || !q.trim()}>
-        {hits.length ? hits.map((p, i) => (
-          <li key={p.id}><Link to={`/person/${p.id}`} className={i === sel ? "sel" : ""} onClick={() => { setQ(""); setOpen(false); }}>
-            {p.name}<span className="sr-meta">{years(p)} · {p.relation || (branches[p.branch || ""] || {}).label || ""}</span></Link></li>
-        )) : <li className="muted small" style={{ padding: 8 }}>{T.search.noMatches}</li>}
+        {hits.length ? hits.map((h, i) => {
+          const p = D.people[h.id], m = h.matches.find((x) => x.how !== "exact");
+          return (
+            <li key={h.id}><Link to={`/person/${h.id}`} className={i === sel ? "sel" : ""} onClick={() => { setQ(""); setOpen(false); }}>
+              {p.name}{m && m.word && <span className="sr-how"> · {T.search[m.how as "sounds" | "close"]} {m.word}</span>}
+              <span className="sr-meta">{years(p)} · {p.relation || (branches[p.branch || ""] || {}).label || ""}</span></Link></li>
+          );
+        }) : <li className="muted small" style={{ padding: 8 }}>{T.search.noMatches}</li>}
+        <li className="sr-all"><Link to={allPath} className={sel === hits.length ? "sel" : ""} onClick={() => { setQ(""); setOpen(false); }}>{T.search.all(q.trim())}</Link></li>
       </ul>
     </div>
   );

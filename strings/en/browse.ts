@@ -5,6 +5,23 @@ export const browse = {
   datesUnknown: "dates unknown",
   filters: { allBranches: "All branches", directOnly: "Direct ancestors only" },
   notFound: { title: "Not found", home: "Go home" },
+  // ---------------------------------------------------------------- search (web/src/pages/Search.tsx)
+  search: {
+    title: "Search",
+    label: "Search everything",
+    placeholder: "A name, place, word or \"a phrase\"",
+    hint: "Searches names (including spelling variants and names that sound alike), facts, places, notes, citations and transcriptions, stories, findings, to-dos and sources. Every word must appear in the same record; put a phrase in quotes.",
+    variants: "Include names that sound alike or are spelled close",
+    count: (n: number) => (n === 1 ? "1 record" : `${n} records`),
+    none: "Nothing matches all of those words.",
+    more: (n: number) => `Show ${n} more`,
+    all: "All",
+    kinds: { person: "People", story: "Stories", finding: "Findings", todo: "To-dos", source: "Sources" },
+    kind: { person: "Person", story: "Story", finding: "Finding", todo: "To-do", source: "Source" },
+    fields: { name: "name", fact: "fact", note: "note", citation: "citation", status: "research status", title: "title", text: "text", where: "where to look", outcome: "outcome" },
+    how: { sounds: (w: string) => `sounds like: ${w}`, close: (w: string) => `spelled close: ${w}` },
+    about: "about",
+  },
 
   home: {
     stats: { people: "People", directAncestors: "Direct ancestors", generations: "Generations", earliestBirth: "Earliest birth", citations: "Citations" },

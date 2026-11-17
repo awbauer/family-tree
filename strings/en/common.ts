@@ -11,7 +11,7 @@ export const common = {
     brand: "Family History",
     menu: "Menu",
     mainNav: "Main",
-    search: { placeholder: "Search people…", label: "Search people", noMatches: "No matches" },
+    search: { placeholder: "Search…", label: "Search people and records", noMatches: "No names match", all: (q: string) => `Search all records for “${q}” →`, sounds: "sounds like", close: "spelled close to" },
     theme: "Toggle dark mode",
     treeSwitch: "Family tree",
     preview: { before: "Previewing what someone with the view ", after: " sees.", exit: "Exit preview" },

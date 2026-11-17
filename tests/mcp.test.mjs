@@ -188,6 +188,18 @@ test("search, person, family, timeline, events, surnames, places, sources", asyn
   assert.ok((await tool("list_data_issues")).data.total >= 1);
 });
 
+test("search_text finds facts, stories and name variants, and links each result", async () => {
+  const r = await tool("search_text", { query: "portland" });
+  assert.ok(r.data.results.some((h) => h.kind === "person" && h.id === "I2" && h.matched.some((m) => m.in === "fact")));
+  const st = (await tool("search_text", { query: "England", kinds: ["story"] })).data;
+  assert.ok(st.results.length && st.results.every((h) => h.kind === "story" && h.page_url.includes("#/story/")));
+  const alike = (await tool("search_text", { query: "Hartlee", kinds: ["person"] })).data.results;
+  assert.ok(alike.some((h) => h.id === "I2" && h.matched[0].how));
+  assert.equal((await tool("search_text", { query: "Hartlee", kinds: ["person"], variants: false })).data.total, 0);
+  assert.ok((await tool("search_people", { query: "Hartlee", sounds_like: true })).data.people.some((p) => p.id === "I2"));
+  assert.equal((await tool("search_people", { query: "Hartlee" })).data.total, 0);
+});
+
 // ---------------------------------------------------------------- scope: grants and views
 test("a member sees only their tree", async () => {
   const s = (await tool("search_people", {}, MEMBER)).data;
@@ -205,6 +217,9 @@ test("a names-only view gives living people as names only, through every tool", 
   assert.deepEqual(s.people.find((x) => x.id === "I2"), { id: "I2", name: "Daniel James Hartley", private: true, page_url: "https://tree.example.test/?tree=all#/person/I2" });
   assert.ok(!(await tool("search_events", {}, NAMES)).data.events.some((e) => e.person && ["I1", "I2", "I3", "I16"].includes(e.person.id)));
   assert.equal((await tool("get_timeline", { id: "I2" }, NAMES)).data.events.length, 0);
+  // text search finds them by name only, never by a fact their view hides
+  assert.ok(!(await tool("search_text", { query: "portland" }, NAMES)).data.results.some((h) => h.id === "I2"));
+  assert.deepEqual((await tool("search_text", { query: "Daniel Hartley" }, NAMES)).data.results.find((h) => h.id === "I2")?.private, true);
   // the owner (full view) sees them in full, living or not
   assert.ok((await tool("get_person", { id: "I1" })).data.birth);
 });

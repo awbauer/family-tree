@@ -168,6 +168,14 @@ button { font: inherit; color: inherit; }
 .callout { border-left: 3px solid var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--card)); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 0 0 16px; }
 .callout.err { border-color: var(--err); background: color-mix(in srgb, var(--err) 8%, var(--card)); }
 .callout.ok { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, var(--card)); }
+.search-page { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 8px; }
+.search-page input[type=search] { flex: 1 1 280px; min-width: 0; padding: 9px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: 1rem; }
+.search-hits { list-style: none; padding: 0; margin: 0 0 16px; }
+.search-hits > li { padding: 12px 0; border-top: 1px solid var(--line); min-width: 0; overflow-wrap: anywhere; }
+.search-hits ul { list-style: none; margin: 6px 0 0; padding-left: 0; }
+.search-hits mark, .search-results mark { background: color-mix(in srgb, var(--warn) 30%, transparent); color: inherit; border-radius: 2px; }
+.search-results .sr-all { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 4px; }
+.search-results .sr-how { font-size: .75rem; color: var(--muted); }
 .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px; }
 .filters select, .filters input { padding: 7px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: .9rem; }
 table.data { width: 100%; border-collapse: collapse; font-size: .92rem; }
