@@ -21,7 +21,8 @@
   },
   "overrides": {
     "@earendil-works/pi-ai": "1.4.0",
-    "@earendil-works/pi-agent-core": "1.4.0"
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@modelcontextprotocol/client": "2.4.0"
   },
   "//": "Pi pinned to 1.4.0: Flue 2.3.0 imports an export Pi removed in 1.5. Lift the pin when Flue supports Pi 1.5."
 }

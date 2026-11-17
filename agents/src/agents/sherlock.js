@@ -7,7 +7,7 @@
 import { env } from "cloudflare:workers";
 import { useAgentFinish, useAgentStart, useInitialData, useModel, usePersistentState, useTool } from "@flue/runtime";
 import * as v from "valibot";
-import { scopedFor } from "../../../worker/bundle.js";
+import { scopedForRun } from "../../../worker/bundle.js";
 import { settings, compactAt, modelSpec } from "../../../worker/agent/config.js";
 import { loadRun, markRunning, logRun, recordRunUsage, endRun } from "../../../worker/agent/runs.js";
 import { personView, searchPeople, relationship } from "../../../worker/agent/tools.js";
@@ -53,7 +53,7 @@ export function Sherlock({ id }) {
     const run = await loadRun(env, runId);
     if (!run) throw new Error("This run no longer exists.");
     if (FINISHED.includes(run.status) && !(finishing && run.status === "succeeded")) throw new Error(`This run is ${run.status}. Stop working.`);
-    const sc = await scopedFor(env, run.started_by, run.tree_id);
+    const sc = await scopedForRun(env, run);
     if (!sc) throw new Error(`${run.started_by} no longer has access to this tree. Stop working.`);
     return { run, b: sc.bundle };
   }

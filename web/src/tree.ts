@@ -78,7 +78,14 @@ export function apidLink(apid?: string) {
 }
 const EVENT_LABEL: Record<string, string> = S.common.events;
 export const eventLabel = (e: { type: string }) => EVENT_LABEL[e.type] || e.type;
-export const mediaUrl = (f: string) => (/^(https?:)?\/\//.test(f) || f.startsWith("/") ? f : "media/" + f.replace(/^media\//, ""));
+export function mediaUrl(file: string, tree?: string | null, preview?: string | null) {
+  if (/^(https?:)?\/\//i.test(file)) return file;
+  const path = "media/" + file.replace(/^\/?media\//, "").split("/").map(encodeURIComponent).join("/");
+  const params = new URLSearchParams();
+  if (tree) params.set("tree", tree);
+  if (preview) params.set("preview_view", preview);
+  return params.size ? `${path}?${params}` : path;
+}
 export const initials = (p: Person) => (p.given[0] || "?") + (p.surname[0] || "");
 
 /** "me", "🤖 researcher" or the part of an email before the @. */

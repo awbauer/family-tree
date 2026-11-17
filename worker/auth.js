@@ -19,20 +19,23 @@ export async function identify(request, env, { extraAud = [] } = {}) {
   const token = request.headers.get("Cf-Access-Jwt-Assertion") || cookie(request, "CF_Authorization");
   if (!token) return { ok: false, error: S.api.auth.notSignedIn };
   try {
-    const [h64, p64, s64] = token.split(".");
+    const parts = token.split(".");
+    if (parts.length !== 3 || parts.some((part) => !part)) throw new Error("invalid token format");
+    const [h64, p64, s64] = parts;
     const header = JSON.parse(b64text(h64));
+    if (header.alg !== "RS256" || typeof header.kid !== "string" || !header.kid) throw new Error("invalid signing header");
     const payload = JSON.parse(b64text(p64));
     const t = Math.floor(Date.now() / 1000);
     const auds = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
     if (![aud, ...extraAud].some((a) => a && auds.includes(a))) throw new Error("audience mismatch");
     if (payload.iss !== `https://${team}`) throw new Error("issuer mismatch");
-    if (payload.exp && payload.exp < t) throw new Error("expired");
-    if (payload.nbf && payload.nbf > t + 60) throw new Error("not yet valid");
+    if (!Number.isSafeInteger(payload.exp) || payload.exp <= t) throw new Error("expired or missing expiration");
+    if (payload.nbf !== undefined && (!Number.isSafeInteger(payload.nbf) || payload.nbf > t + 60)) throw new Error("not yet valid");
     const key = await accessKey(team, header.kid);
     const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64bytes(s64), new TextEncoder().encode(`${h64}.${p64}`));
     if (!ok) throw new Error("bad signature");
-    if (payload.email) return { ok: true, principal: payload.email.toLowerCase(), kind: "person", email: payload.email };
-    if (payload.common_name) return { ok: true, principal: `service:${payload.common_name}`, kind: "agent" };
+    if (typeof payload.email === "string" && payload.email) return { ok: true, principal: payload.email.toLowerCase(), kind: "person", email: payload.email };
+    if (typeof payload.common_name === "string" && payload.common_name) return { ok: true, principal: `service:${payload.common_name.toLowerCase()}`, kind: "agent" };
     throw new Error("token has neither an email nor a service-token name");
   } catch (e) {
     return { ok: false, error: S.api.auth.invalidToken(e.message) };
@@ -44,8 +47,8 @@ export async function resolveAccess(env, ident) {
   const principal = ident.principal;
   const member = await env.DB.prepare("SELECT * FROM members WHERE principal = ?").bind(principal).first();
   const ownerEmails = (env.OWNER_EMAIL || "").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
-  const isOwner = ownerEmails.includes(principal) || !!(member && member.is_owner);
-  const kind = member ? member.kind : ident.kind;
+  const kind = ident.kind === "agent" || member?.kind === "agent" ? "agent" : "person";
+  const isOwner = kind === "person" && (ownerEmails.includes(principal) || !!member?.is_owner);
   const trees = (await env.DB.prepare("SELECT id, name, definition FROM trees ORDER BY rowid").all()).results;
   let grants;
   if (isOwner) {
@@ -59,7 +62,7 @@ export async function resolveAccess(env, ident) {
     principal, kind, isOwner,
     displayName: (member && member.display_name) || ident.email || principal,
     personId: (member && member.person_id) || null,
-    grants: grants.map((g) => ({ ...g, tree_name: treeById[g.tree_id].name })),
+    grants: grants.map((g) => ({ ...g, role: kind === "agent" ? "agent" : g.role, tree_name: treeById[g.tree_id].name })),
     treeById,
   };
 }
@@ -83,7 +86,8 @@ async function accessKey(team, kid) {
   if (!jwksCache.keys || jwksCache.team !== team || Date.now() - jwksCache.at > 3600_000 || !jwksCache.keys[kid]) {
     const res = await fetch(`https://${team}/cdn-cgi/access/certs`);
     const { keys } = await res.json();
-    const imported = {};
+    if (!res.ok || !Array.isArray(keys)) throw new Error("signing keys unavailable");
+    const imported = Object.create(null);
     for (const k of keys) imported[k.kid] = await crypto.subtle.importKey("jwk", k, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
     jwksCache = { at: Date.now(), keys: imported, team };
   }

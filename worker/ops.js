@@ -97,9 +97,9 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
     do { id = `N${prefix}${Date.now().toString(36)}${(counter.n++).toString(36)}`; } while (c[id]);
     return id;
   };
-  const alias = (id) => S.aliases[id] || id;
-  const P = (id, i) => { const x = S.people[alias(id)]; if (!x) throw new OpError(M.noPerson(id), i); return alias(id); };
-  const F = (id, i) => { if (!S.families[id]) throw new OpError(M.noFamily(id), i); return id; };
+  const alias = (id) => Object.hasOwn(S.aliases, id) ? S.aliases[id] : id;
+  const P = (id, i) => { if (!Object.hasOwn(S.people, alias(id))) throw new OpError(M.noPerson(id), i); return alias(id); };
+  const F = (id, i) => { if (!Object.hasOwn(S.families, id)) throw new OpError(M.noFamily(id), i); return id; };
   const entityOf = (o, i) => {
     if (o.entity === "person") return ["person", P(o.id, i)];
     if (o.entity === "family") return ["family", F(o.id, i)];
@@ -478,6 +478,7 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
 export function referencedIds(ops) {
   const people = new Set(), families = new Set();
   for (const o of ops || []) {
+    if (!o || typeof o.op !== "string") continue;
     if (String(o.op || "").startsWith("source.")) continue; // source ids, not people: see sourceIds
     for (const k of ["id", "person", "keep", "drop", "husband", "wife"]) {
       const v = o[k];
@@ -487,7 +488,7 @@ export function referencedIds(ops) {
       else if (k !== "id" || o.entity === "person" || o.op.startsWith("person.")) people.add(v);
     }
     if (o.family) families.add(o.family);
-    for (const c of o.children || []) if (!String(c).startsWith("$")) people.add(c);
+    for (const c of Array.isArray(o.children) ? o.children : []) if (typeof c === "string" && !c.startsWith("$")) people.add(c);
     if (o.op === "person.create" && o.id) people.delete(o.id);
   }
   return { people, families };

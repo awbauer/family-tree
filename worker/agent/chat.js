@@ -6,10 +6,11 @@
 // then does the site Worker apply it, through the same code path as a hand edit (history, provenance, undo), logged as
 // made by the assistant on the editor's behalf.
 import { J, now, parse } from "../db.js";
-import { scopedFor } from "../bundle.js";
+import { scopedFor, canReadDisclosure } from "../bundle.js";
 import { can } from "../auth.js";
 import { referencedIds, applyOps, OpError, editsPersonStatus, documentSource } from "../ops.js";
 import { S } from "../../strings/index.ts";
+import { editScopeError } from "../edit-access.js";
 import { loadEditable } from "../store.js";
 import { personRecordFiles } from "./chat-files.js";
 import { recordUsage } from "./config.js";
@@ -67,7 +68,7 @@ export async function loadChat(env, id) {
 /** What the chat's owner can see of its tree, re-checked on every use; null once they lose editor access. */
 export async function chatScope(env, chat) {
   const sc = await scopedFor(env, chat.principal, chat.tree_id);
-  if (!sc || !can.review(sc.grant)) return null;
+  if (!sc || !can.review(sc.grant) || !(await canReadDisclosure(env, sc.bundle, chat.scope_access))) return null;
   return sc;
 }
 
@@ -223,11 +224,14 @@ function cleanSources(list) {
 export async function checkChange(env, sc, ops) {
   const errors = [];
   if (!Array.isArray(ops) || !ops.length) return { errors: ["ops: give at least one edit op"] };
+  if (ops.some((op) => !op || typeof op.op !== "string")) return { errors: [S.api.ops.opsRequired] };
   if (ops.length > 50) return { errors: ["ops: at most 50 ops in one change; split it up"] };
   const b = sc.bundle;
   const { people, families } = referencedIds(ops);
   if (!b.scope.view.research && ops.some(editsPersonStatus)) errors.push(S.api.edit.personStatusHidden);
   for (const op of ops) {
+    if (op.op === "media.attach") errors.push(S.api.uploads.uploadNotOwned);
+    if (op.op.startsWith("media.") && !b.scope.view.media) errors.push(S.api.uploads.documentsHidden);
     const source = documentSource(op);
     if (source && !Object.hasOwn(b.sources, source)) errors.push(S.api.edit.sourceNotVisible(source));
   }
@@ -235,12 +239,14 @@ export async function checkChange(env, sc, ops) {
     if (!b.people[pid]) errors.push(`person ${pid} isn't in this tree`);
     else if (b.people[pid].private) errors.push(`${pid} is shown to this editor as a name only; their details can't be changed`);
   }
-  for (const fid of families) if (!b.families[fid]) errors.push(`family ${fid} isn't in this tree`);
+  for (const fid of families) if (!b.families[fid] || b.families[fid].partial) errors.push(S.api.edit.familyNotVisible(fid));
   if (ops.some((o) => o && o.op === "person.delete")) errors.push("don't delete people; use person.merge for duplicates");
   if (errors.length) return { errors };
   const { state } = await loadEditable(env);
   try {
     const res = applyOps(state, ops, { actor: sc.access.principal });
+    const scopeError = editScopeError(b, res);
+    if (scopeError) return { errors: [scopeError] };
     const touched = res.touched.filter((x) => x.type === "status"
       ? b.scope.view.research && b.people[x.id] && !b.people[x.id].private
       : ["person", "family", "media_map", "source"].includes(x.type));

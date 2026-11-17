@@ -6,7 +6,7 @@
 import { env } from "cloudflare:workers";
 import { useAgentFinish, useAgentStart, useInitialData, useModel, usePersistentState, useTool } from "@flue/runtime";
 import * as v from "valibot";
-import { scopedFor } from "../../../worker/bundle.js";
+import { scopedForRun } from "../../../worker/bundle.js";
 import { settings, compactAt, modelSpec } from "../../../worker/agent/config.js";
 import { SYSTEM, loadRun, markRunning, logRun, recordRunUsage, submitResults, endRun } from "../../../worker/agent/runs.js";
 import { personView, searchPeople, relationship, checkSubmission } from "../../../worker/agent/tools.js";
@@ -63,7 +63,7 @@ export function Researcher({ id }) {
     if (!run) throw new Error("This run no longer exists.");
     // submit_results is durable: after a crash Flue re-runs it, and by then the run may already be "succeeded"
     if (FINISHED.includes(run.status) && !(finishing && run.status === "succeeded")) throw new Error(`This run is ${run.status}. Stop working.`);
-    const sc = await scopedFor(env, run.started_by, run.tree_id);
+    const sc = await scopedForRun(env, run);
     if (!sc) throw new Error(`${run.started_by} no longer has access to this tree. Stop working.`);
     return sc.bundle;
   }

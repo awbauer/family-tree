@@ -4,7 +4,7 @@
 // It has no web access. It sees the tree as the person who started the run sees it: living relatives in full where
 // that view shows them, and people the view keeps private as a name only.
 import { J, now, parse, write, audit } from "../db.js";
-import { scopedFor } from "../bundle.js";
+import { scopedForRun } from "../bundle.js";
 import { can } from "../auth.js";
 import { validateBatch } from "../research.js";
 import { personView } from "./tools.js";
@@ -33,7 +33,7 @@ Finish with submit_story once. If it comes back with errors, fix them and call i
 
 // ---------------------------------------------------------------- reading
 export async function runScope(env, run) {
-  const sc = await scopedFor(env, run.started_by, run.tree_id);
+  const sc = await scopedForRun(env, run);
   if (!sc || !can.review(sc.grant)) return null;
   return sc;
 }

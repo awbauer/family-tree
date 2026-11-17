@@ -1,4 +1,3 @@
-import { documentType } from "./documents.ts";
 // Per-tree, per-view filtering of the derived bundle. Runs on the FINAL payload, server-side, before anything
 // leaves the Worker. Two passes: (1) structural: drop people/links/research outside the scope; (2) a text scrub
 // that replaces any remaining name or ID of a hidden person inside free text (issue messages, event notes, story
@@ -6,10 +5,21 @@ import { documentType } from "./documents.ts";
 
 export const DEFAULT_VIEW = { living: "full", research: true, notes: true, media: true, sources: true };
 
+const record = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+const strings = (v) => Array.isArray(v) && v.every((x) => typeof x === "string");
+const optional = (v, check) => v == null || check(v);
+export const validTreeDefinition = (d) => record(d) &&
+  ["branches", "include", "exclude"].every((k) => optional(d[k], strings)) && optional(d.root, (x) => typeof x === "string");
+export const validViewFilter = (v) => record(v) &&
+  optional(v.living, (x) => ["full", "names-only", "anonymous", "hidden"].includes(x)) &&
+  ["branches", "exclude_people"].every((k) => optional(v[k], strings)) &&
+  ["research", "notes", "media", "sources"].every((k) => !Object.hasOwn(v, k) || typeof v[k] === "boolean") &&
+  optional(v.max_generations, (x) => Number.isSafeInteger(x) && x >= 0);
+
 /** The person a merged-away id became (following chains), or the id itself. */
 export function followAlias(aliases, id) {
   const seen = new Set();
-  while (aliases && aliases[id] && !seen.has(id)) { seen.add(id); id = aliases[id]; }
+  while (aliases && Object.hasOwn(aliases, id) && !seen.has(id)) { seen.add(id); id = aliases[id]; }
   return id;
 }
 
@@ -19,7 +29,7 @@ export function treeMembers(bundle, def) {
   const branches = def.branches || ["*"];
   const all = branches.includes("*");
   const set = new Set(Object.keys(P).filter((id) => all || branches.includes(P[id].branch)));
-  for (const id of def.include || []) if (P[id]) set.add(id);
+  for (const id of def.include || []) if (Object.hasOwn(P, id)) set.add(id);
   for (const id of def.exclude || []) set.delete(id);
   return set;
 }
@@ -64,10 +74,9 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
   let ids = treeMembers(full, def);
   if (v.branches && v.branches.length) ids = new Set([...ids].filter((id) => v.branches.includes(P0[id].branch)));
   for (const id of v.exclude_people || []) ids.delete(id);
-  const root = (viewerPersonId && ids.has(viewerPersonId) && viewerPersonId) || (def.root && ids.has(def.root) && def.root)
-    || (ids.has(full.home) && full.home) || [...ids][0];
-  if (v.max_generations != null && root) {
-    const dist = generationDistance(full, root);
+  const scopeRoot = (def.root && ids.has(def.root) && def.root) || (ids.has(full.home) && full.home) || [...ids][0];
+  if (v.max_generations != null && scopeRoot) {
+    const dist = generationDistance(full, scopeRoot);
     ids = new Set([...ids].filter((id) => dist.has(id) && dist.get(id) <= v.max_generations));
   }
   if (v.living === "hidden") ids = new Set([...ids].filter((id) => !P0[id].living));
@@ -84,7 +93,14 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
     const w = ids.has(f.wife) ? f.wife : null;
     const children = (f.children || []).filter((c) => ids.has(c));
     if (!h && !w && !children.length) continue;
-    families[fid] = Object.assign({}, f, { husband: h, wife: w, children, events: v.sources ? f.events : (f.events || []).map(noCites) });
+    const fullyVisible = [f.husband, f.wife, ...(f.children || [])].filter(Boolean).every(open);
+    const safe = { ...f, husband: h, wife: w, children,
+      events: fullyVisible ? (f.events || []).map((event) => scopeFact(event, v)) : [] };
+    if (!fullyVisible || !v.notes) delete safe.notes;
+    if (!fullyVisible || !v.sources) delete safe.citations;
+    if (!fullyVisible || !v.media) delete safe.media;
+    if (!fullyVisible) safe.partial = true;
+    families[fid] = safe;
   }
 
   // ---- 3. people, with the view's living/notes/media/sources policy
@@ -97,12 +113,20 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
     if (p.living && (v.living === "names-only" || v.living === "anonymous")) {
       p = strip(p, BASIC);
       Object.assign(p, { events: [], birth: null, death: null, burial: null, notes: [], media: [], citations: [], issues: [], private: true });
+      // The names-only projection is still a full-name display, never a name record with citations or review metadata.
+      p.names = (p.names || []).map((name) => strip(name, ["given", "surname", "suffix", "type"]));
       if (v.living === "anonymous") Object.assign(p, { name: `Living ${p.surname || ""}`.trim(), given: "", names: [{ given: "", surname: p.surname || "" }] });
     }
-    if (!v.notes) delete p.profile; // AI-written narrative counts as notes
-    if (!v.notes) { p.notes = []; p.events = (p.events || []).map((e) => { const { note, ...rest } = e; return rest; }); }
+    if (!v.notes || !v.research || [...(p.famc || []), ...(p.fams || [])].some((fid) => {
+      const f = F0[fid];
+      return f && [f.husband, f.wife, ...(f.children || [])].filter(Boolean).some((person) => !ids.has(person));
+    })) delete p.profile;
+    if (!v.notes) p.notes = [];
     if (!v.media) p.media = [];
-    if (!v.sources) { p.citations = []; p.events = (p.events || []).map(noCites); }
+    if (!v.sources) p.citations = [];
+    p.events = (p.events || []).map((event) => scopeFact(event, v));
+    p.names = (p.names || []).map((name) => scopeFact(name, v));
+    for (const field of ["birth", "death", "burial"]) if (p[field]) p[field] = scopeFact(p[field], v);
     if (!v.research) { p.status = "unverified"; p.statusNote = ""; p.issues = []; }
     if (p.duplicateOf) p.duplicateOf = p.duplicateOf.filter((x) => ids.has(x));
     if (p.relationVia && !ids.has(p.relationVia)) delete p.relationVia;
@@ -110,9 +134,9 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
   }
 
   // ---- 4. relationship labels relative to the viewer (or the tree's root), never to the owner
-  const home = root;
+  const home = (ids.has(viewerPersonId) && viewerPersonId) || (ids.has(scopeRoot) && scopeRoot) || [...ids][0];
   if (helpers.relationLabels && home) {
-    const labels = helpers.relationLabels(full.people, full.families, home);
+    const labels = helpers.relationLabels(people, families, home);
     for (const [id, p] of Object.entries(people)) {
       const l = labels[id] || {};
       p.relation = l.relation || null;
@@ -163,7 +187,7 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
   const sources = v.sources ? Object.fromEntries(Object.entries(full.sources || {}).filter(([k]) => citedSources.has(k) || !citedAnywhere.has(k))) : {};
   if (!v.sources) research.media = Object.fromEntries(Object.entries(research.media).map(([pid, files]) => [pid,
     files.map((m) => {
-      if (!m.source || !documentType(m.file)) return m;
+      if (!m.source) return m;
       const { source, ...file } = m;
       return file;
     }),
@@ -187,7 +211,18 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
   return scrub(out, hidden, full.people, people, v.living === "anonymous" ? reduced : new Set());
 }
 
-function noCites(e) { const { citations, ...rest } = e; return rest; }
+function scopeFact(fact, v) {
+  const result = { ...fact };
+  if (!v.notes) delete result.note;
+  if (!v.sources) delete result.citations;
+  if (!v.research) delete result.review;
+  else if (result.review && (!v.sources || !v.notes)) {
+    result.review = { ...result.review };
+    if (!v.sources) delete result.review.evidence;
+    if (!v.notes) delete result.review.note;
+  }
+  return result;
+}
 
 function namesOf(p) {
   const out = new Set();
@@ -197,6 +232,14 @@ function namesOf(p) {
     if (g && s && g !== "?") out.add(`${g} ${s}`);
   }
   return out;
+}
+
+/** Apply the tree's free-text redaction to data assembled outside scopeBundle (history, queues, comments). */
+export function scrubFor(value, full, bundle) {
+  const hidden = new Set(Object.keys(full.people).filter((id) => !Object.hasOwn(bundle.people, id)));
+  const anonymous = new Set(bundle.scope.view.living === "anonymous"
+    ? Object.values(bundle.people).filter((p) => p.private).map((p) => p.id) : []);
+  return scrub(value, hidden, full.people, bundle.people, anonymous);
 }
 
 export function scrub(out, hidden, allPeople, visiblePeople, nameOnly = new Set()) {
@@ -220,9 +263,7 @@ export function scrub(out, hidden, allPeople, visiblePeople, nameOnly = new Set(
     if (typeof x === "string") return clean(x);
     if (Array.isArray(x)) return x.map(walk);
     if (x && typeof x === "object") {
-      const o = {};
-      for (const [k, val] of Object.entries(x)) if (!hidden.has(k)) o[k] = walk(val);
-      return o;
+      return Object.fromEntries(Object.entries(x).filter(([k]) => !hidden.has(k)).map(([k, val]) => [k, walk(val)]));
     }
     return x;
   };

@@ -16,7 +16,8 @@ export const api = {
     internalError: "Internal error",
     notFound: "Not found",
     notFoundDot: "Not found.",
-    bodyNotJson: "Body must be JSON.",
+    bodyNotJson: "Send a JSON object.",
+    crossOrigin: "Make changes from the family tree site.",
     noMediaBinding: "No R2 binding named MEDIA.",
     badMediaKey: "Bad key",
     emptyDatabase: "The database is empty. Run the one-time import (README → Deploy).",
@@ -308,6 +309,8 @@ export const api = {
   /** Research batch validation (worker/research.js validateBatch); `at` is where in the batch, e.g. findings[0]. */
   batch: {
     notObject: "batch must be a JSON object",
+    objectsRequired: (key: string) => `${key} must be a list of objects`,
+    peopleArray: (key: string) => `${key}.people must be a list of person IDs`,
     missingPerson: (at: string) => `${at}: missing person`,
     personNotInTree: (at: string, id: unknown) => `${at}: person ${JSON.stringify(id)} is not in this tree`,
     noSources: (at: string) => `${at}: no sources. Every claim needs a citation`,
@@ -351,6 +354,7 @@ export const api = {
       photo: "Photo or scan",
     },
     resourceNotFound: "MCP resource not found.",
+    requestTooLarge: "MCP request is too large.",
     parseError: "Parse error: the body must be a JSON-RPC 2.0 message.",
     invalidRequest: "Invalid request: expected a JSON-RPC 2.0 request.",
     unknownMethod: (m: string) => `Method not found: ${m}`,

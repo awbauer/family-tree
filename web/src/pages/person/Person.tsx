@@ -132,7 +132,7 @@ function Research() {
 }
 
 function PersonPage() {
-  const { D, live } = useData();
+  const { D, live, tree } = useData();
   const { id, p } = usePerson();
   const bstyle = useBranchStyle();
   useTitle(p.name);
@@ -145,7 +145,7 @@ function PersonPage() {
   return (
     <div className="wrap">
       <div className="person-head" style={bstyle(p.branch)}>
-        <div className="portrait">{portrait ? <img src={mediaUrl(portrait.file)} alt={p.name} /> : initials(p)}</div>
+        <div className="portrait">{portrait ? <img referrerPolicy="no-referrer" src={mediaUrl(portrait.file, tree, D.previewView)} alt={p.name} /> : initials(p)}</div>
         <div>
           <div className="eyebrow"><RelationText /></div>
           <h1>{p.name}</h1>
@@ -168,13 +168,13 @@ function PersonPage() {
           <Profile />
           {live && <Graph />}
           <LifeEvents />
-          <Research />
-          <Photos />
+          {!p.private && (D.scope?.view.research !== false) && <Research />}
+          {!p.private && D.scope?.view.media !== false && <Photos />}
           <Attachments />
           <Sources />
         </div>
       </div>
-      {live && <Work />}
+      {live && !p.private && <Work />}
     </div>
   );
 }

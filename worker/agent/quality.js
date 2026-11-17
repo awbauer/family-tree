@@ -7,11 +7,12 @@
 // run, and only if the item hasn't changed since the run planned it. Fixes to the tree's facts are always filed as
 // suggestions for an editor. In a dry run nothing changes; the decisions are kept as a report that "Apply these
 // decisions" applies later, with the same checks.
-import { J, now, parse, write } from "../db.js";
-import { scopedFor } from "../bundle.js";
+import { guard, J, now, parse, write } from "../db.js";
+import { scopedForRun, scopedFor } from "../bundle.js";
 import { can } from "../auth.js";
 import { checkChange } from "./chat.js";
 import { treeChecks } from "./checks.js";
+import { isConflict } from "../store.js";
 
 export const QUALITY_AGENT = "agent:data-quality";
 export const QUALITY_PATH = "/agents/quality"; // where agents/src/app.js mounts the QualityReviewer
@@ -88,7 +89,7 @@ export function firstMessage(b, opts, items) {
 
 // ---------------------------------------------------------------- reading
 export async function runScope(env, run) {
-  const sc = await scopedFor(env, run.started_by, run.tree_id);
+  const sc = await scopedForRun(env, run);
   if (!sc || !can.review(sc.grant)) return null;
   return sc;
 }
@@ -186,7 +187,6 @@ export async function applyDecision(env, run, d, { onBehalfOf }) {
   const t = now(), A = QUALITY_AGENT, a = itemAction(d), via = run.id, st = [];
   const changeRow = (type, id, op, before, after, reason) => env.DB.prepare("INSERT INTO changes (at, actor, actor_kind, entity_type, entity_id, op, before, after, reason, on_behalf_of, via) VALUES (?, ?, 'agent', ?, ?, ?, ?, ?, ?, ?, ?)")
     .bind(t, A, type, String(id), op, before === undefined ? null : J(before), after === undefined ? null : J(after), reason || null, onBehalfOf, via);
-  let guarded = false;
   if (d.type === "check") {
     // only while the check still finds the same thing
     const sc = await runScope(env, run);
@@ -195,6 +195,7 @@ export async function applyDecision(env, run, d, { onBehalfOf }) {
   } else if (d.type === "todo") {
     const row = await env.DB.prepare("SELECT * FROM todos WHERE id = ?").bind(d.id).first();
     if (!row || row.version !== d.version || !["open", "in_progress"].includes(row.status)) return { status: "skipped", detail: "the to-do changed since the review read it" };
+    st.push(guard(env, "NOT EXISTS (SELECT 1 FROM todos WHERE id = ? AND version = ?)", d.id, d.version));
     const set = {};
     if (a && a.status) Object.assign(set, { status: a.status, closed_at: t, outcome: clip(`${d.note}${d.evidence.length ? ` (${d.evidence.join("; ")})` : ""}`, 2000), assignee: null });
     if (a && a.priority && a.priority !== row.priority) set.priority = a.priority;
@@ -202,7 +203,6 @@ export async function applyDecision(env, run, d, { onBehalfOf }) {
     if (Object.keys(set).length) {
       const cols = Object.keys(set);
       st.push(env.DB.prepare(`UPDATE todos SET ${cols.map((k) => `${k} = ?`).join(", ")}, updated_at = ?, updated_by = ?, version = version + 1 WHERE id = ? AND version = ?`).bind(...cols.map((k) => set[k]), t, A, d.id, d.version));
-      guarded = true;
       st.push(changeRow("todo", d.id, "update", { status: row.status, priority: row.priority }, set, d.note));
       if (set.status) st.push(ev("status", { from: row.status, to: set.status }));
       if (set.priority) st.push(ev("edited", { field: "priority", from: row.priority, to: set.priority }));
@@ -212,26 +212,34 @@ export async function applyDecision(env, run, d, { onBehalfOf }) {
     const row = await env.DB.prepare("SELECT * FROM findings WHERE id = ?").bind(d.id).first();
     const data = row && parse(row.data, {});
     if (!row || row.version !== d.version || (data.resolution && data.resolution.status !== "open")) return { status: "skipped", detail: "the finding changed since the review read it" };
+    if (a || d.fix || d.new_todos?.length) {
+      st.push(guard(env, "NOT EXISTS (SELECT 1 FROM findings WHERE id = ? AND version = ?)", d.id, d.version));
+    }
     if (a) {
       const resolution = { status: a.status, by: A, on_behalf_of: onBehalfOf, at: t, note: clip(commentText(d), 2000), run: run.id };
       st.push(env.DB.prepare("UPDATE findings SET data = ?, version = version + 1 WHERE id = ? AND version = ?").bind(J({ ...data, resolution }), d.id, d.version));
-      guarded = true;
       st.push(changeRow("finding", d.id, a.status, data.resolution || null, resolution, d.note));
     }
   }
-  let proposal = null;
+  const proposalIndex = d.fix ? st.length : -1;
   if (d.fix) {
-    const r = await env.DB.prepare("INSERT INTO proposals (created_at, author, author_kind, tree_id, kind, payload, rationale, todo_id) VALUES (?, ?, 'agent', ?, 'edit', ?, ?, ?) RETURNING id")
-      .bind(t, A, run.tree_id, J({ reason: d.fix.reason, ops: d.fix.ops, sources: [], origin: `data quality review ${run.id}, ${d.item}` }), `Fix found while reviewing ${d.item}: ${d.fix.reason}`, d.type === "todo" ? d.id : null).first();
-    proposal = r.id;
+    st.push(env.DB.prepare("INSERT INTO proposals (created_at, author, author_kind, tree_id, kind, payload, rationale, todo_id) VALUES (?, ?, 'agent', ?, 'edit', ?, ?, ?) RETURNING id")
+      .bind(t, A, run.tree_id, J({ reason: d.fix.reason, ops: d.fix.ops, sources: [], origin: `data quality review ${run.id}, ${d.item}` }), `Fix found while reviewing ${d.item}: ${d.fix.reason}`, d.type === "todo" ? d.id : null));
   }
   for (const n of d.new_todos || []) {
     st.push(env.DB.prepare("INSERT INTO todos (person_id, tree_id, task, location, priority, status, created_at, created_by, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)")
       .bind(n.person, run.tree_id, n.task, n.where, n.priority, t, A, t, A));
   }
-  if (!st.length) return { status: "applied", detail: describe(d), proposal };
-  const res = await write(env, st);
-  if (guarded && res[0].meta && res[0].meta.changes === 0) return { status: "skipped", detail: "the item changed while the review was writing", proposal };
+  let proposal = null;
+  if (st.length) {
+    try {
+      const result = await write(env, st);
+      if (proposalIndex >= 0) proposal = result[proposalIndex].results[0].id;
+    } catch (e) {
+      if (isConflict(e)) return { status: "skipped", detail: "the item changed while the review was writing" };
+      throw e;
+    }
+  }
   return { status: "applied", detail: describe(d), proposal };
 }
 

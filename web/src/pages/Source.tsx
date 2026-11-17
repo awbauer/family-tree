@@ -38,7 +38,7 @@ function FactLink({ u }: { u: SourceUse }) {
 export function Source() {
   const M = T.meta, X = T.tools, G = T.merge;
   const { id = "" } = useParams();
-  const { D, live, editor } = useData();
+  const { D, live, editor, tree } = useData();
   const s = (D.sources as any)[id];
   useTitle(s ? s.title || id : T.title);
   const uses = useMemo(() => sourceUses(D)[id] || [], [D, id]);
@@ -81,7 +81,7 @@ export function Source() {
         <section className="card" style={{ marginTop: 16 }}><h2>{T.photos}</h2>
           <div className="photo-grid">{photos.map((u) => (
             <figure className="photo" key={u.file}>
-              {/\.pdf$/i.test(u.file!) ? <div className="doc">{T.pdf}</div> : <img loading="lazy" src={mediaUrl(u.file!)} alt={u.fact} />}
+              {/\.pdf$/i.test(u.file!) ? <div className="doc">{T.pdf}</div> : <img referrerPolicy="no-referrer" loading="lazy" src={mediaUrl(u.file!, tree, D.previewView)} alt={u.fact} />}
               <figcaption>{u.fact.replace(/^photo: /, "")}<br /><span className="small"><PersonLink id={u.person} /></span></figcaption>
             </figure>
           ))}</div>

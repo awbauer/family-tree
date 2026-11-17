@@ -291,8 +291,8 @@ export async function commissionStory(env, run, b, v) {
   const label = `Draft a ${v.length} story about ${v.people.map((x) => b.people[x].name).join(", ")}: ${v.brief}`.slice(0, 2000);
   const child = { run: id, key: v.key, people: v.people, brief: v.brief, length: v.length, candidate: v.candidate, message };
   await write(env, [
-    env.DB.prepare("INSERT INTO agent_runs (id, kind, person_id, tree_id, started_by, instructions, options, created_at) VALUES (?, 'story', ?, ?, ?, ?, ?, ?)")
-      .bind(id, v.people[0], run.tree_id, run.started_by, label, J(o), now()),
+    env.DB.prepare("INSERT INTO agent_runs (id, kind, person_id, tree_id, started_by, instructions, options, created_at, scope_access) VALUES (?, 'story', ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, v.people[0], run.tree_id, run.started_by, label, J(o), now(), run.scope_access || null),
     recordUsage(env, { runs: 1 }),
     env.DB.prepare("UPDATE agent_runs SET report = json_insert(COALESCE(report, '{\"checked\":[],\"children\":[]}'), '$.children[#]', json(?)) WHERE id = ?").bind(J(child), run.id),
   ]);
