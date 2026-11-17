@@ -17,7 +17,7 @@ const LINK = "https://records.example.org/collections/parish-registers/volume-12
 let srv, browsers = [], pages = [], longId, errors = [];
 
 before(async () => {
-  srv = await startDevServer({ port: 8797, site: SITE, quiet: true });
+  srv = await startDevServer({ port: 0, site: SITE, quiet: true });
   const api = async (m, p, b) => {
     const r = await fetch(`${srv.url}/api/${p}`, { method: m, headers: { "Content-Type": "application/json" }, body: b ? JSON.stringify(b) : undefined });
     const j = await r.json(); if (!r.ok) throw new Error(`${p}: ${j.error}`); return j;
@@ -46,8 +46,8 @@ before(async () => {
     pages.push(page);
     await setUp(page);
   }
-});
-after(async () => { for (const b of browsers) await b.close(); await srv?.close(); });
+}, { timeout: 90_000 });
+after(async () => { for (const b of browsers) await b.close(); await srv?.close(); }, { timeout: 30_000 });
 
 async function setUp(page) {
   page.on("pageerror", (e) => errors.push(`${page.engine}: ${e.message}`));

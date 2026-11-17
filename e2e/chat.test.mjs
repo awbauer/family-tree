@@ -14,7 +14,7 @@ const calls = [];
 let reply = { busy: false, messages: [], changes: [] };
 
 before(async () => {
-  srv = await startDevServer({ port: 8798, site: SITE, quiet: true });
+  srv = await startDevServer({ port: 0, site: SITE, quiet: true });
   browser = await chromium.launch();
   page = await browser.newPage();
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
@@ -40,8 +40,8 @@ before(async () => {
   });
   await page.goto(`${srv.url}/#/person/I5`);
   await page.waitForSelector(".chat-fab", { timeout: 15000 });
-});
-after(async () => { await browser?.close(); await srv?.close(); });
+}, { timeout: 90_000 });
+after(async () => { await browser?.close(); await srv?.close(); }, { timeout: 30_000 });
 
 test("ask, see the drafted change with its preview, dismiss it", async () => {
   await page.click(".chat-fab");

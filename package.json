@@ -27,7 +27,7 @@
     "dev:web": "vite --config web/vite.config.ts",
     "dev:example": "node tools/dev_server.mjs --site dist/site",
     "typecheck": "tsc -p web",
-    "test:e2e": "node --test --test-concurrency=1 e2e/",
+    "test:e2e": "node --test --test-concurrency=1 --test-timeout=180000 e2e/",
     "check:strings": "node tools/check_strings.mjs",
     "build:agents": "test -d agents/node_modules || npm --prefix agents ci --no-audit --no-fund && npm --prefix agents run build"
   },
