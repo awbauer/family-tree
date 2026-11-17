@@ -115,3 +115,31 @@ test("the agents' build config is build input only: never deployed on its own", 
   assert.equal(pkg.scripts.deploy, undefined);
   assert.equal(pkg.scripts["deploy:ci"], undefined);
 });
+
+test("--d1-only (the migrations Action): no Workers lookup, so a D1-only token works; Durable Objects left out", async () => {
+  const { createServer } = await import("node:http");
+  const seen = [];
+  // the Action's token can't read Workers: every Workers API call is refused
+  const srv = createServer((req, res) => { seen.push(req.url); res.writeHead(403).end("{}"); });
+  await new Promise((r) => srv.listen(0, r));
+  const dir = mkdtempSync(join(tmpdir(), "ci-"));
+  const env = { D1_DATABASE_ID: ID, AGENTS_TRANSFER_FROM: "", CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a1", CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${srv.address().port}` };
+  const runAsync = (args) => new Promise((resolve) => {
+    const p = spawn(process.execPath, [join(ROOT, "tools/ci_config.mjs"), ...args], { env: { ...process.env, ...env } });
+    let err = ""; p.stderr.on("data", (d) => (err += d)); p.on("close", (code) => resolve({ status: code, stderr: err }));
+  });
+  try {
+    // without the flag this is the failure the Action hit
+    assert.notEqual((await runAsync([join(ROOT, "wrangler.jsonc"), join(dir, "full.json")])).status, 0);
+    seen.length = 0;
+    const out = join(dir, "d1.json");
+    const r = await runAsync(["--d1-only", join(ROOT, "wrangler.jsonc"), out]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(seen, [], "no Cloudflare API calls");
+    const cfg = JSON.parse(readFileSync(out, "utf8"));
+    assert.equal(cfg.d1_databases.find((d) => d.binding === "DB").database_id, ID);
+    assert.equal(cfg.durable_objects, undefined);
+    assert.equal(cfg.migrations, undefined);
+    assert.equal(cfg.vars, undefined);
+  } finally { srv.close(); }
+});

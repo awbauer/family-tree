@@ -11,8 +11,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const src = process.argv[2] || join(ROOT, "wrangler.jsonc");
-const out = process.argv[3] || join(ROOT, "wrangler.ci.jsonc");
+// --d1-only: a config for `wrangler d1 …` commands only (the D1 migrations GitHub Action). Its token has just
+// "D1 → Edit", so it can't look up Workers, and Durable Objects don't matter there; they're left out so the
+// file can't be used to deploy by mistake.
+const D1_ONLY = process.argv.includes("--d1-only");
+const [srcArg, outArg] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+const src = srcArg || join(ROOT, "wrangler.jsonc");
+const out = outArg || join(ROOT, "wrangler.ci.jsonc");
 
 import { parseJsonc } from "./jsonc.mjs";
 
@@ -59,7 +64,10 @@ async function workerExists(name) {
   } catch { return null; }
 }
 let transferFrom = null;
-if (fromVar === "off") transferFrom = null;
+if (D1_ONLY) {
+  delete cfg.durable_objects;
+  delete cfg.migrations;
+} else if (fromVar === "off") transferFrom = null;
 else if (fromVar) transferFrom = fromVar;
 else if (cfg.durable_objects) {
   const found = await workerExists(LEGACY_AGENTS);
@@ -77,4 +85,4 @@ if (transferFrom) {
 }
 cfg.$schema = "node_modules/wrangler/config-schema.json";
 writeFileSync(out, JSON.stringify(cfg, null, 2) + "\n");
-console.log(`ci_config: wrote ${out.replace(ROOT + "/", "")} (D1 bound by id, no vars, keep_vars on)`);
+console.log(`ci_config: wrote ${out.replace(ROOT + "/", "")} (D1 bound by id, no vars, keep_vars on${D1_ONLY ? ", D1 only: not deployable" : ""})`);
