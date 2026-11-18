@@ -3,6 +3,7 @@ import { S } from "../strings/index.ts";
 import { canReadDisclosure } from "./bundle.js";
 import { parse } from "./db.js";
 import { followAlias } from "./scope.js";
+import { storyPeople } from "./stories.js";
 
 export const detailsVisible = (bundle, id) => Object.hasOwn(bundle.people, id) && !bundle.people[id].private;
 export const familyPeople = (family) => [family?.husband, family?.wife, ...(family?.children || [])].filter(Boolean);
@@ -35,6 +36,7 @@ export async function batchVisible(env, bundle, batchId) {
     if (type === "family") return family(row.before) && family(row.after);
     if (type === "source") return bundle.scope.view.sources &&
       (Object.hasOwn(bundle.sources, id) || (row.after == null && canRestoreSource));
+    if (type === "story") return [row.before, row.after].every((v) => storyPeople(parse(v)).every(person));
     if (type === "finding") return (bundle.research.findings || []).some((f) => String(f.id) === id);
     if (type === "config" && id === "media_map") {
       return bundle.scope.view.media && [row.before, row.after].every((value) => Object.keys(parse(value) || {}).every(person));

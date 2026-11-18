@@ -336,6 +336,15 @@ export const api = {
     noMedia: "media: photos are attached by the owner, not through research batches (yet)",
   },
 
+  /** Editing stories directly (worker/stories.js). */
+  stories: {
+    editorsOnly: "Only editors can write or change stories directly. Suggest one instead.",
+    noSuch: (slug: string) => `There's no story "${slug}" you can edit in this tree.`,
+    changed: "This story changed since you loaded it. Reload and try again.",
+    bodyRequired: "A story needs a body.",
+    invalid: "This story isn't valid.",
+  },
+
   /** The MCP server (worker/mcp.js): JSON-RPC errors and tool errors an AI client shows its user. */
   mcp: {
     tooLargeToEmbed: "This file is larger than 8 MB, so it isn't embedded. The member can open it from download_url while signed in to the site.",

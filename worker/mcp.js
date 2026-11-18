@@ -64,7 +64,7 @@ source.upsert {id?, data:{title, type?, author?, publication?, url?, repository?
 media.attach {person, file, caption?, type?, date?, place?, note?, source?, portrait?} · media.update {person, file, set:{caption?, type?, date?, place?, note?, source?}} (set source to a catalogued source id, or null to unlink it) · media.set_primary {person, file} · media.detach {person, file}
 A citation: {source?:"S…", title?, url?, page?, text?, note?, accessed?, source_type?:"original"|"derivative"|"authored", information?:"primary"|"secondary"|"undetermined", evidence?:"direct"|"indirect"|"negative", quality?:0-3, personal?:true}.`;
 
-const BATCH_HELP = `A research batch: {findings?:[{person, kind:"confirmed"|"correction"|"conflict"|"data-error"|"new-fact"|"new-person", field?, fact?:"e3", claim?, finding, confidence:"high"|"medium"|"low", sources:[{title, url?|note?}], proposed_ops?:[op]}], log?:[{person?, searched, result:"found"|"nil"|"inconclusive", note?, url?}], todo?:[{person?, task, where?, priority:"high"|"medium"|"low"}], todo_done?:[{id, outcome?}], people_status?:{"I…":{status:"unverified"|"partly-verified"|"verified"|"disputed", note?}}, stories?:[{title, body, people:[ids], sources:[…], era?}]}. Every finding and story needs sources; story bodies link people as [[I12|Name]].`;
+const BATCH_HELP = `A research batch: {findings?:[{person, kind:"confirmed"|"correction"|"conflict"|"data-error"|"new-fact"|"new-person", field?, fact?:"e3", claim?, finding, confidence:"high"|"medium"|"low", sources:[{title, url?|note?}], proposed_ops?:[op]}], log?:[{person?, searched, result:"found"|"nil"|"inconclusive", note?, url?}], todo?:[{person?, task, where?, priority:"high"|"medium"|"low"}], todo_done?:[{id, outcome?}], people_status?:{"I…":{status:"unverified"|"partly-verified"|"verified"|"disputed", note?}}, stories?:[{title, body, people:[ids], sources:[…], era?}], story_updates?:[{slug, title?, body, people?, sources, reason?}]}. Every finding and story needs sources; story bodies link people as [[I12|Name]].`;
 
 // ---------------------------------------------------------------- schema helpers
 const str = (description, extra = {}) => ({ type: "string", description, ...extra });
@@ -163,8 +163,12 @@ tool("get_source", { title: "Get source", description: "One source record and ev
   props: { id: str("source id, e.g. S3") }, required: ["id"], run: async (x, a) => V.source(await x.bundle(), a.id) || fail(404, M.notInTree(a.id)) });
 tool("list_stories", { title: "Stories", description: "The family stories in this tree's view, optionally about one person or containing some text.",
   props: { person: str("person id"), query: str("title/body contains") }, run: async (x, a) => V.stories(await x.bundle(), a) });
-tool("get_story", { title: "Get story", description: "One story: title, Markdown body (people linked as [[I12|Name]]), the people it's about and its sources.",
-  props: { slug: str("story slug from list_stories") }, required: ["slug"], run: async (x, a) => V.story(await x.bundle(), a.slug) || fail(404, M.noStory(a.slug)) });
+tool("get_story", { title: "Get story", description: "One story: title, Markdown body (people linked as [[I12|Name]]), the people it's about, its sources, and its version (pass it to update_story).",
+  props: { slug: str("story slug from list_stories") }, required: ["slug"], run: async (x, a) => {
+    const s = V.story(await x.bundle(), a.slug) || fail(404, M.noStory(a.slug));
+    const row = await x.c.env.DB.prepare("SELECT version, updated_at, updated_by FROM stories WHERE slug = ?").bind(a.slug).first();
+    return { ...s, version: row && row.version, updated_at: row && row.updated_at || undefined };
+  } });
 
 // research
 tool("list_findings", { title: "Research findings", description: "Research findings (confirmations, corrections, conflicts, new facts…) with their sources, proposed fixes and resolution.",
@@ -185,7 +189,7 @@ tool("list_comments", { title: "Comments", description: "The discussion on a per
   props: { type: en(["person", "family"], "default person"), id: str("person or family id") }, required: ["id"],
   run: async (x, a) => x.api("GET", `/api/comments${qs({ type: a.type || "person", id: a.id })}`) });
 tool("get_history", { title: "Change history", description: "Who changed what and why: for one person or family (their record, families, findings, photos and status), or, for editors, the latest changes to the whole tree. Each change has a batch id that revert_change can undo.",
-  props: { id: str("person or family id (leave out for the whole tree; editors only)") }, run: async (x, a) => x.api("GET", `/api/history${qs({ id: a.id })}`) });
+  props: { id: str("person or family id (leave out for the whole tree; editors only)"), story: str("a story's slug: its revisions") }, run: async (x, a) => x.api("GET", `/api/history${qs({ id: a.id, story: a.story })}`) });
 tool("get_provenance", { title: "Provenance (PROV-O)", description: "W3C PROV-O (JSON-LD) for one person's records: every change, who made it, from which suggestion and evidence. Editors may ask for an agent run's provenance instead.",
   props: { id: str("person id"), run: str("agent run id (editors)") }, run: async (x, a) => x.api("GET", `/api/prov${qs({ id: a.id, run: a.run })}`) });
 tool("get_media", { title: "Get photo or document", description: "A photo or scanned document attached to someone you can see (its `file` from get_person), returned as an image or a PDF.",
@@ -233,6 +237,24 @@ W("suggest_research", { title: "Suggest research", description: "Submit research
 W("suggest_edit", { title: "Suggest a tree edit", description: "Propose changes to the tree itself for an editor to review (the way members and agents change the tree). Cite the records. " + OPS_HELP,
   props: { ops: OPS, reason: str("the evidence, in a sentence or two"), sources: SOURCES, resolves: arr({ type: "integer" }, "finding ids this settles"), rationale: str("note to the reviewer"), todo_id: int("the to-do this answers") }, required: ["ops", "reason"],
   run: async (x, a) => x.api("POST", "/api/proposals", { tree: x.treeId, kind: "edit", payload: pick(a, ["ops", "reason", "sources", "resolves"]), rationale: a.rationale || a.reason, todo_id: a.todo_id }) });
+const STORY = {
+  title: str("the story's title"),
+  body: str("the story in Markdown: paragraphs, ## headings, **bold**, *italic*; link people as [[I12|Name]] or [[I12]]. Tell what the records show; don't invent detail"),
+  people: arr({ type: "string" }, "ids of the people it's about (all must be visible to you in full)"),
+  sources: arr({ type: "object", properties: { title: str("the record, interview or book"), url: str("where it is"), note: str("where/how, if no url"), page: str("page or entry") }, required: ["title"] }, "what the story rests on; at least one, each with a url or a note"),
+  era: str("when it happens, e.g. \"1948\" or \"1920s\""),
+};
+W("suggest_story", { title: "Suggest a story or a revision", description: "Propose a new story, or a revision of an existing one (give its slug), for an editor to review. Editors can use create_story / update_story instead.",
+  props: { slug: str("an existing story's slug, to revise it"), ...STORY, reason: str("what changed and why (revisions)"), rationale: str("note to the reviewer") }, required: ["body"],
+  run: async (x, a) => {
+    const pick2 = pick(a, ["title", "body", "people", "sources", "era"]);
+    let batch;
+    if (a.slug) {
+      const cur = V.story(await x.bundle(), a.slug) || fail(404, M.noStory(a.slug));
+      batch = { story_updates: [{ slug: a.slug, people: (cur.people || []).map((p) => p.id), sources: cur.sources, ...pick2, reason: a.reason }] };
+    } else batch = { stories: [pick2] };
+    return x.api("POST", "/api/proposals", { tree: x.treeId, kind: "research", payload: batch, rationale: a.rationale || a.reason });
+  } });
 W("withdraw_suggestion", { title: "Withdraw a suggestion", description: "Withdraw one of your own open suggestions.", props: { id: int("suggestion id") }, required: ["id"],
   run: async (x, a) => x.api("POST", `/api/proposals/${+a.id}/withdraw`, {}) });
 W("add_comment", { title: "Comment", description: "Add a comment to the discussion on a person or family, optionally about one fact.",
@@ -285,6 +307,15 @@ const E = (name, def) => W(name, { role: "editor", ...def });
 E("edit_tree", { title: "Edit the tree", description: "Change the tree directly (editors; recorded as you, undoable with revert_change). Give the evidence in reason and sources. `resolves` closes findings in the same change. Preview first and confirm with the member. " + OPS_HELP,
   destructive: true, props: { ops: OPS, reason: str("why: the evidence"), sources: SOURCES, resolves: arr({ type: "integer" }, "finding ids this settles") }, required: ["ops", "reason"],
   run: async (x, a) => x.api("POST", "/api/edit", { tree: x.treeId, ...pick(a, ["ops", "reason", "sources", "resolves"]) }) });
+E("create_story", { title: "Write a story", description: "Write a new family story directly (editors; logged as you, undoable with revert_change). Show the member the draft and get their OK first. Members use suggest_story.",
+  props: { ...STORY, slug: str("its address (default: from the title)"), reason: str("why, for the history") }, required: ["title", "body", "people", "sources"],
+  run: async (x, a) => x.api("POST", "/api/stories", { tree: x.treeId, ...a }) });
+E("update_story", { title: "Revise a story", description: "Change a story's title, text, people, sources or era (editors; only the fields you give change; logged and undoable). Pass the version from get_story so you don't overwrite someone else's revision.",
+  props: { slug: str("the story's slug"), version: int("the version you read"), ...STORY, reason: str("what changed and why") }, required: ["slug"],
+  run: async (x, a) => { const { slug, ...d } = a; return x.api("PUT", `/api/stories/${enc(slug)}`, { tree: x.treeId, ...d }); } });
+E("delete_story", { title: "Remove a story", description: "Remove a story (editors; undoable with revert_change and the batch id this returns).", destructive: true,
+  props: { slug: str("the story's slug"), reason: str("why") }, required: ["slug"],
+  run: async (x, a) => x.api("DELETE", `/api/stories/${enc(a.slug)}`, { reason: a.reason }) });
 E("revert_change", { title: "Undo a change", description: "Undo one change (a batch id from get_history), if nothing has changed those records since (editors).", destructive: true,
   props: { batch: str("batch id"), reason: str("why") }, required: ["batch"], run: async (x, a) => x.api("POST", `/api/changes/${enc(a.batch)}/revert`, { reason: a.reason }) });
 E("review_suggestion", { title: "Approve or reject a suggestion", description: "Approve (applies it: research is recorded, edits are made) or reject (back to its author with your note) an open suggestion (editors). skip_missing approves a research batch without parts about people no longer in the tree; close_todo:false keeps the linked to-do open.",
