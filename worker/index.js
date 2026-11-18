@@ -19,6 +19,8 @@
  *   GET  /api/admin/stories/hidden        stories some tree doesn't show, and why (owner only; worker/hidden-stories.js)
  *   /api/research-sites…                 the research sites list and its credentials (worker/sites.js)
  *   POST /api/stories, PUT|DELETE /api/stories/:slug   editors write, revise and remove stories (worker/stories.js)
+ *   GET  /api/search/semantic?tree=&q=&kinds=&limit=   meaning-based search, filtered to your view (worker/ai-search.js)
+ *   GET  /api/admin/ai-search, POST /api/admin/ai-search/sync   the AI Search index's state, and a sync now (owner)
  *   GET  /media/<key>                    photos/documents from R2, only if attached to someone you can see
  *   POST /mcp                            the MCP server (worker/mcp.js): the same API as tools, for members' own AI clients
  *   everything else                      static app from ./site (contains no family data)
@@ -44,6 +46,7 @@ import { exportGedcom } from "./gedcom_export.js";
 import * as Audit from "./audit.js";
 import * as Sites from "./sites.js";
 import * as Stories from "./stories.js";
+import * as AiSearch from "./ai-search.js";
 import { detailsVisible, familyVisible, batchVisible, editScopeError } from "./edit-access.js";
 import { followAlias, scrubFor, validTreeDefinition, validViewFilter } from "./scope.js";
 import * as Mcp from "./mcp.js";
@@ -143,6 +146,13 @@ async function route(c) {
   if (p === "/api/admin/grants" && (m === "PUT" || m === "DELETE")) return adminGrant(c, m);
   if (p.startsWith("/api/research-sites") && (r = await Sites.route(c, p, m, body))) return r;
   if (p.startsWith("/api/stories") && (r = await Stories.route(c, p, m, { body, grantOrFail, scoped }))) return r;
+  if (p === "/api/search/semantic" && m === "GET") return semanticSearch(c);
+  if (p === "/api/admin/ai-search" && m === "GET") { if (!can.admin(c.access)) fail(403, S.api.auth.ownerOnly); return json(await AiSearch.status(c.env)); }
+  if (p === "/api/admin/ai-search/sync" && m === "POST") {
+    if (!can.admin(c.access)) fail(403, S.api.auth.ownerOnly);
+    const d = await c.request.json().catch(() => ({}));
+    return json(await AiSearch.sync(c.env, { force: d.force !== false }));
+  }
   fail(404, S.api.http.notFound);
 }
 
@@ -164,6 +174,7 @@ async function me(c) {
     trees: a.grants.map((g) => ({ id: g.tree_id, name: g.tree_name, role: g.role, view: g.view_id })),
     sourceOfTruth: await meta(c.env, "source_of_truth"),
     ai: Agent.enabled(c.env), // research runs and AI profiles are available
+    aiSearch: AiSearch.enabled(c.env), // meaning-based search (worker/ai-search.js)
   });
 }
 
@@ -941,6 +952,14 @@ async function graph(c, kind) {
   const id = sp.get("id"), n = Math.min(+sp.get("generations") || 4, 12);
   if (!b.people[id]) fail(404, S.api.http.notFoundDot);
   return json({ id, [kind]: kind === "ancestors" ? Graph.ancestors(idx, id, n) : Graph.descendants(idx, id, n) });
+}
+
+/** Meaning-based search (AI Search), filtered to what the caller's grant and view show. */
+async function semanticSearch(c) {
+  const g = grantOrFail(c);
+  const sp = c.url.searchParams;
+  const kinds = (sp.get("kinds") || "").split(",").map((x) => x.trim()).filter(Boolean);
+  return json(await AiSearch.semanticSearch(c.env, await scoped(c, g), sp.get("q") || "", { kinds, limit: +sp.get("limit") || 10 }), 200, { "Cache-Control": "private, no-store" });
 }
 
 async function linkMe(c) {
