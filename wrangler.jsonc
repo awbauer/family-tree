@@ -36,6 +36,9 @@
   // "vars" block: any variable listed here would overwrite the dashboard value on every deploy.
   // Workers AI: the agents' models through AI Gateway, Cloudflare's Web Search API, and page-to-Markdown conversion.
   "ai": { "binding": "AI" },
+  // AI Search: meaning-based search over the family history (worker/ai-search.js). Its own namespace keeps it apart
+  // from the account's other projects; deploy creates the namespace and the Worker creates its instance on first sync.
+  "ai_search_namespaces": [{ "binding": "AI_SEARCH", "namespace": "family-tree" }],
   // One Durable Object class per agent (Flue generates the classes; their names must match agents/src/agents).
   "durable_objects": {
     "bindings": [
@@ -55,8 +58,9 @@
     { "tag": "v1", "new_sqlite_classes": ["FlueResearcherAgent", "FlueProfileWriterAgent", "FlueStoryReviewerAgent", "FlueAssistantAgent", "FlueQualityReviewerAgent", "FlueStoryWriterAgent", "FlueStoryLibrarianAgent", "FlueSherlockAgent"] }
   ],
   // Weekly content job (AI profiles), Sundays 03:23 UTC (agents/src/cloudflare.js). Does nothing unless
-  // CONTENT_JOB_ENABLED=true.
-  "triggers": { "crons": ["23 3 * * SUN"] },
+  // CONTENT_JOB_ENABLED=true. Every 15 minutes: the AI Search sync (worker/ai-search.js), which does nothing when the
+  // data hasn't changed.
+  "triggers": { "crons": ["23 3 * * SUN", "*/15 * * * *"] },
   // Workers Logs and Traces, everything kept: every invocation (request URL, status, timing), every console line, and
   // every trace span, unsampled. Readable only by members of the Cloudflare account (Workers → this Worker →
   // Observability). Request and response bodies are never logged; agent traces carry no prompt or tool content.

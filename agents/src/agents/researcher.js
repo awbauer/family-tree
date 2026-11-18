@@ -12,6 +12,7 @@ import { SYSTEM, loadRun, markRunning, logRun, recordRunUsage, submitResults, en
 import { personView, searchPeople, relationship, checkSubmission } from "../../../worker/agent/tools.js";
 import { useUsage } from "./usage.js";
 import { useWebTools } from "../web.js";
+import { semanticSearch, enabled as aiSearchEnabled } from "../../../worker/ai-search.js";
 
 const S = settings(env);
 const FINISHED = ["succeeded", "failed", "cancelled"];
@@ -81,6 +82,12 @@ export function Researcher({ id }) {
     description: "Find people in the tree by name (any part of any recorded name, accents ignored). Returns up to 20 matches with id, name and life years.",
     input: v.object({ query: v.string() }),
     async run({ data }) { return { output: searchPeople(await tree(), data.query) }; },
+  });
+  if (aiSearchEnabled(env)) useTool({
+    name: "search_records",
+    description: "Search the family's own records by meaning: people, stories, findings, catalogued sources and the text of attached documents and reports. Finds what a name search can't (\"letters about the move west\", \"who worked at a mill\", \"evidence of a second marriage\"). Returns only what this tree's view shows: kind, id, title, the person it belongs to and a snippet. Read a hit in full with get_person (or the file tools) before relying on it.",
+    input: v.object({ query: str("What you're looking for, in plain words"), limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(25))) }),
+    async run({ data }) { return { output: await semanticSearch(env, await tree(), data.query, { limit: data.limit || 10 }) }; },
   });
   useTool({
     name: "relationship_path",
