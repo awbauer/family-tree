@@ -443,6 +443,36 @@ The code reads both layouts, so deploying it before the move is safe.
 - Families are rebuilt from Couple and ParentChild relationships.
 - The old one-time import (`npm run db:import`) refuses to run against GEDCOM X storage.
 
+## SQL views (the tree as rows and columns)
+
+The tree's records are JSON in D1 (`people.data`, `families.data`, or GEDCOM X Persons and `relationships` after the storage upgrade), so that edits, versions and undo work on whole records. Migration `0013_tree_views.sql` adds read-only views that show the same data as ordinary rows and columns, for the D1 console, Time Travel snapshots and any tool that reads D1:
+
+| view | one row per | columns |
+|---|---|---|
+| `tree_people` | person | `id`, `sex`, `given`, `surname`, `suffix`, `name`, `birth_date`/`_year`/`_place`, `death_date`/`_year`/`_place`, `burial_date`/`_place`, `name_count`, `event_count`, `version`, `updated_at`, `updated_by` |
+| `tree_person_names` | name | `person_id`, `name_index` (0 = main), `fid`, `given`, `surname`, `suffix`, `name_type`, `review_status` |
+| `tree_person_events` | person event | `person_id`, `event_index`, `fid`, `type`, `date`, `year`, `place`, `value`, `note`, `age`, `review_status` |
+| `tree_family_members` | family member | `family_id`, `person_id`, `role` (`husband`, `wife`, `child`), `child_index` |
+| `tree_family_events` | family event | `family_id`, `event_index`, `fid`, `type`, `date`, `year`, `place`, `value`, `note` |
+| `tree_citations` | citation | `entity_type`, `entity_id`, `fid` (the name or event, or null for the person), `citation_index`, `source_id`, `title`, `page`, `url`, `text`, `note` |
+
+- **They follow the data:** views compute from the JSON on every query, so they're never out of date, and they read either storage layout. `tests/tree-views.test.mjs` checks every view against the storage layer's own reading of the tree, in both layouts.
+- **Read only:** nothing writes through them, and the app doesn't read them. Change the tree through the app (edits, suggestions, MCP), so versions, the change log and undo stay right.
+- **Years** are a best-effort reading of the date text (or the GEDCOM X formal date): `Abt 1850` and `2 Feb 1931` work, `Bet 1850 and 1860` gives 1860, and dual dates (`1750/51`) give none. The app's own date parser (`worker/derive.js`) remains the reference. Living status, relationship labels, branches and research status are computed by the app, not stored, so they aren't in the views.
+- **Examples** (Workers & Pages → D1 → family-tree → Console, or `npx wrangler d1 execute DB -c wrangler.local.jsonc --remote --command "…"`):
+
+  ```sql
+  -- everyone born in a place, by year
+  SELECT name, birth_year, birth_place FROM tree_people WHERE birth_place LIKE '%Example Town%' ORDER BY birth_year;
+  -- occupations over time
+  SELECT p.name, e.year, e.value FROM tree_person_events e JOIN tree_people p ON p.id = e.person_id WHERE e.type = 'Occupation' ORDER BY e.year;
+  -- facts with no citation at all
+  SELECT e.person_id, e.type, e.date FROM tree_person_events e
+  LEFT JOIN tree_citations c ON c.entity_id = e.person_id AND c.fid = e.fid WHERE c.fid IS NULL;
+  -- children of a couple
+  SELECT c.person_id FROM tree_family_members c WHERE c.family_id = 'F1' AND c.role = 'child' ORDER BY c.child_index;
+  ```
+
 ## Restore (D1 Time Travel)
 
 D1 keeps point-in-time recovery automatically: 30 days on Workers Paid, 7 on Free. There is no other copy.
