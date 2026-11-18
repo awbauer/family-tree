@@ -21,6 +21,13 @@ export const browse = {
     fields: { name: "name", fact: "fact", note: "note", citation: "citation", status: "research status", title: "title", text: "text", where: "where to look", outcome: "outcome" },
     how: { sounds: (w: string) => `sounds like: ${w}`, close: (w: string) => `spelled close: ${w}` },
     about: "about",
+    meaning: {
+      title: "Related by meaning",
+      hint: "Records about the same idea, even in other words (AI Search), including the text of attached documents and reports.",
+      loading: "Looking for related records…",
+      none: "Nothing closely related.",
+      kind: { person: "Person", story: "Story", finding: "Finding", source: "Source", document: "Document" },
+    },
   },
 
   home: {

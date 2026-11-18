@@ -1,5 +1,5 @@
 // Search everything the viewer can see, grouped by kind, with where each record matched.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useData } from "../data";
 import { useTitle } from "../lib";
@@ -20,6 +20,7 @@ export function Search() {
   const all = useMemo(() => search(indexFor(D), q, { variants }), [D, q, variants]);
   const counts = useMemo(() => Object.fromEntries(KINDS.map((k) => [k, all.filter((h) => h.kind === k).length])), [all]);
   const hits = kind ? all.filter((h) => h.kind === kind) : all;
+  const meaning = useMeaning(q);
   return (
     <div className="wrap page">
       <h1>{L.title}</h1>
@@ -52,7 +53,51 @@ export function Search() {
           ))}
         </ol>
         {hits.length > shown && <button type="button" className="btn" onClick={() => setShown(shown + PAGE)}>{L.more(Math.min(PAGE, hits.length - shown))}</button>}
+        {meaning.available && <section className="search-meaning" aria-live="polite">
+          <h2>{L.meaning.title}</h2>
+          <p className="muted small">{L.meaning.hint}</p>
+          {meaning.loading ? <p className="muted small">{L.meaning.loading}</p> : !meaning.results.length ? <p className="muted small">{L.meaning.none}</p> : (
+            <ol className="search-hits">
+              {meaning.results.map((h) => (
+                <li key={`${h.kind}:${h.id}`}>
+                  <div><span className="badge">{L.meaning.kind[h.kind]}</span> <Link to={meaningPath(h)}>{h.title || h.id}</Link>
+                    {h.person && h.kind !== "person" && D.people[h.person] && <span className="muted small"> · {L.about} <Link to={`/person/${encodeURIComponent(h.person)}`}>{D.people[h.person].name}</Link></span>}
+                  </div>
+                  {h.snippet && <p className="small">{h.snippet}</p>}
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>}
       </>}
     </div>
   );
+}
+
+type MeaningKind = "person" | "story" | "finding" | "source" | "document";
+type MeaningHit = { kind: MeaningKind; id: string; title: string; person?: string; score: number; snippet?: string };
+
+/** Where a meaning-based result opens. Documents open on the person they're attached to. */
+function meaningPath(h: MeaningHit): string {
+  if (h.kind === "document") return h.person ? `/person/${encodeURIComponent(h.person)}` : "/search";
+  return hitPath({ kind: h.kind, id: h.id, person: h.person, title: h.title, score: h.score, matches: [] });
+}
+
+/** Meaning-based results from the Worker (AI Search), a moment after typing stops. Hidden when it isn't set up. */
+function useMeaning(q: string) {
+  const { api, live } = useData();
+  const [state, setState] = useState<{ available: boolean; loading: boolean; results: MeaningHit[] }>({ available: false, loading: false, results: [] });
+  useEffect(() => {
+    const text = q.trim();
+    if (!live || text.length < 3) { setState((s) => ({ ...s, loading: false, results: [] })); return; }
+    let cancelled = false;
+    setState((s) => ({ ...s, loading: true }));
+    const timer = setTimeout(() => {
+      api<{ available: boolean; results: MeaningHit[] }>("GET", `search/semantic?q=${encodeURIComponent(text)}&limit=10`)
+        .then((r) => { if (!cancelled) setState({ available: !!r.available, loading: false, results: r.results || [] }); })
+        .catch(() => { if (!cancelled) setState({ available: false, loading: false, results: [] }); });
+    }, 450);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [q, live, api]);
+  return state;
 }

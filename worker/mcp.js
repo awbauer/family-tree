@@ -47,7 +47,7 @@ const INSTRUCTIONS = `This server is a private family-history database. Everythi
 How to work:
 - Include the returned page_url when referring to a record so the member can open it in the site.
 - Start with whoami (which trees you can use and your role in each) and tree_overview. Every tool takes an optional "tree" (a tree id from whoami); without it, the member's first tree is used.
-- People are I… ids, families F…, sources S…. Events and names carry a fact id ("fid": e1, n1) that edits, reviews and citations point at. Find people with search_people, then get_person. For a word or phrase anywhere (a ship, a street, an employer, an uncertain spelling), use search_text.
+- People are I… ids, families F…, sources S…. Events and names carry a fact id ("fid": e1, n1) that edits, reviews and citations point at. Find people with search_people, then get_person. For a word or phrase anywhere (a ship, a street, an employer, an uncertain spelling), use search_text; for an idea in other words, semantic_search.
 - A person shown as {private: true} is a name only in this member's view: use them to walk the family, never research or change them.
 - Never invent records. Cite only what you actually retrieved and read; a guess is a to-do, not a finding. Negative searches count: log them.
 - Members suggest (suggest_research, suggest_edit); editors review suggestions and edit directly (edit_tree), always with a reason and sources. Use preview_edit to show a change before making it. Never delete people: merge duplicates with person.merge.
@@ -144,6 +144,9 @@ tool("search_text", { title: "Search everything", description: "Full-text search
   props: { query: str("words or \"a phrase\"; accents ignored"), kinds: arr(en(["person", "story", "finding", "todo", "source"], "record kind"), "only these kinds"),
     variants: bool("match name variants and sound-alikes (default true)"), limit: int("max results (default 25, max 100)"), offset: int("skip this many") }, required: ["query"],
   run: async (x, a) => V.searchText(await x.bundle(), a) });
+tool("semantic_search", { title: "Search by meaning", description: "Meaning-based search (Cloudflare AI Search) across people, stories, findings, sources and the text of attached documents and reports: finds records about an idea even when the words differ (\"relatives who worked on the railways\", \"letters about emigrating\", \"who served in the navy\"). Results are only what your view shows, best first, with a snippet. Use search_text for exact words, names and spellings.",
+  props: { query: str("what you're looking for, in plain words"), kinds: arr(en(["person", "story", "finding", "source", "document"], "record kind"), "only these kinds"), limit: int("max results (default 10, max 25)") }, required: ["query"],
+  run: async (x, a) => x.api("GET", `/api/search/semantic${qs({ q: a.query, kinds: (a.kinds || []).join(",") || undefined, limit: a.limit })}`) });
 tool("list_surnames", { title: "Surnames", description: "Every surname with how many people carry it, the years it spans, its branches and its most common places.",
   props: { min_count: int("only surnames with at least this many people") }, run: async (x, a) => V.surnames(await x.bundle(), a) });
 tool("list_places", { title: "Places", description: "Places in the tree with event and people counts, years, event types, and the standardized name and coordinates where known.",
@@ -317,6 +320,10 @@ O("audit_log", { title: "Audit history", description: "Every change to the datab
   run: async (x, a) => x.api("GET", `/api/admin/audit${qs(pick(a, ["actor", "type", "q", "limit", "before"]))}`) });
 O("audit_detail", { title: "Audit detail", description: "One batch from the audit history in full: every record's before and after, its suggestion and agent run (owner).", readOnly: true,
   props: { key: str("batch id or c<row id>") }, required: ["key"], run: async (x, a) => x.api("GET", `/api/admin/audit/${enc(a.key)}`) });
+O("search_index_status", { title: "AI Search index", description: "The AI Search index's state: whether it's set up, how many documents it holds, and whether it's caught up with the latest changes (owner).", readOnly: true,
+  run: async (x) => x.api("GET", "/api/admin/ai-search") });
+O("reindex_search", { title: "Update the AI Search index", description: "Bring the AI Search index up to date now instead of waiting for the 15-minute sync; uploads only what changed, up to 150 documents a run (owner).",
+  run: async (x) => x.api("POST", "/api/admin/ai-search/sync", { force: true }) });
 O("list_hidden_stories", { title: "Hidden stories", description: "The stories some tree doesn't show, and why (owner).", readOnly: true, run: async (x) => x.api("GET", "/api/admin/stories/hidden") });
 O("save_research_site", { title: "Add or change a research site", description: "Add a genealogy site to the research list, or change one (give id). Credentials are set on the site, never through MCP (owner).",
   props: { id: str("site id, to change an existing one"), name: str("name"), url: str("home page"), search_url: str("search URL with {given} {surname} {birth_year} {place}"), domains: arr({ type: "string" }, "domains"), coverage: str("what it covers"),
