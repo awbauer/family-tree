@@ -117,7 +117,7 @@ export function validateBatch(b, visible) {
   return errs;
 }
 
-const slugify = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+export const slugify = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
 
 /** D1 statements that apply an approved research batch. Idempotent like merge_research.py (skips duplicates). */
 export async function researchStatements(env, b, { actor, actorKind, proposalId, treeId, canReadTodo }) {

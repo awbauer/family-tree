@@ -2,6 +2,7 @@
 // entities back in one D1 batch guarded by versions, with an audit row per entity sharing a batch id.
 // Reverting a batch restores the "before" snapshots if nothing has changed those entities since.
 
+import { revertStatements as storyRevert } from "./stories.js";
 import { applyOps } from "./ops.js";
 import { J, now, parse, bumpVersion, guard } from "./db.js";
 import { readTree, writeRecord, restoreRecord, mode as storageMode } from "./storage.js";
@@ -167,6 +168,10 @@ export async function revertBatch(env, batchId, { actor, actorKind, reason, extr
       st.push(env.DB.prepare("UPDATE findings SET data = ?, version = version + 1 WHERE id = ?").bind(J(data), +r.entity_id));
       st.push(env.DB.prepare("INSERT INTO changes (at, actor, actor_kind, entity_type, entity_id, op, before, after, reason, batch_id) VALUES (?, ?, ?, 'finding', ?, 'revert', ?, ?, ?, ?)")
         .bind(t, actor, actorKind, r.entity_id, r.after, r.before, reason || `revert ${batchId}`, nb));
+      continue;
+    }
+    if (r.entity_type === "story") {
+      st.push(...await storyRevert(env, r, { t, actor, actorKind, reason: reason || `revert ${batchId}`, batch: nb }));
       continue;
     }
     if (!["person", "family", "source", "status"].includes(r.entity_type)) continue;

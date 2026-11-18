@@ -18,6 +18,7 @@
  *   GET  /api/admin/audit, /api/admin/audit/:key   the audit history of every change (owner only; worker/audit.js)
  *   GET  /api/admin/stories/hidden        stories some tree doesn't show, and why (owner only; worker/hidden-stories.js)
  *   /api/research-sites…                 the research sites list and its credentials (worker/sites.js)
+ *   POST /api/stories, PUT|DELETE /api/stories/:slug   editors write, revise and remove stories (worker/stories.js)
  *   GET  /media/<key>                    photos/documents from R2, only if attached to someone you can see
  *   POST /mcp                            the MCP server (worker/mcp.js): the same API as tools, for members' own AI clients
  *   everything else                      static app from ./site (contains no family data)
@@ -42,6 +43,7 @@ import * as Storage from "./storage.js";
 import { exportGedcom } from "./gedcom_export.js";
 import * as Audit from "./audit.js";
 import * as Sites from "./sites.js";
+import * as Stories from "./stories.js";
 import { detailsVisible, familyVisible, batchVisible, editScopeError } from "./edit-access.js";
 import { followAlias, scrubFor, validTreeDefinition, validViewFilter } from "./scope.js";
 import * as Mcp from "./mcp.js";
@@ -140,6 +142,7 @@ async function route(c) {
   if ((r = p.match(/^\/api\/admin\/(trees|views|members)\/([^/]+)$/)) && m === "PUT") return adminPut(c, r[1], decodeURIComponent(r[2]));
   if (p === "/api/admin/grants" && (m === "PUT" || m === "DELETE")) return adminGrant(c, m);
   if (p.startsWith("/api/research-sites") && (r = await Sites.route(c, p, m, body))) return r;
+  if (p.startsWith("/api/stories") && (r = await Stories.route(c, p, m, { body, grantOrFail, scoped }))) return r;
   fail(404, S.api.http.notFound);
 }
 
@@ -681,6 +684,7 @@ const visibleRow = (c, b) => (r) => {
     familyVisible(b, parse(r.before), (person) => visibleRef(b, person)) && familyVisible(b, parse(r.after), (person) => visibleRef(b, person));
   if (r.entity_type === "finding") return (b.research.findings || []).some((f) => String(f.id) === id);
   if (r.entity_type === "source") return b.scope.view.sources && Object.hasOwn(b.sources, id);
+  if (r.entity_type === "story") return Stories.storyVisible(b, parse(r.before)) && Stories.storyVisible(b, parse(r.after));
   return r.entity_type === "config" && id === "media_map" ? b.scope.view.media : c.access.isOwner;
 };
 
@@ -689,10 +693,12 @@ async function history(c) {
   const b = await scoped(c, g);
   const id = c.url.searchParams.get("id");
   let rows;
-  if (id) rows = await entityRows(c, g, b, id);
+  const story = c.url.searchParams.get("story");
+  if (story) rows = (await c.env.DB.prepare("SELECT * FROM changes WHERE entity_type = 'story' AND entity_id = ? ORDER BY id DESC LIMIT 200").bind(story).all()).results.filter(visibleRow(c, b));
+  else if (id) rows = await entityRows(c, g, b, id);
   else {
     if (!can.review(g)) fail(403, S.api.history.editorsFull);
-    rows = (await c.env.DB.prepare("SELECT * FROM changes WHERE entity_type IN ('person','family','source','config','status') ORDER BY id DESC LIMIT 200").all()).results.filter(visibleRow(c, b));
+    rows = (await c.env.DB.prepare("SELECT * FROM changes WHERE entity_type IN ('person','family','source','config','status','story') ORDER BY id DESC LIMIT 200").all()).results.filter(visibleRow(c, b));
   }
   const batches = {};
   for (const r of rows) {
