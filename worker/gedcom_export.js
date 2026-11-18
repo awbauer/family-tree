@@ -298,7 +298,7 @@ export function exportGedcom(bundle, { title, now } = {}) {
     g.opt(2, "TITL", item.caption);
     if (item.portrait) g.raw(1, "_PRIM", "Y");
     g.opt(1, "DATE", item.date);
-    g.opt(1, "NOTE", [item.place && `Place: ${item.place}`, item.note].filter(nonEmpty).join(". "));
+    g.opt(1, "NOTE", [item.place && `Place: ${item.place}`, item.note, item.transcript && `Transcript: ${item.transcript}`].filter(nonEmpty).join(". "));
     if (nonEmpty(item.source)) {
       const ptr = sourcePtr(item.source);
       if (ptr) g.ptr(1, "SOUR", ptr); else g.text(1, "SOUR", item.source);

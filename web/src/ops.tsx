@@ -158,7 +158,7 @@ export function OpText({ o }: { o: any }) {
     case "source.delete": return parts(O.sourceDelete(<SourceLink id={o.id} />));
     case "media.attach": return parts(document ? O.documentAttach(S.person.attachments[document], W(o.person), o.caption) : O.mediaAttach(W(o.person), o.caption));
     case "media.detach": return parts(document ? O.documentDetach(S.person.attachments[document], W(o.person)) : O.mediaDetach(W(o.person)));
-    case "media.update": return parts(O.mediaUpdate(W(o.person), Object.entries(o.set || {}).filter(([, v]) => v).map(([k, v]) => O.mediaSet(k, String(v))).join(", ") || O.clearDetails));
+    case "media.update": return parts(O.mediaUpdate(W(o.person), Object.entries(o.set || {}).filter(([, v]) => v).map(([k, v]) => (k === "transcript" ? O.transcriptSet(String(v).length) : O.mediaSet(k, String(v)))).join(", ") || O.clearDetails));
     case "media.set_primary": return parts(O.mediaSetPrimary(W(o.person)));
     default: return <>{o.op}</>;
   }
@@ -205,6 +205,7 @@ function mediaDiff(a: any[] = [], b: any[] = []) {
     if (!o) continue;
     if (!o.portrait && m.portrait) out.push(<li className="d-chg"><b>{X.mainPhoto}</b> → {label(m)}</li>);
     for (const k of ["caption", "date", "place", "type", "note", "source"]) if ((o[k] || "") !== (m[k] || "")) out.push(<Chg label={X.field(kind(f), k)} from={o[k]} to={m[k]} />);
+    if ((o.transcript || "") !== (m.transcript || "")) out.push(<Chg label={X.field(kind(f), "transcript")} from={o.transcript && O.transcriptSet(o.transcript.length)} to={m.transcript && O.transcriptSet(m.transcript.length)} />);
   }
   return out;
 }

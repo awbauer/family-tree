@@ -61,7 +61,7 @@ citation.add {entity, id, fid?, citation} · citation.remove {entity, id, fid?, 
 fact.review {entity, id, fid, status:"verified"|"disputed"|"unverified", note, evidence?:[{index}|citation], finding?}
 family.create {id?, husband?, wife?, children?, events?} · family.set_spouse {family, role:"husband"|"wife", person|null} · family.swap_spouses {family} · family.add_child / family.remove_child {family, person} · family.delete {family} · family.merge {keep, drop}
 source.upsert {id?, data:{title, type?, author?, publication?, url?, repository?, apid?, note?, text?}} · source.merge {keep, drop} · source.delete {id}
-media.attach {person, file, caption?, type?, date?, place?, note?, source?, portrait?} · media.update {person, file, set:{caption?, type?, date?, place?, note?, source?}} (set source to a catalogued source id, or null to unlink it) · media.set_primary {person, file} · media.detach {person, file}
+media.attach {person, file, caption?, type?, date?, place?, note?, source?, transcript?, portrait?} · media.update {person, file, set:{caption?, type?, date?, place?, note?, source?, transcript?}} (transcript: what a photo, scan or attachment says, word for word, up to 100,000 characters; null clears it) (set source to a catalogued source id, or null to unlink it) · media.set_primary {person, file} · media.detach {person, file}
 A citation: {source?:"S…", title?, url?, page?, text?, note?, accessed?, source_type?:"original"|"derivative"|"authored", information?:"primary"|"secondary"|"undetermined", evidence?:"direct"|"indirect"|"negative", quality?:0-3, personal?:true}.`;
 
 const BATCH_HELP = `A research batch: {findings?:[{person, kind:"confirmed"|"correction"|"conflict"|"data-error"|"new-fact"|"new-person", field?, fact?:"e3", claim?, finding, confidence:"high"|"medium"|"low", sources:[{title, url?|note?}], proposed_ops?:[op]}], log?:[{person?, searched, result:"found"|"nil"|"inconclusive", note?, url?}], todo?:[{person?, task, where?, priority:"high"|"medium"|"low"}], todo_done?:[{id, outcome?}], people_status?:{"I…":{status:"unverified"|"partly-verified"|"verified"|"disputed", note?}}, stories?:[{title, body, people:[ids], sources:[…], era?}], story_updates?:[{slug, title?, body, people?, sources, reason?}]}. Every finding and story needs sources; story bodies link people as [[I12|Name]].`;
@@ -192,7 +192,7 @@ tool("get_history", { title: "Change history", description: "Who changed what an
   props: { id: str("person or family id (leave out for the whole tree; editors only)"), story: str("a story's slug: its revisions") }, run: async (x, a) => x.api("GET", `/api/history${qs({ id: a.id, story: a.story })}`) });
 tool("get_provenance", { title: "Provenance (PROV-O)", description: "W3C PROV-O (JSON-LD) for one person's records: every change, who made it, from which suggestion and evidence. Editors may ask for an agent run's provenance instead.",
   props: { id: str("person id"), run: str("agent run id (editors)") }, run: async (x, a) => x.api("GET", `/api/prov${qs({ id: a.id, run: a.run })}`) });
-tool("get_media", { title: "Get photo or document", description: "A photo or scanned document attached to someone you can see (its `file` from get_person), returned as an image or a PDF.",
+tool("get_media", { title: "Get photo or document", description: "A photo or scanned document attached to someone you can see (its `file` from get_person), returned as an image or a PDF, followed by its stored transcript when it has one.",
   props: { file: str("the media file key") }, required: ["file"], run: (x, a) => media(x, a.file) });
 tool("list_attachments", { title: "List attachments and reports", description: "List general attachments and Markdown reports attached to one person in your view.",
   props: { person: str("person id"), type: en(["attachment", "report"], "omit to list both") }, required: ["person"],
@@ -201,9 +201,9 @@ tool("list_attachments", { title: "List attachments and reports", description: "
     if (!Object.hasOwn(b.people, a.person) || b.people[a.person].private) fail(404, M.notInTree(a.person));
     const linkedTo = (file) => Object.entries(b.research.media || {}).filter(([pid, items]) => pid !== a.person && !(b.people[pid] || {}).private && items.some((m) => m.file === file)).map(([pid]) => ({ id: pid, name: b.people[pid] && b.people[pid].name }));
     return { attachments: documentsFor(b, a.person).filter((m) => !a.type || documentType(m.file) === a.type)
-      .map((m) => ({ ...m, also_linked_to: linkedTo(m.file), download_url: documentUrl(x, m.file) })) };
+      .map((m) => ({ ...V.withTranscriptExcerpt(m), also_linked_to: linkedTo(m.file), download_url: documentUrl(x, m.file) })) };
   } });
-tool("get_attachment", { title: "Open an attachment", description: "Get a private attachment by its file key. Files up to 8 MB are embedded. Larger files return an authenticated download link.",
+tool("get_attachment", { title: "Open an attachment", description: "Get a private attachment by its file key, with its stored transcript when it has one. Files up to 8 MB are embedded. Larger files return an authenticated download link.",
   props: { file: str("attachment file key from list_attachments") }, required: ["file"],
   run: (x, a) => getDocument(x, a.file, "attachment") });
 tool("get_report", { title: "Read a Markdown report", description: "Read the original Markdown of a visible report by its file key.",
@@ -269,15 +269,14 @@ W("upload_media", { title: "Upload a photo or document", description: "Upload a 
     return x.api("POST", `/api/media/upload${qs({ name: a.name || "upload" })}`, bytes, { "Content-Type": a.content_type, "Content-Length": String(bytes.byteLength) });
   } });
 W("add_attachment", { title: "Add an attachment", description: "Upload any file (up to 20 MB) and attach it to a person (and optionally to more people, via also), optionally linking an existing source. Members submit it for review.",
-  props: { person: str("person id"), also: { type: "array", items: { type: "string" }, description: "more person ids to attach the same file to" }, name: str("original filename"), title: str("optional display title"), source: str("existing catalogued source id from get_source"), data_base64: str("file bytes as base64") },
+  props: { person: str("person id"), also: { type: "array", items: { type: "string" }, description: "more person ids to attach the same file to" }, name: str("original filename"), title: str("optional display title"), source: str("existing catalogued source id from get_source"), data_base64: str("file bytes as base64"),
+    transcript: str("optional: what the document says, word for word (editors: saved with it; members: add it with set_transcript once the attachment is approved)") },
   required: ["person", "name", "data_base64"],
-  run: (x, a) => {
-    return addDocument(x, a, "attachment", uploadBytes(a.data_base64));
-  } });
+  run: async (x, a) => withTranscript(x, a, await addDocument(x, a, "attachment", uploadBytes(a.data_base64))) });
 W("add_report", { title: "Add a report", description: "Attach UTF-8 Markdown as a report with a built-in viewer, to a person (and optionally to more people, via also), and optionally link an existing source. For an already uploaded report, use media.update with set.source; to link it to someone else later, use link_document. Members submit it for review.",
-  props: { person: str("person id"), also: { type: "array", items: { type: "string" }, description: "more person ids to attach the same report to" }, name: str("filename ending in .md or .markdown"), title: str("optional display title"), source: str("existing catalogued source id from get_source"), markdown: str("the report in Markdown") },
+  props: { person: str("person id"), also: { type: "array", items: { type: "string" }, description: "more person ids to attach the same report to" }, name: str("filename ending in .md or .markdown"), title: str("optional display title"), source: str("existing catalogued source id from get_source"), markdown: str("the report in Markdown"), transcript: str("optional: a transcript of the source the report is about") },
   required: ["person", "name", "markdown"],
-  run: (x, a) => addDocument(x, a, "report", new TextEncoder().encode(a.markdown)) });
+  run: async (x, a) => withTranscript(x, a, await addDocument(x, a, "report", new TextEncoder().encode(a.markdown))) });
 W("link_document", { title: "Link an attachment or report to more people", description: "Link an attachment or report that is already attached to someone in your view to more people (one shared file, listed on each person). Editors link directly; members submit it for review. To unlink it from one person, use a media.detach op.",
   props: { file: str("attachment or report file key from list_attachments"), people: { type: "array", items: { type: "string" }, description: "person ids to link it to" }, reason: str("why (optional)") },
   required: ["file", "people"],
@@ -286,7 +285,7 @@ W("link_document", { title: "Link an attachment or report to more people", descr
     const b = await x.bundle();
     const item = Object.values(b.research.media || {}).flat().find((m) => m && m.file === a.file);
     if (!item) fail(404, M.notInTree(a.file));
-    const ops = [...new Set(a.people || [])].map((person) => ({ op: "media.attach", person, file: a.file, caption: item.caption, ...(item.source ? { source: item.source } : {}) }));
+    const ops = [...new Set(a.people || [])].map((person) => ({ op: "media.attach", person, file: a.file, caption: item.caption, ...(item.source ? { source: item.source } : {}), ...(item.transcript ? { transcript: item.transcript } : {}) }));
     if (!ops.length) fail(400, S.api.uploads.personRequired);
     const reason = String(a.reason || "").trim() || `Linked "${item.caption || a.file}" to more people`;
     const g = x.grant();
@@ -298,6 +297,10 @@ W("link_document", { title: "Link an attachment or report to more people", descr
     const r = await x.api("POST", "/api/proposals", { kind: "edit", payload: { reason, ops }, rationale: reason });
     return { file: a.file, people, proposal: r.proposal && r.proposal.id };
   } });
+W("set_transcript", { title: "Set a transcript", description: "Save what a photo, scan or attachment says, word for word: a census page, a letter, a gravestone, a certificate. It's stored with the file on every person in your view it's attached to (or only on `person`), shown by get_person, get_media and get_attachment, and found by search_text and semantic_search. Transcribe only what you actually read in the file; mark unclear words [illegible] or [?]. Editors save it directly (undoable); members and agents submit it for review. An empty transcript clears it.",
+  props: { file: str("the file key, from get_person or list_attachments"), transcript: { type: ["string", "null"], description: "the transcript (up to 100,000 characters); empty or null clears it" },
+    person: str("only on this person's copy (default: every person in your view the file is attached to)"), reason: str("where the transcript comes from (optional)") }, required: ["file", "transcript"],
+  run: async (x, a) => setTranscript(x, a.file, a.transcript, { person: a.person, reason: a.reason }) });
 W("link_my_person", { title: "Link me to my person", description: "Say which person in the tree you are, so relationships are labelled relative to you. null unlinks.",
   props: { person_id: { type: ["string", "null"], description: "person id, or null" } }, required: ["person_id"],
   run: async (x, a) => x.api("PUT", "/api/me/person", { tree: x.treeId, person_id: a.person_id }) });
@@ -443,7 +446,48 @@ function addDocument(x, args, type, bytes) {
   });
 }
 
+/** Set (or clear) the transcript of `file` on the people in the caller's view it's attached to: an edit for editors,
+ *  a suggestion for everyone else, through the site's own routes. */
+async function setTranscript(x, file, transcript, { person, reason } = {}) {
+  const b = await x.bundle();
+  const people = Object.entries((b.research && b.research.media) || {})
+    .filter(([pid, list]) => (!person || pid === person) && b.people[pid] && !b.people[pid].private && (list || []).some((m) => m && m.file === file))
+    .map(([pid]) => pid);
+  if (!people.length) fail(404, M.notInTree(file));
+  const ops = people.map((pid) => ({ op: "media.update", person: pid, file, set: { transcript: transcript == null ? null : String(transcript) } }));
+  const why = String(reason || "").trim() || M.transcriptReason;
+  if (can.review(x.grant()) && x.c.access.kind !== "agent") {
+    const r = await x.api("POST", "/api/edit", { reason: why, ops });
+    return { file, people, batch: r.batch };
+  }
+  const r = await x.api("POST", "/api/proposals", { kind: "edit", payload: { reason: why, ops }, rationale: why });
+  return { file, people, proposal: r.proposal && r.proposal.id };
+}
+
+/** After add_attachment / add_report: save the transcript given with it, when the file was attached directly. */
+async function withTranscript(x, a, added) {
+  if (!a.transcript || !String(a.transcript).trim()) return added;
+  if (!added || !added.batch) return { ...added, transcript: M.transcriptAfterReview };
+  const t = await setTranscript(x, added.file, a.transcript, { reason: a.title || a.name });
+  return { ...added, transcript_batch: t.batch };
+}
+
+/** The stored transcript of a file, from the caller's view (any person's copy that has one). */
+async function storedTranscript(x, file) {
+  const b = await x.bundle();
+  for (const list of Object.values((b.research && b.research.media) || {})) for (const m of list || []) if (m && m.file === file && m.transcript) return m.transcript;
+  return undefined;
+}
+const transcriptPart = (t) => ({ type: "text", text: JSON.stringify({ transcript: t }) });
+
 async function getDocument(x, file, type) {
+  const out = await openDocument(x, file, type);
+  const transcript = await storedTranscript(x, file);
+  if (!transcript) return out;
+  return Array.isArray(out.content) ? { content: [...out.content, transcriptPart(transcript)] } : { ...out, transcript };
+}
+
+async function openDocument(x, file, type) {
   if (documentType(file) !== type || !x.c.env.MEDIA) fail(404, M.notInTree(file));
   const uri = documentUrl(x, file);
   const response = await x.downloadDocument(uri, file);
@@ -483,8 +527,10 @@ async function media(x, file) {
   if (obj.writeHttpMetadata) obj.writeHttpMetadata(h);
   const type = safeMediaType(h.get("Content-Type"));
   const data = b64(buf);
+  const transcript = await storedTranscript(x, file);
   return { content: [type.startsWith("image/") ? { type: "image", data, mimeType: type }
-    : { type: "resource", resource: { uri: `${x.c.url.origin}/media/${file.split("/").map(enc).join("/")}${qs({ tree: x.treeId })}`, mimeType: type, blob: data } }] };
+    : { type: "resource", resource: { uri: `${x.c.url.origin}/media/${file.split("/").map(enc).join("/")}${qs({ tree: x.treeId })}`, mimeType: type, blob: data } },
+    ...(transcript ? [transcriptPart(transcript)] : [])] };
 }
 
 const textResult = (v) => ({ content: [{ type: "text", text: typeof v === "string" ? v : JSON.stringify(v) }] });

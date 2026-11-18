@@ -389,7 +389,7 @@ export function exportDoc(b, { now = new Date(), title = "Family tree" } = {}) {
     for (const m of list) {
       const id = `photo-${++n}`;
       sds.push(clean({ id, resourceType: GX + "DigitalArtifact", about: m.file, mediaType: MIME[String(m.file).split(".").pop().toLowerCase()],
-        titles: m.caption ? [{ value: m.caption }] : undefined, [ft("mediaKind")]: m.type, [ft("date")]: m.date, [ft("place")]: m.place, [ft("note")]: m.note }));
+        titles: m.caption ? [{ value: m.caption }] : undefined, [ft("mediaKind")]: m.type, [ft("date")]: m.date, [ft("place")]: m.place, [ft("note")]: m.note, [ft("transcript")]: m.transcript }));
       (byId[pid].media = byId[pid].media || []).push(clean({ description: `#${id}`, [ft("primary")]: m.portrait ? true : undefined }));
     }
     byId[pid].media && byId[pid].media.sort((x, y) => (y[ft("primary")] ? 1 : 0) - (x[ft("primary")] ? 1 : 0)); // main photo first

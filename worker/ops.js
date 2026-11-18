@@ -35,6 +35,8 @@ export const CITATION_ENUMS = {
 // GEDCOM 7 MEDI enumeration, lower-cased.
 export const MEDIA_TYPES = ["audio", "book", "card", "electronic", "fiche", "film", "magazine", "manuscript", "map", "newspaper", "photo", "tombstone", "video", "other"];
 const MEDIA_FIELDS = ["caption", "date", "place", "source", "note"];
+/** A transcript of a photo, scan or attachment: what it says, word for word (images and documents alike). */
+export const TRANSCRIPT_LIMIT = 100000;
 // What kind of source a catalogued source record is (source.upsert `type`).
 export const SOURCE_KINDS = ["original", "derivative", "tree", "book", "website"];
 const SOURCE_FIELDS = ["title", "type", "author", "publication", "url", "repository", "apid", "note", "text"];
@@ -143,6 +145,11 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
   };
   const cleanMedia = (o, m, i) => {
     for (const k of MEDIA_FIELDS) if (k in o) { if (o[k] == null || o[k] === "") delete m[k]; else m[k] = String(o[k]).slice(0, 1000); }
+    if ("transcript" in o) {
+      const t = o.transcript == null ? "" : String(o.transcript).replace(/\r\n?/g, "\n");
+      if (t.length > TRANSCRIPT_LIMIT) throw new OpError(M.transcriptTooLong(TRANSCRIPT_LIMIT), i);
+      if (t.trim()) m.transcript = t; else delete m.transcript;
+    }
     const document = documentType(m.file);
     if (document) {
       if (o.source != null && o.source !== "" && !Object.hasOwn(S.sources, o.source)) throw new OpError(M.noSource(o.source), i);

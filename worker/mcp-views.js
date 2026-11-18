@@ -10,6 +10,12 @@ const norm = (x) => String(x || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toL
 const has = (v) => v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && !v.length);
 /** Drop empty fields, so answers stay short. */
 export const compact = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => has(v)));
+/** A photo's or attachment's transcript, shortened for listings: the full text comes with get_media / get_attachment. */
+export const TRANSCRIPT_EXCERPT = 1500;
+export function withTranscriptExcerpt(m) {
+  if (!m || !m.transcript || m.transcript.length <= TRANSCRIPT_EXCERPT) return m;
+  return { ...m, transcript: `${m.transcript.slice(0, TRANSCRIPT_EXCERPT)}…`, transcript_truncated: true, transcript_length: m.transcript.length };
+}
 const yearOf = (e) => (e && e.sort ? Math.floor(e.sort / 10000) : null);
 const clampInt = (v, d, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(+v) && v !== null && v !== "" ? Math.floor(+v) : d));
 
@@ -137,9 +143,9 @@ export function person(b, id, { comments } = {}) {
     events: (p.events || []).map((e) => eventOut(b, e)),
     citations: (p.citations || []).map((c) => cite(b, c)),
     notes: p.notes,
-    attachments: documentsFor(b, id),
+    attachments: documentsFor(b, id).map(withTranscriptExcerpt),
     media: [
-      ...(((b.research && b.research.media) || {})[id] || []).filter((m) => !documentType(m.file)).map((m) => compact({ file: m.file, caption: m.caption, type: m.type, date: m.date, place: m.place, note: m.note, source: m.source, main: m.portrait || undefined })),
+      ...(((b.research && b.research.media) || {})[id] || []).filter((m) => !documentType(m.file)).map((m) => compact(withTranscriptExcerpt({ file: m.file, caption: m.caption, type: m.type, date: m.date, place: m.place, note: m.note, source: m.source, main: m.portrait || undefined, transcript: m.transcript }))),
       ...(p.media || []).map((mid) => (b.media || {})[mid]).filter(Boolean).map((m) => compact({ id: m.id, file: m.file, caption: m.title, type: m.type, date: m.date, place: m.place, imported: true })),
     ],
     profile: p.profile && p.profile.text,

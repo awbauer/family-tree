@@ -18,7 +18,7 @@ export const browse = {
     all: "All",
     kinds: { person: "People", story: "Stories", finding: "Findings", todo: "To-dos", source: "Sources" },
     kind: { person: "Person", story: "Story", finding: "Finding", todo: "To-do", source: "Source" },
-    fields: { name: "name", fact: "fact", note: "note", citation: "citation", status: "research status", title: "title", text: "text", where: "where to look", outcome: "outcome" },
+    fields: { name: "name", fact: "fact", note: "note", citation: "citation", status: "research status", title: "title", text: "text", where: "where to look", outcome: "outcome", transcript: "transcript" },
     how: { sounds: (w: string) => `sounds like: ${w}`, close: (w: string) => `spelled close: ${w}` },
     about: "about",
     meaning: {
