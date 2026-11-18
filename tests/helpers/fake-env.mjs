@@ -27,7 +27,8 @@ class Stmt {
 }
 
 export class FakeD1 {
-  constructor() { this.db = new DatabaseSync(":memory:"); }
+  // D1's SQLite limits (developers.cloudflare.com/d1/platform/limits), so a query D1 would refuse fails here too
+  constructor() { this.db = new DatabaseSync(":memory:", { limits: { compoundSelect: 5, likePatternLength: 50 } }); }
   prepare(sql) { return new Stmt(this.db, sql); }
   async batch(stmts) {
     this.db.exec("BEGIN");
