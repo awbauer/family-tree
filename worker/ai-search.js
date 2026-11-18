@@ -69,6 +69,12 @@ export function personDoc(full, id) {
   if (cites.length) out.push("", "## Sources", ...cites.map((c) => `- ${c}`));
   if ((p.notes || []).length) out.push("", "## Notes", ...p.notes.map((n) => String(typeof n === "string" ? n : n.text || "")));
   if (p.profile && p.profile.text) out.push("", "## Profile", p.profile.text);
+  const files = ((full.research && full.research.media) || {})[id] || [];
+  const described = files.filter((m) => m && (m.caption || m.transcript));
+  if (described.length) {
+    out.push("", "## Photos and documents");
+    for (const m of described) out.push(`- ${line(m.caption || m.file, m.type, m.date, m.place)}${m.transcript ? `\n  Transcript: ${m.transcript.replace(/\s+/g, " ")}` : ""}`);
+  }
   if (p.statusNote) out.push("", `Research status: ${p.status}. ${p.statusNote}`);
   return out.join("\n");
 }
@@ -188,7 +194,7 @@ function visibleAs(b, r) {
   if (r.kind === "person") {
     const id = followAlias(b.aliases, r.id);
     if (!detailsVisible(b, id)) return null;
-    return { id, title: b.people[id].name, person: id, snippetOk: v.notes && v.sources && v.research };
+    return { id, title: b.people[id].name, person: id, snippetOk: v.notes && v.sources && v.research && v.media };
   }
   if (r.kind === "story") { const s = (R.stories || []).find((x) => x.slug === r.id); return s && { title: s.title, snippetOk: true }; }
   if (r.kind === "finding") { const f = (R.findings || []).find((x) => String(x.id) === r.id); return f && { title: f.claim || f.kind || `Finding ${f.id}`, person: f.person || undefined, snippetOk: true }; }

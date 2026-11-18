@@ -143,6 +143,7 @@ export const common = {
     mediaDetach: <T,>(who: T) => ["detach a photo/document from ", who],
     mediaUpdate: <T,>(who: T, changes: string) => ["update photo details on ", who, `: ${changes}`],
     mediaSet: (field: string, value: string) => `${field} “${value}”`,
+    transcriptSet: (chars: number) => `transcript (${chars.toLocaleString("en-US")} characters)`,
     clearDetails: "clear details",
     mediaSetPrimary: <T,>(who: T) => ["make a photo the main photo of ", who],
   },

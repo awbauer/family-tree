@@ -27,10 +27,18 @@ function fileEntry(b, person, item) {
     person, file: item.file, title: item.caption || item.title || item.file.split("/").at(-1),
     type: type || item.type || "media",
     date: item.date || undefined, place: item.place || undefined, note: item.note || undefined,
+    has_transcript: item.transcript ? true : undefined,
     source: item.source && Object.hasOwn(b.sources || {}, item.source) ? item.source : undefined,
     page: `/person/${enc(person)}?${section}`,
     bucket_reference: keyPath(item.file),
   };
+}
+
+/** The transcript saved with a file, from any visible person's copy of it. */
+export function storedTranscript(b, file) {
+  if (!b.scope.view.media) return undefined;
+  for (const list of Object.values(b.research.media || {})) for (const m of list || []) if (m && m.file === file && m.transcript) return m.transcript;
+  return undefined;
 }
 
 export function personRecordFiles(b, person) {
@@ -108,6 +116,9 @@ export async function readRecordFile(env, bundle, { person, source, file, offset
   if (found.error) return found;
   const entry = found.files.find((item) => item.file === file);
   if (!entry) return { error: T.notVisible };
+  // a transcript someone already saved for this file: read that rather than the file (no model call for an image)
+  const stored = storedTranscript(bundle, file);
+  if (stored && !focus) return excerpt({ ...entry, filename: file.split("/").at(-1) }, stored, offset, "stored_transcript");
   if (!entry.bucket_reference) return { ...entry, error: T.external };
   if (!env.MEDIA) return { ...entry, error: T.unavailable };
   const object = await env.MEDIA.get(entry.file);

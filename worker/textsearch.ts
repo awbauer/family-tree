@@ -92,7 +92,7 @@ const closeLimit = (n: number) => (n >= 8 ? 2 : n >= 5 ? 1 : 0);
 export type Kind = "person" | "story" | "finding" | "todo" | "source";
 export type How = "exact" | "sounds" | "close";
 /** Field keys; the site and the MCP server label them. */
-export type Field = "name" | "fact" | "note" | "citation" | "status" | "title" | "text" | "where" | "outcome";
+export type Field = "name" | "fact" | "note" | "citation" | "status" | "title" | "text" | "where" | "outcome" | "transcript";
 type Doc = { kind: Kind; id: string; title: string; person?: string; private?: boolean; fields: { field: Field; text: string; name?: boolean }[] };
 export type Index = { docs: Doc[]; names: Map<string, { codes: string[] }> };
 
@@ -121,6 +121,8 @@ export function buildIndex(tree: any): Index {
       for (const n of p.notes || []) fields.push({ field: "note", text: n });
       for (const c of p.citations || []) fields.push({ field: "citation", text: citeText(c) });
       if (p.statusNote) fields.push({ field: "status", text: p.statusNote });
+      // what the person's photos, scans and attachments say, transcribed
+      for (const m of (R.media && R.media[p.id]) || []) if (m && m.transcript) fields.push({ field: "transcript", text: m.transcript });
     }
     docs.push({ kind: "person", id: p.id, title: p.name, private: !!p.private, fields });
   }

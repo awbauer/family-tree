@@ -103,6 +103,7 @@ export const api = {
     sourceStillCited: (id: string, n: number) => `source ${id} is still cited ${plural(n, "time", "times")}; merge it into another source instead`,
     fileKey: "file must be an R2 key like uploads/…",
     noMedia: (file: unknown) => `no photo or document ${JSON.stringify(file)} on this person`,
+    transcriptTooLong: (max: number) => `a transcript can be at most ${max.toLocaleString("en-US")} characters`,
     unknownOp: (op: unknown) => `unknown op ${JSON.stringify(op)}`,
     missingMember: (fid: string, pid: string) => `family ${fid} points at missing person ${pid}`,
   },
@@ -377,6 +378,8 @@ export const api = {
     postOnly: "The MCP endpoint takes JSON-RPC over POST (Streamable HTTP, no SSE stream).",
     mediaTooLarge: (mb: number) => `That file is over ${mb} MB, too large to return through MCP. Open it on the site.`,
     badBase64: "data_base64 isn't valid base64.",
+    transcriptReason: "Transcript of the file, as read",
+    transcriptAfterReview: "Not saved yet: the attachment is waiting for review. Add the transcript with set_transcript once it's approved.",
     failed: (status: number, msg: string) => `${msg} (HTTP ${status})`,
   },
 
