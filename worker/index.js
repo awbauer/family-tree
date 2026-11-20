@@ -45,6 +45,7 @@ import * as Storage from "./storage.js";
 import { exportGedcom } from "./gedcom_export.js";
 import * as Audit from "./audit.js";
 import * as Sites from "./sites.js";
+import { withResilientDB } from "./d1-retry.js";
 import * as Stories from "./stories.js";
 import * as AiSearch from "./ai-search.js";
 import { detailsVisible, familyVisible, batchVisible, editScopeError } from "./edit-access.js";
@@ -59,6 +60,7 @@ const PRIORITY = ["high", "medium", "low"];
 
 export default {
   async fetch(request, env, ctx) {
+    env = withResilientDB(env); // ride out D1's brief refusals instead of failing the request (worker/d1-retry.js)
     const url = new URL(request.url);
     const isApi = url.pathname.startsWith("/api/");
     const isMedia = url.pathname.startsWith("/media/");
