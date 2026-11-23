@@ -28,6 +28,9 @@ export const common = {
     notSignedIn: "Not signed in.",
     serverAnswered: (status: number) => `The server answered ${status}.`,
     loading: "Loading the family tree…",
+    retrying: "The server is busy for a moment. Trying again…",
+    unavailable: "The server is temporarily unavailable. Try again in a minute.",
+    tryAgain: "Try again",
     failed: {
       title: "Can’t load the tree",
       // "Locally: run <code>…</code> and <code>…</code>, or <code>…</code> then <code>…</code>. On Cloudflare: …"

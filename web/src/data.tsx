@@ -31,9 +31,23 @@ const store = {
 };
 export { store };
 
+/** A server error or a dropped connection: worth trying again in a moment (the database sometimes refuses for a few
+ *  seconds; the Worker already retries, this covers the rest). */
+const RETRY_DELAYS = [700, 2000, 5000];
+let onRetry: ((attempt: number) => void) | null = null;
+
 async function getJson(path: string) {
-  const r = await fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } });
-  return { ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) };
+  for (let attempt = 0; ; attempt++) {
+    let r: Response | null = null;
+    try { r = await fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } }); }
+    catch { r = null; } // offline, or the connection dropped
+    if ((r && r.status < 500) || attempt >= RETRY_DELAYS.length) {
+      if (!r) throw new Error(L.unavailable);
+      return { ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) };
+    }
+    if (onRetry) onRetry(attempt + 1);
+    await new Promise((res) => setTimeout(res, RETRY_DELAYS[attempt]));
+  }
 }
 
 /** Load /api/me (the Worker) and the tree; on the static preview (tools/serve.py) there is no /api/me. */
@@ -47,6 +61,7 @@ async function loadTree(): Promise<Tree> {
     const linkedTree = new URLSearchParams(location.search).get("tree");
     tree = linkedTree || (account!.trees.find((t) => t.id === saved) || account!.trees[0]).id;
   } else if (me.status === 403) throw new Error(me.body.error || L.notSignedIn);
+  else if (me.status >= 500) throw new Error(me.body.error ? `${L.unavailable} (${me.body.error})` : L.unavailable); // not the static preview
   const preview = account && account.isOwner ? store.get("previewView", sessionStorage) : null;
   const r = await getJson(`api/tree${tree ? `?tree=${encodeURIComponent(tree)}` : ""}${preview ? `&preview_view=${encodeURIComponent(preview)}` : ""}`);
   if (!r.ok) throw new Error(r.body.error || L.serverAnswered(r.status));
@@ -56,8 +71,13 @@ async function loadTree(): Promise<Tree> {
 }
 
 export function DataProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<{ D?: Tree; error?: string }>({});
-  useEffect(() => { loadTree().then((D) => setState({ D }), (e) => setState({ error: String(e.message || e) })); }, []);
+  const [state, setState] = useState<{ D?: Tree; error?: string; retrying?: number }>({});
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    onRetry = (n) => setState((s) => ({ ...s, retrying: n }));
+    loadTree().then((D) => setState({ D }), (e) => setState({ error: String(e.message || e) }));
+    return () => { onRetry = null; };
+  }, [attempt]);
   const value = useMemo<Data | null>(() => {
     const D = state.D;
     if (!D) return null;
@@ -84,8 +104,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   if (state.error) return (
     <div className="wrap page"><h1>{L.failed.title}</h1><p>{state.error}</p>
+      <p><button type="button" className="btn primary" onClick={() => { setState({}); setAttempt((n) => n + 1); }}>{L.tryAgain}</button></p>
       <p className="muted small">{L.failed.locally}<code>{L.failed.cmds.devExample}</code>{L.failed.and}<code>{L.failed.cmds.devWeb}</code>{L.failed.or}<code>{L.failed.cmds.build}</code>{L.failed.then}<code>{L.failed.cmds.serve}</code>{L.failed.cloudflare}</p></div>
   );
-  if (!value) return <div className="wrap page"><p className="muted">{L.loading}</p></div>;
+  if (!value) return <div className="wrap page"><p className="muted" aria-live="polite">{state.retrying ? L.retrying : L.loading}</p></div>;
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
