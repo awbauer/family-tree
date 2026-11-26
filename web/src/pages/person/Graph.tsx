@@ -5,27 +5,15 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import { Link } from "react-router";
 import { useData } from "../../data";
 import { isUnknown } from "../../lib";
-import type { Tree } from "../../types";
+import { edgePath, familyLayout, FH, FW, rels } from "../../familyLayout";
 import { usePerson } from "./context";
 import { S } from "../../../../strings/index.ts";
 
 const T = S.person.graph;
 
-const W = 168, H = 52, GX = 14, GY = 48, PAD = 10;
+const W = FW, H = FH;
 const edgeKey = (a: string, b: string) => [a, b].sort().join("~");
 const clip = (t: string, n: number) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
-
-function rels(D: Tree) {
-  const P = D.people, F = D.families;
-  const uniq = (xs: (string | null | undefined)[]) => [...new Set(xs.filter((x): x is string => !!x && !!P[x]))];
-  const birth = (x: string) => ((P[x] && (P[x].birth as any) && (P[x].birth as any).sort) || 99999999);
-  const parents = (x: string) => uniq((P[x].famc || []).flatMap((f) => (F[f] ? [F[f].husband, F[f].wife] : [])));
-  const couples = (x: string) => (P[x].fams || []).map((f) => F[f]).filter(Boolean);
-  const spouses = (x: string) => uniq(couples(x).map((f) => (f.husband === x ? f.wife : f.husband)));
-  const children = (x: string) => uniq(couples(x).flatMap((f) => f.children || []).sort((a, b) => birth(a) - birth(b)));
-  const siblings = (x: string) => uniq((P[x].famc || []).flatMap((f) => (F[f] ? F[f].children || [] : []))).filter((y) => y !== x).sort((a, b) => birth(a) - birth(b));
-  return { parents, spouses, children, siblings };
-}
 
 function loadView() {
   const st = { up: 2, down: 2, sibs: true };
@@ -80,45 +68,7 @@ export function Graph() {
     setSt((cur) => ({ ...cur, up: Math.min(4, Math.max(cur.up, ...[...pathSet].map(depthUp))) }));
   }, [path, pathSet, id, R]);
 
-  const { rows, placed } = useMemo(() => {
-    const rows = new Map<number, string[]>(), placed = new Set<string>();
-    const put = (g: number, xs: string[]) => { const r = rows.get(g) || []; for (const x of xs) if (!placed.has(x)) { placed.add(x); r.push(x); } rows.set(g, r); };
-    put(0, [...(st.sibs ? R.siblings(id) : []), id, ...R.spouses(id)]);
-    let up = [id];
-    for (let g = 1; g <= st.up; g++) { up = up.flatMap(R.parents); put(-g, up); up = rows.get(-g) || []; if (!up.length) break; }
-    let down = [id];
-    for (let g = 1; g <= st.down; g++) { down = down.flatMap(R.children); put(g, down); down = rows.get(g) || []; if (!down.length) break; }
-    // a highlighted path may run through people outside this neighbourhood (in-laws, cousins' lines): bring each in
-    // next to the relative it connects to, one step at a time
-    const genOf = new Map<string, number>();
-    for (const [g, r] of rows) for (const x of r) genOf.set(x, g);
-    for (let changed = true; changed;) {
-      changed = false;
-      for (const x of pathSet) {
-        if (placed.has(x) || !P[x]) continue;
-        const pa = R.parents(x).find((y) => genOf.has(y)), ch = R.children(x).find((y) => genOf.has(y)), sp = R.spouses(x).find((y) => genOf.has(y));
-        const g = pa ? genOf.get(pa)! + 1 : ch ? genOf.get(ch)! - 1 : sp ? genOf.get(sp)! : null;
-        if (g == null) continue;
-        put(g, [x]); genOf.set(x, g); changed = true;
-      }
-    }
-    return { rows, placed };
-  }, [st, id, R, pathSet, P]);
-
-  const gens = [...rows.keys()].filter((g) => rows.get(g)!.length).sort((a, b) => a - b);
-  const maxN = Math.max(...gens.map((g) => rows.get(g)!.length));
-  const width = Math.max(maxN * (W + GX) - GX + PAD * 2, W + PAD * 2);
-  const pos = new Map<string, { x: number; y: number }>();
-  gens.forEach((g, gi) => {
-    const r = rows.get(g)!, rw = r.length * (W + GX) - GX, x0 = (width - rw) / 2;
-    r.forEach((x, i) => pos.set(x, { x: x0 + i * (W + GX), y: PAD + gi * (H + GY) }));
-  });
-  const height = PAD * 2 + gens.length * (H + GY) - GY;
-  const edges: { a: string; b: string; kind: "pc" | "sp" }[] = [];
-  for (const x of placed) {
-    for (const p of R.parents(x)) if (pos.has(p)) edges.push({ a: p, b: x, kind: "pc" });
-    for (const s of R.spouses(x)) if (pos.has(s) && x < s) edges.push({ a: x, b: s, kind: "sp" });
-  }
+  const { placed, pos, edges, width, height } = useMemo(() => familyLayout(D, R, id, st, pathSet), [D, R, id, st, pathSet]);
 
   // keep the focus person in view
   const wrap = useRef<HTMLDivElement>(null), focus = useRef<SVGAElement>(null);
@@ -126,7 +76,7 @@ export function Graph() {
     if (!wrap.current || !focus.current) return;
     const r = focus.current.getBBox();
     wrap.current.scrollLeft = Math.max(0, r.x + r.width / 2 - wrap.current.clientWidth / 2);
-  }, [width, rows]);
+  }, [width, placed]);
 
   const opt = (n: number) => Array.from({ length: n + 1 }, (_, i) => <option key={i} value={i}>{i}</option>);
   return (
@@ -145,13 +95,7 @@ export function Graph() {
           {edges.map((e) => {
             const A = pos.get(e.a)!, B = pos.get(e.b)!, on = pathEdges.has(edgeKey(e.a, e.b));
             const k = `${e.kind}-${e.a}-${e.b}`;
-            if (e.kind === "sp") {
-              const [L, Rt] = A.x < B.x ? [A, B] : [B, A];
-              const d = `M${L.x + W},${L.y + H / 2} ${L.y === Rt.y ? `L${Rt.x},${Rt.y + H / 2}` : `C${L.x + W + 30},${L.y + H / 2} ${Rt.x - 30},${Rt.y + H / 2} ${Rt.x},${Rt.y + H / 2}`}`;
-              return <path key={k} className={`g-edge g-sp${on ? " on" : ""}`} d={d} />;
-            }
-            const x1 = A.x + W / 2, y1 = A.y + H, x2 = B.x + W / 2, y2 = B.y, my = (y1 + y2) / 2;
-            return <path key={k} className={`g-edge g-pc${on ? " on" : ""}`} d={`M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`} />;
+            return <path key={k} className={`g-edge g-${e.kind}${on ? " on" : ""}`} d={edgePath(A, B, e.kind)} />;
           })}
           {[...placed].map((x) => {
             const p: any = P[x], { x: nx, y: ny } = pos.get(x)!;

@@ -13,7 +13,7 @@
 
 ## What you get
 
-- **Explore the family.** A fan chart, pan-and-zoom ancestor and descendant charts, a page per person with a life timeline and footnoted sources, plus stories, a map of where everyone lived, and a timeline set against history.
+- **Explore the family.** A tree page with four views (chart, family graph, fan or sunburst, and a numbered outline that reads well on a phone), a page per person with a life timeline and footnoted sources, plus stories, a map of where everyone lived, and a timeline set against history.
 - **Research you can trust.** Every person is *verified*, *partly verified*, *unverified* or *disputed*. Findings carry their sources and a confidence level, and searches that found nothing are logged too. Automatic checks catch duplicates, people with two sets of parents, impossible ages, misfiled Ancestry events and anachronistic places.
 - **Edit together, safely.** Editors change the tree in the app. Every change records who, why and its sources, and can be undone. Relatives without edit rights suggest changes for review. Each relative gets a *view*, which decides how much of living people they see (full, names only, anonymous or hidden).
 - **Search built for genealogy.** Search every name, fact, note, citation and story. Name matching handles spelling variants and sound-alikes (Daitch–Mokotoff Soundex), which helps with Central and Eastern European names.

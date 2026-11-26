@@ -104,6 +104,25 @@ export const browse = {
     fit: "Fit",
     hintMouse: "Click a person to re-centre · drag to pan · scroll to zoom",
     hintTouch: "Tap a person to re-centre · drag to pan · pinch to zoom",
+    view: "View",
+    views: { chart: "Chart", family: "Family", fan: "Fan", outline: "Outline" },
+    viewHelp: {
+      chart: "Boxes and lines, one generation per column",
+      family: "Parents above, children below, with brothers, sisters and spouses",
+      fan: "Rings of ancestors, or of descendants",
+      outline: "A numbered list, easy to read on a phone",
+    },
+    /** Generations above someone: 1 = parents. */
+    generation: (g: number) => (g === 1 ? "Parents" : g === 2 ? "Grandparents" : g === 3 ? "Great-grandparents" : `${g - 2}× great-grandparents`),
+    /** Generations below someone: 1 = children. */
+    descGeneration: (g: number) => (g === 1 ? "Children" : g === 2 ? "Grandchildren" : g === 3 ? "Great-grandchildren" : `${g - 2}× great-grandchildren`),
+    found: (n: number, of: number) => `${n} of ${of} found`,
+    recentre: (name: string) => `Centre the tree on ${name}`,
+    ahnentafel: "Numbered the Ahnentafel way: a father is twice his child's number, a mother twice plus one.",
+    daboville: "Numbered the d'Aboville way: 1.2 is the second child of 1.",
+    noParents: "No parents recorded.",
+    noChildren: "No children recorded.",
+    spouse: (name: string) => `⚭ ${name}`,
   },
 
   fan: {
