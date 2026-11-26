@@ -1,9 +1,15 @@
-// The interactive tree: someone's ancestors or descendants as a pan/zoom SVG chart. Routes /tree and /tree/:id,
-// with ?mode=desc and ?g=<generations>.
-import { useEffect, useMemo, useRef } from "react";
+// The tree page: someone's ancestors or descendants, in one of four views. Routes /tree and /tree/:id, with
+// ?view=chart|family|fan|outline, ?mode=desc and ?g=<generations>. The last view used is remembered.
+//   chart    boxes and lines, a generation per column (pan/zoom)
+//   family   the person page's family graph: parents above, children below, siblings and spouses alongside (pan/zoom)
+//   fan      rings of ancestors, or a sunburst of descendants (pan/zoom)
+//   outline  a numbered list: Ahnentafel for ancestors, d'Aboville for descendants
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { branchColor, useTitle, years } from "../lib";
+import { branchColor, isUnknown, useTitle, years } from "../lib";
 import { byBirth, homeFirst, spousesOf } from "../tree";
+import { edgePath, familyLayout, FH, FW, rels } from "../familyLayout";
+import { ancestorFan, descendantFan } from "./browse/FanChart";
 import { useBrowse, type BTree } from "./browse/shared";
 import { S } from "../../../strings/index.ts";
 
@@ -12,9 +18,20 @@ const T = S.browse.tree;
 const BW = 210, BH = 54, HG = 70, VG = 14;
 const ST_COLOR: Record<string, string> = { verified: "var(--ok)", "partly-verified": "var(--info)", disputed: "var(--err)", unverified: "var(--line)" };
 
+export type View = "chart" | "family" | "fan" | "outline";
+const VIEWS: View[] = ["chart", "family", "fan", "outline"];
+const isView = (v: string | null): v is View => !!v && (VIEWS as string[]).includes(v);
+function savedView(): View {
+  try { const v = localStorage.getItem("treeView"); if (isView(v)) return v; } catch { /* private mode */ }
+  return "chart";
+}
+function saveView(v: View) { try { localStorage.setItem("treeView", v); } catch { /* fine */ } }
+/** Generations shown when a view or mode is first picked. Family counts the focus row plus this many up and down. */
+const defaultGens = (view: View, mode: "anc" | "desc") => (view === "family" ? 3 : mode === "anc" ? 5 : 4);
+
 interface Node { id: string | null; g: number; x: number; y: number; h?: number; unknown?: boolean; label?: string; spouses?: string[] }
 
-function layout(D: BTree, root: string, mode: "anc" | "desc", gens: number) {
+function chartLayout(D: BTree, root: string, mode: "anc" | "desc", gens: number) {
   const P = D.people, F = D.families;
   const nodes: Node[] = [], links: [Node, Node][] = [];
   let next = 0;
@@ -58,39 +75,27 @@ function layout(D: BTree, root: string, mode: "anc" | "desc", gens: number) {
 
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
-export function TreeChart() {
-  const { id } = useParams();
-  const [params] = useSearchParams();
-  const navigate = useNavigate();
-  const { D, branches } = useBrowse();
-  const P = D.people, HOME = D.home;
-  const root = id && P[id] ? id : HOME;
-  const mode = params.get("mode") === "desc" ? "desc" : "anc";
-  const gens = Math.max(2, Math.min(8, +(params.get("g") || 0) || (mode === "anc" ? 5 : 4)));
-  const p = P[root];
-  useTitle(T.title(p.name));
-  const { nodes, links, bbox } = useMemo(() => layout(D, root, mode, gens), [D, root, mode, gens]);
-
+/** Pan (drag), zoom (wheel, pinch, buttons), fit on load and resize; a click on anything with data-id calls onPick. */
+function usePanZoom(bbox: { w: number; h: number }, onPick: (id: string) => void, active: boolean) {
   const canvasRef = useRef<HTMLDivElement>(null), gRef = useRef<SVGGElement>(null), zoomRef = useRef<HTMLDivElement>(null);
   const ctl = useRef<{ fit(): void; zoom(f: number): void } | null>(null);
-  const nav = useRef(navigate);
-  nav.current = navigate;
-
-  // Pan (drag), zoom (wheel, pinch, buttons), fit on load and resize, click a person to re-centre.
+  const pick = useRef(onPick);
+  pick.current = onPick;
   useEffect(() => {
+    if (!active) return;
     const canvas = canvasRef.current!, g = gRef.current!, zoomEl = zoomRef.current!;
     let t = { x: 0, y: 0, k: 1 };
     const apply = () => g.setAttribute("transform", `translate(${t.x},${t.y}) scale(${t.k})`); // strings-ok (an SVG transform)
     const fit = () => {
       const r = canvas.getBoundingClientRect();
       const k = Math.min(1.15, (r.width - 40) / bbox.w, (r.height - 90) / bbox.h);
-      t = { k: Math.max(0.2, k), x: 0, y: 0 };
+      t = { k: Math.max(0.12, k), x: 0, y: 0 };
       t.x = (r.width - bbox.w * t.k) / 2;
       t.y = Math.max(20, (r.height - 60 - bbox.h * t.k) / 2);
       apply();
     };
     const zoomAt = (f: number, cx: number, cy: number) => {
-      const k = Math.max(0.15, Math.min(3, t.k * f));
+      const k = Math.max(0.1, Math.min(3, t.k * f));
       t.x = cx - ((cx - t.x) * k) / t.k; t.y = cy - ((cy - t.y) * k) / t.k; t.k = k; apply();
     };
     fit();
@@ -117,8 +122,8 @@ export function TreeChart() {
       ptrs.delete(e.pointerId); pinch = null; canvas.classList.remove("dragging");
       if (moved < 6 && e.type === "pointerup") {
         const el = document.elementFromPoint(e.clientX, e.clientY);
-        const node = el && (el.closest(".node[data-id]") as SVGGElement | null);
-        if (node) nav.current(`/tree/${node.dataset.id}${mode === "desc" ? "?mode=desc" : ""}`);
+        const hit = el && (el.closest("[data-id]") as SVGGElement | null);
+        if (hit && hit.dataset.id) pick.current(hit.dataset.id);
       }
       if (ptrs.size) { const f = [...ptrs.values()][0]; last = { x: f.clientX, y: f.clientY }; }
     };
@@ -142,61 +147,207 @@ export function TreeChart() {
       canvas.classList.remove("dragging");
       ctl.current = null;
     };
-  }, [bbox, mode]);
+  }, [bbox, active]);
+  return { canvasRef, gRef, zoomRef, ctl };
+}
 
-  const qs = (m: string, g: number) => `/tree/${root}?${m === "desc" ? "mode=desc&" : ""}g=${g}`;
+/** Chart view: the original boxes-and-lines pedigree or descendant chart. */
+function ChartView({ D, L, root, branches }: { D: BTree; L: ReturnType<typeof chartLayout>; root: string; branches: any }) {
+  const P = D.people;
+  const { nodes, links } = L;
+  return <>
+    {links.map(([a, b], i) => {
+      const x1 = a.x + BW, y1 = a.y + (a.h || BH) / 2, x2 = b.x, y2 = b.y + (b.h || BH) / 2, mx = x1 + HG / 2;
+      return <path key={i} className="link" d={`M${x1},${y1} H${mx} V${y2} H${x2}`} />;
+    })}
+    {nodes.map((n, i) => {
+      const h = n.h || BH;
+      if (n.unknown) return (
+        <g key={i} className="node unknown" transform={`translate(${n.x},${n.y})`}>
+          <rect className="box" width={BW} height={h} rx="9" /><text className="nm" x="14" y={h / 2 + 4}>{n.label}</text>
+        </g>
+      );
+      const q = P[n.id!];
+      const sp = n.spouses || [];
+      const place = q.birth && q.birth.place ? ` · ${q.birth.place.split(",")[0].slice(0, 18)}` : "";
+      return (
+        <g key={i} className={`node${n.id === root ? " root" : ""}`} data-id={n.id!} transform={`translate(${n.x},${n.y})`}>
+          <title>{`${q.name} (${years(q)})${q.relation ? " — " + q.relation : ""}`}</title>
+          <rect className="box" width={BW} height={h} rx="9" />
+          <rect width="5" height={h - 12} x="0" y="6" rx="2" style={{ fill: branchColor(q.branch, branches) }} />
+          <circle cx={BW - 12} cy="12" r="4" style={{ fill: ST_COLOR[q.status || ""] }} />
+          <text className="nm" x="14" y="22">{clip(q.name, 26)}</text>
+          <text className="yr" x="14" y="39">{(years(q) || S.browse.datesUnknown) + place}</text>
+          {sp.slice(0, 2).map((s, j) => <text key={j} className="yr" x="14" y={54 + j * 16}>{clip(T.spouse(P[s].name), 30)}</text>)}
+          {sp.length > 2 && <text className="yr" x={BW - 30} y="70">+{sp.length - 2}</text>}
+        </g>
+      );
+    })}
+  </>;
+}
+
+/** Family view: the person page's family graph, drawn in the pan/zoom canvas. */
+function FamilyView({ D, L, root }: { D: BTree; L: ReturnType<typeof familyLayout>; root: string }) {
+  const P = D.people;
+  return <g className="family-graph">
+    {L.edges.map((e) => <path key={`${e.kind}-${e.a}-${e.b}`} className={`g-edge g-${e.kind}`} d={edgePath(L.pos.get(e.a)!, L.pos.get(e.b)!, e.kind)} />)}
+    {[...L.placed].map((x) => {
+      const p: any = P[x], { x: nx, y: ny } = L.pos.get(x)!;
+      const yrs = years(p);
+      return (
+        <g key={x} className={`g-node${x === root ? " focus" : ""}`} data-id={x} style={{ ["--bc" as any]: `var(--b-${p.branch || "other"}, var(--muted))`, cursor: "pointer" }}>
+          <title>{`${p.name}${p.relation ? ` · ${p.relation}` : ""}${yrs ? ` · ${yrs}` : ""}`}</title>
+          <rect x={nx} y={ny} width={FW} height={FH} rx={9} /><rect className="g-band" x={nx} y={ny} width={5} height={FH} rx={2} />
+          <text x={nx + 13} y={ny + 21} className="g-name">{clip(p.name, 21)}</text>
+          <text x={nx + 13} y={ny + 39} className="g-sub">{clip([yrs, x !== root && p.relation].filter(Boolean).join(" · "), 25)}</text>
+          {p.status === "verified" && <circle className="g-ok" cx={nx + FW - 11} cy={ny + 11} r={4} />}
+        </g>
+      );
+    })}
+  </g>;
+}
+
+/** One person's line in the outline. */
+function OutlineRow({ D, id, num, branches, recentre, extra }: { D: BTree; id: string; num: string; branches: any; recentre: (id: string) => string; extra?: ReactNode }) {
+  const p = D.people[id];
+  const place = p.birth && p.birth.place ? p.birth.place.split(",")[0] : "";
+  return (
+    <div className="ol-row" style={{ ["--bc" as any]: branchColor(p.branch, branches) }}>
+      <span className="ol-num">{num}</span>
+      <span className="ol-main">
+        <Link to={`/person/${id}`} className="ol-name">{p.name}</Link>
+        <span className="muted small"> {[years(p) || S.browse.datesUnknown, place].filter(Boolean).join(" · ")}</span>
+        {p.status && p.status !== "unverified" && <span className="ol-dot" style={{ background: ST_COLOR[p.status] }} title={S.common.status[p.status as keyof typeof S.common.status] || p.status} />}
+        {extra}
+      </span>
+      <Link className="ol-centre" to={recentre(id)} title={T.recentre(p.name)} aria-label={T.recentre(p.name)}>⌖</Link>
+    </div>
+  );
+}
+
+/** Outline view: ancestors by generation with Ahnentafel numbers, or descendants nested with d'Aboville numbers. */
+function OutlineView({ D, root, mode, gens, branches, recentre }: { D: BTree; root: string; mode: "anc" | "desc"; gens: number; branches: any; recentre: (id: string) => string }) {
+  const P = D.people, F = D.families;
+  if (mode === "anc") {
+    const byGen: { n: number; id: string }[][] = [[{ n: 1, id: root }]];
+    for (let g = 1; g < gens; g++) {
+      byGen[g] = [];
+      for (const { n, id } of byGen[g - 1]) {
+        const fid = P[id].famc[0], f = fid && F[fid];
+        if (!f) continue;
+        if (f.husband && P[f.husband] && !isUnknown(P[f.husband])) byGen[g].push({ n: 2 * n, id: f.husband });
+        if (f.wife && P[f.wife] && !isUnknown(P[f.wife])) byGen[g].push({ n: 2 * n + 1, id: f.wife });
+      }
+      if (!byGen[g].length) { byGen.length = g; break; }
+    }
+    return (
+      <div className="tree-outline">
+        <p className="small muted">{T.ahnentafel}</p>
+        <OutlineRow D={D} id={root} num="1" branches={branches} recentre={recentre} />
+        {byGen.length === 1 && <p className="muted">{T.noParents}</p>}
+        {byGen.slice(1).map((row, i) => (
+          <section key={i}>
+            <h3>{T.generation(i + 1)} <span className="muted small">{T.found(row.length, 2 ** (i + 1))}</span></h3>
+            {row.map(({ n, id }) => <OutlineRow key={n} D={D} id={id} num={String(n)} branches={branches} recentre={recentre} />)}
+          </section>
+        ))}
+      </div>
+    );
+  }
+  const bb = byBirth(D);
+  const kids = (id: string) => spousesOf(D, id).flatMap((s) => s.children.slice().sort(bb)).filter((c, i, a) => P[c] && a.indexOf(c) === i);
+  const branch = (id: string, num: string, g: number): ReactNode => {
+    const sp = spousesOf(D, id).map((s) => s.spouse).filter((s): s is string => !!s && !!P[s]);
+    const k = g < gens - 1 ? kids(id) : [];
+    return (
+      <li key={num}>
+        <OutlineRow D={D} id={id} num={num} branches={branches} recentre={recentre}
+          extra={sp.length > 0 && <span className="small ol-spouses">{sp.map((s) => <Link key={s} to={`/person/${s}`}>{T.spouse(P[s].name)}</Link>)}</span>} />
+        {k.length > 0 && <ol>{k.map((c, i) => branch(c, `${num}.${i + 1}`, g + 1))}</ol>}
+      </li>
+    );
+  };
+  return (
+    <div className="tree-outline">
+      <p className="small muted">{T.daboville}</p>
+      <ol className="ol-desc">{branch(root, "1", 0)}</ol>
+      {!kids(root).length && <p className="muted">{T.noChildren}</p>}
+    </div>
+  );
+}
+
+export function TreeChart() {
+  const { id } = useParams();
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const { D, branches } = useBrowse();
+  const P = D.people, HOME = D.home;
+  const root = id && P[id] ? id : HOME;
+  const urlView = params.get("view");
+  const view: View = isView(urlView) ? urlView : savedView();
+  const mode = params.get("mode") === "desc" ? "desc" : "anc";
+  const gens = Math.max(2, Math.min(8, +(params.get("g") || 0) || defaultGens(view, mode)));
+  const p = P[root];
+  useTitle(T.title(p.name));
+  useEffect(() => { saveView(view); }, [view]);
+
+  const href = (who: string, v: View = view, m: string = mode, g: number = gens) =>
+    `/tree/${who}?view=${v}${m === "desc" ? "&mode=desc" : ""}&g=${g}`;
+
+  // What the canvas views draw, and how big it is.
+  const R = useMemo(() => rels(D), [D]);
+  const drawn = useMemo(() => {
+    if (view === "family") {
+      const L = familyLayout(D, R, root, { up: gens - 1, down: gens - 1, sibs: true });
+      return { bbox: { w: L.width, h: L.height }, content: <FamilyView D={D} L={L} root={root} /> };
+    }
+    if (view === "fan") {
+      const wrap = (who: string, key: string, shape: ReactNode) => <g key={key} className="fan-cell" data-id={who}>{shape}</g>;
+      const fan = (mode === "anc" ? ancestorFan : descendantFan)(D, branches, root, Math.min(gens, 7), wrap);
+      return { bbox: { w: fan.width, h: fan.height }, content: <g className="fan-tree">{fan.content}</g> };
+    }
+    if (view === "chart") {
+      const L = chartLayout(D, root, mode, gens);
+      return { bbox: L.bbox, content: <ChartView D={D} L={L} root={root} branches={branches} /> };
+    }
+    return null;
+  }, [view, D, R, root, mode, gens, branches]);
+  const bbox = useMemo(() => drawn ? drawn.bbox : { w: 1, h: 1 }, [drawn]);
+  const { canvasRef, gRef, zoomRef, ctl } = usePanZoom(bbox, (who) => navigate(href(who)), !!drawn);
+
   return (
     <div className="tree-page">
       <div className="tree-bar">
         <span className="who">{p.name} <span className="muted small">{years(p)}</span></span>
-        <div className="seg" role="group" aria-label={T.type}>
-          <button data-mode="anc" className={mode === "anc" ? "on" : ""} onClick={() => navigate(qs("anc", 5))}>{T.ancestors}</button>
-          <button data-mode="desc" className={mode === "desc" ? "on" : ""} onClick={() => navigate(qs("desc", 4))}>{T.descendants}</button>
+        <div className="seg" role="group" aria-label={T.view}>
+          {VIEWS.map((v) => <button key={v} data-view={v} className={v === view ? "on" : ""} title={T.viewHelp[v]} aria-pressed={v === view}
+            onClick={() => navigate(href(root, v, mode, defaultGens(v, mode)))}>{T.views[v]}</button>)}
         </div>
+        {view !== "family" && <div className="seg" role="group" aria-label={T.type}>
+          <button data-mode="anc" className={mode === "anc" ? "on" : ""} onClick={() => navigate(href(root, view, "anc", defaultGens(view, "anc")))}>{T.ancestors}</button>
+          <button data-mode="desc" className={mode === "desc" ? "on" : ""} onClick={() => navigate(href(root, view, "desc", defaultGens(view, "desc")))}>{T.descendants}</button>
+        </div>}
         <div className="seg" role="group" aria-label={T.generations}>
-          {[3, 4, 5, 6, 7].map((g) => <button key={g} data-g={g} className={g === gens ? "on" : ""} onClick={() => navigate(qs(mode, g))}>{g}</button>)}
+          {(view === "fan" ? [3, 4, 5, 6, 7] : view === "family" ? [2, 3, 4, 5] : [3, 4, 5, 6, 7]).map((g) =>
+            <button key={g} data-g={g} className={g === gens ? "on" : ""} onClick={() => navigate(href(root, view, mode, g))}>{g}</button>)}
         </div>
         <Link className="btn" to={`/person/${root}`}>{T.profile}</Link>
-        {root !== HOME && <Link className="btn" to={`/tree/${HOME}${mode === "desc" ? "?mode=desc" : ""}`}>↺ {homeFirst(D)}</Link>}
+        {root !== HOME && <Link className="btn" to={href(HOME)}>↺ {homeFirst(D)}</Link>}
       </div>
-      <div className="tree-canvas" id="tc" ref={canvasRef}>
-        <svg id="tsvg"><g id="tg" ref={gRef}>
-          {links.map(([a, b], i) => {
-            const x1 = a.x + BW, y1 = a.y + (a.h || BH) / 2, x2 = b.x, y2 = b.y + (b.h || BH) / 2, mx = x1 + HG / 2;
-            return <path key={i} className="link" d={`M${x1},${y1} H${mx} V${y2} H${x2}`} />;
-          })}
-          {nodes.map((n, i) => {
-            const h = n.h || BH;
-            if (n.unknown) return (
-              <g key={i} className="node unknown" transform={`translate(${n.x},${n.y})`}>
-                <rect className="box" width={BW} height={h} rx="9" /><text className="nm" x="14" y={h / 2 + 4}>{n.label}</text>
-              </g>
-            );
-            const q = P[n.id!];
-            const sp = n.spouses || [];
-            const place = q.birth && q.birth.place ? ` · ${q.birth.place.split(",")[0].slice(0, 18)}` : "";
-            return (
-              <g key={i} className={`node${n.id === root ? " root" : ""}`} data-id={n.id!} transform={`translate(${n.x},${n.y})`}>
-                <title>{`${q.name} (${years(q)})${q.relation ? " — " + q.relation : ""}`}</title>
-                <rect className="box" width={BW} height={h} rx="9" />
-                <rect width="5" height={h - 12} x="0" y="6" rx="2" style={{ fill: branchColor(q.branch, branches) }} />
-                <circle cx={BW - 12} cy="12" r="4" style={{ fill: ST_COLOR[q.status || ""] }} />
-                <text className="nm" x="14" y="22">{clip(q.name, 26)}</text>
-                <text className="yr" x="14" y="39">{(years(q) || S.browse.datesUnknown) + place}</text>
-                {sp.slice(0, 2).map((s, j) => <text key={j} className="yr" x="14" y={54 + j * 16}>{clip("⚭ " + P[s].name, 30)}</text>)}
-                {sp.length > 2 && <text className="yr" x={BW - 30} y="70">+{sp.length - 2}</text>}
-              </g>
-            );
-          })}
-        </g></svg>
-        <div className="tree-zoom" ref={zoomRef}>
-          <button data-z="in" aria-label={T.zoomIn} onClick={(e) => { e.stopPropagation(); ctl.current?.zoom(1.25); }}>+</button>
-          <button data-z="out" aria-label={T.zoomOut} onClick={(e) => { e.stopPropagation(); ctl.current?.zoom(0.8); }}>−</button>
-          <button data-z="fit" aria-label={T.fit} onClick={(e) => { e.stopPropagation(); ctl.current?.fit(); }}>⤢</button>
+      {drawn ? (
+        <div className="tree-canvas" id="tc" ref={canvasRef}>
+          <svg id="tsvg" className={`tree-${view}`}><g id="tg" ref={gRef}>{drawn.content}</g></svg>
+          <div className="tree-zoom" ref={zoomRef}>
+            <button data-z="in" aria-label={T.zoomIn} onClick={(e) => { e.stopPropagation(); ctl.current?.zoom(1.25); }}>+</button>
+            <button data-z="out" aria-label={T.zoomOut} onClick={(e) => { e.stopPropagation(); ctl.current?.zoom(0.8); }}>−</button>
+            <button data-z="fit" aria-label={T.fit} onClick={(e) => { e.stopPropagation(); ctl.current?.fit(); }}>⤢</button>
+          </div>
+          <div className="tree-legend">{(D.research.branches || []).map((b) => <span key={b.key}><i style={{ background: branchColor(b.key, branches) }} />{b.label}</span>)}
+            <span className="muted hint-mouse">{T.hintMouse}</span><span className="muted hint-touch">{T.hintTouch}</span></div>
         </div>
-        <div className="tree-legend">{(D.research.branches || []).map((b) => <span key={b.key}><i style={{ background: branchColor(b.key, branches) }} />{b.label}</span>)}
-          <span className="muted hint-mouse">{T.hintMouse}</span><span className="muted hint-touch">{T.hintTouch}</span></div>
-      </div>
+      ) : (
+        <div className="tree-scroll"><OutlineView D={D} root={root} mode={mode} gens={gens} branches={branches} recentre={(who) => href(who)} /></div>
+      )}
     </div>
   );
 }

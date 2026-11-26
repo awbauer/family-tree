@@ -83,8 +83,28 @@ test("person page: close-family events and their toggle", async () => {
   assert.deepEqual(errors, []);
 });
 test("family tree chart", async () => {
-  await visit("#/tree/I1", ["Ancestors"]);
+  await visit("#/tree/I1?view=chart", ["Ancestors"]);
   assert.ok(await page.locator("svg").count() > 0, "the chart draws");
+});
+test("tree views: family, fan, outline, and the choice is remembered", async () => {
+  await visit("#/tree/I1?view=family&g=3", ["Family", "grandmother"]);
+  assert.ok(await page.locator("#tg .g-node[data-id]").count() >= 7, "the family graph draws parents, grandparents and siblings");
+  await visit("#/tree/I1?view=fan&g=5", ["Fan"]);
+  assert.ok(await page.locator("#tg .fan-cell[data-id]").count() >= 10, "the ancestor fan draws");
+  await visit("#/tree/I8?view=fan&mode=desc&g=4", ["Descendants"]);
+  assert.ok(await page.locator("#tg .fan-cell[data-id]").count() >= 5, "the descendant sunburst draws");
+  await visit("#/tree/I1?view=outline&g=5", ["Ahnentafel", "Grandparents", "Eva Novák"]);
+  await visit("#/tree/I8?view=outline&mode=desc&g=4", ["d'Aboville", "1.2.1", "Daniel James Hartley"]);
+  // pick a view with the toggle; a plain /tree link opens in it next time
+  await visit("#/tree/I1", ["Ancestors"]);
+  await page.locator('[data-view="fan"]').click();
+  await page.waitForFunction(() => location.hash.includes("view=fan"), null, { timeout: 5000 });
+  await visit("#/people", ["Eva Novák"]);
+  await visit("#/tree/I5", ["Fan"]);
+  assert.ok(await page.locator("#tg .fan-cell").count() > 0, "the last view chosen is remembered");
+  await page.locator('[data-view="chart"]').click();
+  await page.waitForFunction(() => location.hash.includes("view=chart"), null, { timeout: 5000 });
+  assert.deepEqual(errors, []);
 });
 test("branch", async () => { await visit("#/branch/novak", ["Direct ancestors"]); });
 test("stories and a story", async () => {

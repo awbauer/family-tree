@@ -528,3 +528,25 @@ table.audit .audit-row:focus-visible { outline: 2px solid var(--accent); outline
 .attachment-list > li { border-bottom: 1px solid var(--line); padding: 0.8rem 0; overflow-wrap: anywhere; }
 .attachment-list .btn-row { margin: 0.4rem 0; }
 .report-viewer { display: block; width: 100%; height: min(65vh, 38rem); border: 1px solid var(--line); border-radius: 6px; margin: 0.5rem 0; }
+
+/* Tree page views (web/src/pages/TreeChart.tsx) */
+.tree-fan .fan-cell, .tree-family .g-node { cursor: pointer; }
+.tree-fan .fan-cell:hover path, .tree-fan .fan-cell:hover circle { opacity: .82; }
+.tree-fan text { font-family: var(--sans); pointer-events: none; }
+.tree-scroll { flex: 1; overflow: auto; background: var(--paper); }
+.tree-outline { max-width: 860px; margin: 0 auto; padding: 18px 16px 90px; }
+.tree-outline h3 { margin: 22px 0 8px; font-size: 1.05rem; }
+.tree-outline h3 .small { font-family: var(--sans); font-weight: 400; margin-left: 6px; }
+.ol-row { display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; gap: 10px; padding: 8px 10px 8px 12px; margin: 4px 0;
+  background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--bc, var(--line)); border-radius: 10px; }
+.ol-num { font: 600 .8rem var(--sans); color: var(--muted); min-width: 2.2em; font-variant-numeric: tabular-nums; }
+.ol-main { min-width: 0; overflow-wrap: anywhere; }
+.ol-name { font-weight: 600; }
+.ol-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 8px; vertical-align: middle; }
+.ol-spouses { display: block; margin-top: 2px; }
+.ol-spouses a { margin-right: 10px; color: var(--ink-2); }
+.ol-centre { text-decoration: none; font-size: 1.1rem; color: var(--muted); padding: 0 4px; }
+.ol-centre:hover { color: var(--accent); }
+.tree-outline ol { list-style: none; margin: 0; padding: 0; }
+.tree-outline ol ol { padding-left: 22px; border-left: 2px solid var(--line); margin-left: 12px; }
+@media (max-width: 600px) { .tree-outline ol ol { padding-left: 10px; margin-left: 6px; } }

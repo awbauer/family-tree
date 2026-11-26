@@ -66,7 +66,7 @@ async function setUp(page) {
 test("no page is wider than a 320px screen, even with very long text", async () => {
   const wide = [];
   for (const page of pages)
-  for (const p of ["/", "/people", `/person/${longId}`, "/person/I5", `/tree/${longId}`, "/branch/novak", "/stories", "/map", "/timeline", "/search?q=England", "/search?q=Hartlee",
+  for (const p of ["/", "/people", `/person/${longId}`, "/person/I5", `/tree/${longId}`, `/tree/${longId}?view=outline`, "/tree/I8?view=outline&mode=desc", "/branch/novak", "/stories", "/map", "/timeline", "/search?q=England", "/search?q=Hartlee",
     "/research", "/research/todo", "/research/queue", "/sources", "/source/S99", "/admin", "/admin/sites", "/admin/stories", "/admin/audit", "/about"]) {
     await page.evaluate((h) => { location.hash = h; }, "#" + p);
     await page.waitForTimeout(500);
