@@ -19,6 +19,12 @@ export interface Fan { content: ReactNode; width: number; height: number }
 
 const pt = (cx: number, cy: number, r: number, a: number) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
 function wedge(cx: number, cy: number, r0: number, r1: number, a0: number, a1: number) {
+  // A whole ring (an only child in the sunburst): an arc whose ends meet isn't drawn, so each circle is two half
+  // arcs, the inner one the other way round so it cuts a hole.
+  if (a1 - a0 >= 2 * Math.PI - 1e-6) {
+    return `M${cx + r1},${cy} A${r1},${r1} 0 1 1 ${cx - r1},${cy} A${r1},${r1} 0 1 1 ${cx + r1},${cy} Z ` +
+      `M${cx + r0},${cy} A${r0},${r0} 0 1 0 ${cx - r0},${cy} A${r0},${r0} 0 1 0 ${cx + r0},${cy} Z`;
+  }
   const [x0, y0] = pt(cx, cy, r0, a0), [x1, y1] = pt(cx, cy, r1, a0), [x2, y2] = pt(cx, cy, r1, a1), [x3, y3] = pt(cx, cy, r0, a1);
   const big = a1 - a0 > Math.PI ? 1 : 0;
   return `M${x0},${y0} L${x1},${y1} A${r1},${r1} 0 ${big} 1 ${x2},${y2} L${x3},${y3} A${r0},${r0} 0 ${big} 0 ${x0},${y0} Z`;

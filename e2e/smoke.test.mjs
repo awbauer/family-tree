@@ -93,6 +93,10 @@ test("tree views: family, fan, outline, and the choice is remembered", async () 
   assert.ok(await page.locator("#tg .fan-cell[data-id]").count() >= 10, "the ancestor fan draws");
   await visit("#/tree/I8?view=fan&mode=desc&g=4", ["Descendants"]);
   assert.ok(await page.locator("#tg .fan-cell[data-id]").count() >= 5, "the descendant sunburst draws");
+  // an only child fills the whole ring: it must still draw (a ring, not a zero-width arc) and be clickable
+  await visit("#/tree/I10?view=fan&mode=desc&g=3", ["Descendants"]);
+  const only = await page.locator('#tg .fan-cell[data-id="I5"] path').boundingBox();
+  assert.ok(only && only.width > 50 && only.height > 50, `an only child's ring is drawn (${JSON.stringify(only)})`);
   await visit("#/tree/I1?view=outline&g=5", ["Ahnentafel", "Grandparents", "Eva Novák"]);
   await visit("#/tree/I8?view=outline&mode=desc&g=4", ["d'Aboville", "1.2.1", "Daniel James Hartley"]);
   // pick a view with the toggle; a plain /tree link opens in it next time
@@ -101,7 +105,7 @@ test("tree views: family, fan, outline, and the choice is remembered", async () 
   await page.waitForFunction(() => location.hash.includes("view=fan"), null, { timeout: 5000 });
   await visit("#/people", ["Eva Novák"]);
   await visit("#/tree/I5", ["Fan"]);
-  assert.ok(await page.locator("#tg .fan-cell").count() > 0, "the last view chosen is remembered");
+  await page.waitForSelector("#tg .fan-cell", { timeout: 5000 }).catch(() => assert.fail("the last view chosen is remembered"));
   await page.locator('[data-view="chart"]').click();
   await page.waitForFunction(() => location.hash.includes("view=chart"), null, { timeout: 5000 });
   assert.deepEqual(errors, []);

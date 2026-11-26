@@ -1,5 +1,6 @@
 // The tree page: someone's ancestors or descendants, in one of four views. Routes /tree and /tree/:id, with
-// ?view=chart|family|fan|outline, ?mode=desc and ?g=<generations>. The last view used is remembered.
+// ?view=chart|family|fan|outline, ?mode=desc and ?g=<generations>. The view last picked with the toggle is remembered
+// (a link with ?view= shows that view without changing what's remembered).
 //   chart    boxes and lines, a generation per column (pan/zoom)
 //   family   the person page's family graph: parents above, children below, siblings and spouses alongside (pan/zoom)
 //   fan      rings of ancestors, or a sunburst of descendants (pan/zoom)
@@ -289,7 +290,6 @@ export function TreeChart() {
   const gens = Math.max(2, Math.min(8, +(params.get("g") || 0) || defaultGens(view, mode)));
   const p = P[root];
   useTitle(T.title(p.name));
-  useEffect(() => { saveView(view); }, [view]);
 
   const href = (who: string, v: View = view, m: string = mode, g: number = gens) =>
     `/tree/${who}?view=${v}${m === "desc" ? "&mode=desc" : ""}&g=${g}`;
@@ -321,7 +321,7 @@ export function TreeChart() {
         <span className="who">{p.name} <span className="muted small">{years(p)}</span></span>
         <div className="seg" role="group" aria-label={T.view}>
           {VIEWS.map((v) => <button key={v} data-view={v} className={v === view ? "on" : ""} title={T.viewHelp[v]} aria-pressed={v === view}
-            onClick={() => navigate(href(root, v, mode, defaultGens(v, mode)))}>{T.views[v]}</button>)}
+            onClick={() => { saveView(v); navigate(href(root, v, mode, defaultGens(v, mode))); }}>{T.views[v]}</button>)}
         </div>
         {view !== "family" && <div className="seg" role="group" aria-label={T.type}>
           <button data-mode="anc" className={mode === "anc" ? "on" : ""} onClick={() => navigate(href(root, view, "anc", defaultGens(view, "anc")))}>{T.ancestors}</button>
