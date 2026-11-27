@@ -22,21 +22,33 @@ for (const ext of ["jpg", "png", "webp"]) {
   });
 }
 
-test("jpg: only the orientation survives, so phone photos aren't shown sideways", () => {
-  const after = stripImageMetadata(fixture("gps.jpg"));
-  const at = Buffer.from(after).indexOf("Exif\0\0");
-  assert.ok(at > 0);
-  const tiff = after.subarray(at + 6);
-  assert.equal((tiff[8] << 8) | tiff[9], 1, "one tag");
-  assert.equal((tiff[10] << 8) | tiff[11], 0x0112, "Orientation");
-  assert.equal(tiff[19], 6);
-  assert.equal(Buffer.from(after).indexOf("Exif\0\0", at + 1), -1, "no other EXIF block");
+/** The TIFF block left in each format, which should hold just Orientation 6. */
+const tiffOf = {
+  jpg: (b) => b.subarray(Buffer.from(b).indexOf("Exif\0\0") + 6),
+  png: (b) => b.subarray(Buffer.from(b).indexOf("eXIf") + 4),
+  webp: (b) => b.subarray(Buffer.from(b).indexOf("EXIF") + 8),
+};
+for (const ext of ["jpg", "png", "webp"]) {
+  test(`${ext}: only the orientation survives, so photos aren't shown sideways`, () => {
+    const tiff = tiffOf[ext](stripImageMetadata(fixture(`gps.${ext}`)));
+    assert.equal(Buffer.from(tiff.subarray(0, 4)).toString("latin1"), "MM\0*");
+    assert.equal((tiff[8] << 8) | tiff[9], 1, "one tag");
+    assert.equal((tiff[10] << 8) | tiff[11], 0x0112, "Orientation");
+    assert.equal(tiff[19], 6);
+  });
+}
+
+test("png: the orientation chunk is valid (its CRC checks) and comes before the image data", () => {
+  const b = Buffer.from(stripImageMetadata(fixture("gps.png")));
+  assert.ok(b.indexOf("eXIf") < b.indexOf("IDAT"));
+  assert.equal(b.indexOf("eXIf"), 8 + 25 + 4, "right after IHDR");
 });
 
-test("webp: the header's EXIF flag and size are updated", () => {
+test("webp: the header's size is updated and the EXIF flag matches what's left", () => {
   const after = stripImageMetadata(fixture("gps.webp"));
   assert.equal(new DataView(after.buffer).getUint32(4, true), after.length - 8);
-  assert.equal(after[20] & 0x08, 0);
+  assert.equal(after[20] & 0x08, 0x08, "orientation kept, so EXIF is flagged");
+  assert.equal(after[20] & 0x04, 0, "no XMP");
 });
 
 test("other files pass through untouched", () => {

@@ -1,8 +1,8 @@
 // Strip location and camera metadata from photos that reach the server as raw bytes (MCP uploads). The site's own
 // upload form already does this in the browser by redrawing the photo; files from AI clients arrive untouched, and
-// a phone photo's EXIF carries where it was taken. Removes EXIF and XMP from JPEG (keeping the orientation, so
-// photos aren't shown sideways), the eXIf and text chunks from PNG, and the EXIF and XMP chunks from WebP. Anything
-// else comes back unchanged.
+// a phone photo's EXIF carries where it was taken. Removes EXIF and XMP from JPEG, the eXIf and text chunks from PNG,
+// and the EXIF and XMP chunks from WebP, keeping only the orientation, so photos aren't shown sideways. Anything else
+// comes back unchanged.
 
 const ascii = (b, i, n) => String.fromCharCode(...b.subarray(i, i + n));
 
@@ -23,10 +23,12 @@ function orientation(tiff) {
   return 1;
 }
 
+/** A TIFF block (EXIF without its "Exif\0\0" prefix) holding only Orientation. */
+const orientationTiff = (value) => [0x4d, 0x4d, 0, 42, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, value, 0, 0, 0, 0, 0, 0];
+
 /** An APP1 EXIF segment holding only Orientation. */
 function orientationSegment(value) {
-  const tiff = [0x4d, 0x4d, 0, 42, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, value, 0, 0, 0, 0, 0, 0];
-  const body = [...new TextEncoder().encode("Exif"), 0, 0, ...tiff];
+  const body = [...new TextEncoder().encode("Exif"), 0, 0, ...orientationTiff(value)];
   const len = body.length + 2;
   return [0xff, 0xe1, len >> 8, len & 255, ...body];
 }
@@ -53,28 +55,53 @@ function jpeg(b) {
 }
 
 const PNG_DROP = new Set(["eXIf", "tEXt", "zTXt", "iTXt"]);
+let crcTable;
+function crc32(bytes) {
+  crcTable ||= Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  let c = 0xffffffff;
+  for (const x of bytes) c = crcTable[(c ^ x) & 255] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+function pngChunk(type, data) {
+  const typed = [...new TextEncoder().encode(type), ...data], n = data.length, c = crc32(typed);
+  return new Uint8Array([(n >>> 24) & 255, (n >> 16) & 255, (n >> 8) & 255, n & 255, ...typed, (c >>> 24) & 255, (c >> 16) & 255, (c >> 8) & 255, c & 255]);
+}
 function png(b) {
   const out = [b.subarray(0, 8)];
+  let turn = 1;
   for (let i = 8; i + 12 <= b.length;) {
     const len = ((b[i] << 24) >>> 0) + ((b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3]);
     const end = i + 12 + len;
     if (end > b.length) return b;
-    if (!PNG_DROP.has(ascii(b, i + 4, 4))) out.push(b.subarray(i, end));
+    const type = ascii(b, i + 4, 4);
+    if (type === "eXIf") turn = orientation(b.subarray(i + 8, i + 8 + len));
+    if (!PNG_DROP.has(type)) out.push(b.subarray(i, end));
     i = end;
   }
+  // put the orientation back, right after IHDR (eXIf must come before the image data)
+  if (turn !== 1) out.splice(2, 0, pngChunk("eXIf", orientationTiff(turn)));
   return concat(out);
 }
 
 function webp(b) {
   const out = [];
-  let i = 12;
-  for (; i + 8 <= b.length;) {
+  let turn = 1, extended = null;
+  for (let i = 12; i + 8 <= b.length;) {
     const id = ascii(b, i, 4), len = b[i + 4] | (b[i + 5] << 8) | (b[i + 6] << 16) | (b[i + 7] << 24);
     const end = i + 8 + len + (len & 1);
     if (end > b.length) return b;
-    if (id === "VP8X") { const c = b.slice(i, end); c[8] &= ~0x0c; out.push(c); } // clear the EXIF and XMP flags
-    else if (id !== "EXIF" && id !== "XMP ") out.push(b.subarray(i, end));
+    if (id === "EXIF") {
+      const data = b.subarray(i + 8, i + 8 + len);
+      turn = orientation(ascii(data, 0, 6) === "Exif\0\0" ? data.subarray(6) : data);
+    } else if (id === "VP8X") { extended = b.slice(i, end); extended[8] &= ~0x0c; out.push(extended); } // clear the EXIF and XMP flags
+    else if (id !== "XMP ") out.push(b.subarray(i, end));
     i = end;
+  }
+  // put the orientation back as the last chunk, where the format keeps EXIF (needs the extended header)
+  if (turn !== 1 && extended) {
+    extended[8] |= 0x08;
+    const tiff = orientationTiff(turn);
+    out.push(new Uint8Array([...new TextEncoder().encode("EXIF"), tiff.length, 0, 0, 0, ...tiff]));
   }
   const body = concat(out), head = new Uint8Array(12);
   head.set(b.subarray(0, 12));
