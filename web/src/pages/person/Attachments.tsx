@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router";
 import { Marked } from "marked";
 import { S } from "../../../../strings/index.ts";
@@ -45,7 +46,8 @@ function Report({ url, title }: { url: string; title: string }) {
   return <iframe className="report-viewer" sandbox="" title={title} srcDoc={page} />;
 }
 
-export function DocumentLinks({ item, proposal }: { item: DocumentItem; proposal?: number }) {
+/** Read (reports) and download buttons. `inline`: just the buttons and the reader, for a row the caller lays out. */
+export function DocumentLinks({ item, proposal, inline }: { item: DocumentItem; proposal?: number; inline?: boolean }) {
   const { D, tree } = useData();
   const url = documentUrl(item.file, tree, D.previewView, proposal);
   const target = useSearchParams()[0].get("attachment");
@@ -53,13 +55,29 @@ export function DocumentLinks({ item, proposal }: { item: DocumentItem; proposal
   const [reading, setReading] = useState(linked);
   useEffect(() => { setReading(linked); }, [linked]);
   const report = documentType(item.file) === "report";
-  return <>
-    <div className="btn-row">
-      {report && <button className="btn" aria-expanded={reading} onClick={() => setReading(!reading)}>{reading ? S.person.photos.close : T.read}</button>}
-      <a className="btn" href={url} download>{T.download}</a>
-    </div>
-    {reading && report && <Report key={url} url={url} title={item.caption} />}
+  const buttons = <>
+    {report && <button className={`btn${inline ? " sm" : ""}`} aria-expanded={reading} onClick={() => setReading(!reading)}>{reading ? S.person.photos.close : T.read}</button>}
+    <a className={`btn${inline ? " sm" : ""}`} href={url} download>{T.download}</a>
   </>;
+  const reader = reading && report && <Report key={url} url={url} title={item.caption} />;
+  return <>
+    {inline ? buttons : <div className="btn-row">{buttons}</div>}
+    {inline ? reader && <ReportDialog title={item.caption} onClose={() => setReading(false)}>{reader}</ReportDialog> : reader}
+  </>;
+}
+
+/** A report opened from the narrow side column reads in a dialog, at a readable width. */
+function ReportDialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  const dlg = useRef<HTMLDialogElement>(null);
+  useEffect(() => { const d = dlg.current!; if (!d.open) d.showModal(); }, []);
+  return createPortal(
+    <dialog className="lightbox report-dialog" ref={dlg} onClose={onClose} aria-label={title}>
+      <form method="dialog" className="lb-close"><button className="icon-btn" aria-label={S.person.photos.close}>✕</button></form>
+      <h3>{title}</h3>
+      {children}
+    </dialog>,
+    document.body,
+  );
 }
 
 /** Choose several people from the tree (not private, not "Unknown"), shown as removable chips. */
@@ -86,11 +104,11 @@ function PeoplePicker({ chosen, setChosen, exclude, name }: { chosen: string[]; 
 }
 
 /** Link a document already on this person to more people. */
-function LinkMore({ item, others }: { item: DocumentItem; others: string[] }) {
+export function LinkMore({ item, others }: { item: DocumentItem; others: string[] }) {
   const { editor } = useData();
   const { id, change } = usePerson();
   const [open, setOpen] = useState(false), [chosen, setChosen] = useState<string[]>([]), [sent, setSent] = useState(false);
-  if (!open) return <>{sent && <p role="status" className="small">{T.linkSent}</p>}<button className="btn" onClick={() => { setOpen(true); setSent(false); }}>{T.linkMore}</button></>;
+  if (!open) return <>{sent && <p role="status" className="small">{T.linkSent}</p>}<button className="btn sm" onClick={() => { setOpen(true); setSent(false); }}>{T.linkMore}</button></>;
   return <div className="filters">
     <PeoplePicker chosen={chosen} setChosen={setChosen} exclude={[id, ...others]} name={`link-${item.file.replace(/\W/g, "-")}`} />
     <button className="btn primary" disabled={!chosen.length} onClick={async () => {
@@ -104,7 +122,8 @@ function LinkMore({ item, others }: { item: DocumentItem; others: string[] }) {
 export function Attachments() {
   const { D, live, editor, tree } = useData();
   const { id, p, change } = usePerson();
-  const list: DocumentItem[] = (((D.research as any).media || {})[id] || []).filter((m: DocumentItem) => documentType(m.file));
+  // image attachments are in the photo gallery instead (Photos.tsx)
+  const list: DocumentItem[] = (((D.research as any).media || {})[id] || []).filter((m: DocumentItem & { image?: boolean }) => documentType(m.file) && !m.image);
   const [kind, setKind] = useState<DocumentType | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -142,23 +161,23 @@ export function Attachments() {
     }
   }
   return (
-    <section className="card" id="w-attachments" style={{ marginTop: 20 }}>
+    <section className="card side side-attachments" id="w-attachments">
       <h2>{T.title}</h2>
       {list.length ? <ul className="attachment-list">{list.map((item) => (
         <li key={item.file} id={item.file}>
-          <strong>{item.caption}</strong> <span className="muted small">{documentType(item.file) === "report" ? T.report : T.attachment}</span>
+          <strong>{item.caption}</strong>{documentType(item.file) === "report" && <> <span className="muted small">{T.report}</span></>}
           {item.source && D.sources[item.source] != null && (
             <div className="small"><Link to={`/source/${encodeURIComponent(item.source)}`}>{T.source((D.sources[item.source] as { title?: string }).title || item.source)}</Link></div>
           )}
           {linkedTo(item.file).length > 0 && <div className="small">{T.alsoOn} {linkedTo(item.file).map((pid, i) => <span key={pid}>{i > 0 && ", "}<PersonLink id={pid} /></span>)}</div>}
-          <DocumentLinks item={item} />
-          {!D.previewView && <div className="btn-row">
-            <LinkMore item={item} others={linkedTo(item.file)} />
-            <button className="btn" onClick={() => {
+          <div className="btn-row doc-acts">
+            <DocumentLinks item={item} inline />
+            {!D.previewView && <LinkMore item={item} others={linkedTo(item.file)} />}
+            {!D.previewView && <button className="btn sm" onClick={() => {
               const shared = linkedTo(item.file).length > 0;
               if (confirm(shared ? T.removeHereConfirm : T.removeConfirm)) void change([{ op: "media.detach", person: id, file: item.file }], { reason: T.removeReason });
-            }}>{linkedTo(item.file).length ? (editor ? T.removeHere : T.suggestRemoveHere) : (editor ? T.remove : T.suggestRemove)}</button>
-          </div>}
+            }}>{linkedTo(item.file).length ? (editor ? T.removeHere : T.suggestRemoveHere) : (editor ? T.remove : T.suggestRemove)}</button>}
+          </div>
         </li>
       ))}</ul> : <p className="muted small">{T.none}</p>}
       {!D.previewView && <div className="btn-row">

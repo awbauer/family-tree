@@ -687,3 +687,51 @@ test("url: the server downloads public https files itself, and refuses this site
     globalThis.fetch = real;
   }
 });
+
+// ---- attachments that are images show in the person page's gallery (worker/index.js markImageAttachments)
+const site = (path, init = {}) => worker.fetch(new Request(`https://tree.example.test${path}`, { ...init, headers: { "X-Dev-Principal": OWNER, ...(init.headers || {}) } }), env, { waitUntil() {} });
+const attachFile = async (person, name, bytes) => (await (await site(`/api/attachments?person=${person}&type=attachment&tree=all`, {
+  method: "POST", body: bytes, headers: { "X-Document-Name": encodeURIComponent(name), "X-Document-Title": "" } })).json());
+const mediaOf = async (person) => (await (await site("/api/tree?tree=all")).json()).research.media[person] || [];
+
+test("image attachments: marked for the gallery, shown inline only when the bytes are an image, location data removed", async () => {
+  const photo = readFileSync(join(ROOT, "tests", "fixtures", "gps.jpg"));
+  const up = await attachFile("I2", "draft card", photo); // no extension: recognised from the bytes
+  assert.ok(up.file, JSON.stringify(up));
+  const row = await env.DB.prepare("SELECT content_type FROM uploads WHERE key = ?").bind(up.file).first();
+  assert.equal(row.content_type, "image/jpeg");
+  assert.ok(!Buffer.from(await (await env.MEDIA.get(up.file)).arrayBuffer()).includes("ExampleCam"), "site attachments lose location data too");
+  const pdf = await attachFile("I2", "notes.pdf", new TextEncoder().encode("%PDF-1.4 example"));
+  const fake = await attachFile("I2", "trick.png", new TextEncoder().encode("<svg onload=alert(1)>")); // named like an image
+  const items = Object.fromEntries((await mediaOf("I2")).map((m) => [m.file, m]));
+  assert.equal(items[up.file].image, true);
+  assert.equal(items[pdf.file].image, undefined);
+  assert.equal(items[fake.file].image, true, "the name says image, so the page tries; /media checks the bytes");
+
+  const inline = await site(`/media/${up.file}?tree=all&inline=1`);
+  assert.equal(inline.headers.get("Content-Type"), "image/jpeg");
+  assert.match(inline.headers.get("Content-Disposition"), /^inline;/);
+  assert.equal(inline.headers.get("X-Content-Type-Options"), "nosniff");
+  const trick = await site(`/media/${fake.file}?tree=all&inline=1`);
+  assert.equal(trick.headers.get("Content-Type"), "application/octet-stream");
+  assert.match(trick.headers.get("Content-Disposition"), /^attachment;/);
+  const download = await site(`/media/${up.file}?tree=all`);
+  assert.match(download.headers.get("Content-Disposition"), /^attachment;/, "without inline=1 it's still a download");
+});
+
+test("image attachments uploaded before images were recorded are checked once from their first bytes", async () => {
+  const photo = readFileSync(join(ROOT, "tests", "fixtures", "gps.png"));
+  const old = await attachFile("I3", "scan", photo);
+  const pdf = await attachFile("I3", "letter", new TextEncoder().encode("%PDF-1.4 example"));
+  // as an older upload recorded them
+  await env.DB.prepare("UPDATE uploads SET content_type = 'application/octet-stream' WHERE key IN (?, ?)").bind(old.file, pdf.file).run();
+  const items = Object.fromEntries((await mediaOf("I3")).map((m) => [m.file, m]));
+  assert.equal(items[old.file].image, true);
+  assert.equal(items[pdf.file].image, undefined);
+  const types = Object.fromEntries((await env.DB.prepare("SELECT key, content_type FROM uploads WHERE key IN (?, ?)").bind(old.file, pdf.file).all()).results.map((r) => [r.key, r.content_type]));
+  assert.equal(types[old.file], "image/png");
+  assert.equal(types[pdf.file], "application/octet-stream; checked");
+  const reads = env.MEDIA.reads;
+  await mediaOf("I3");
+  assert.equal(env.MEDIA.reads, reads, "not read again");
+});

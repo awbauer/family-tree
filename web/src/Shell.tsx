@@ -1,5 +1,5 @@
 // The frame around every page: header (brand, navigation, search, theme), the owner's preview bar, and the footer.
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router";
 import { store, useData } from "./data";
 import { Chat } from "./Chat";
@@ -102,6 +102,12 @@ export function Shell({ children }: { children: ReactNode }) {
   const [menu, setMenu] = useState(false);
   const main = useRef<HTMLElement>(null);
   useEffect(() => { setMenu(false); }, [loc.pathname]);
+  // A new page starts at the top, back and forward included (main.tsx turns off the browser's own restoring), unless
+  // the link names a section to scroll to (next effect). Changes that stay on the page (a filter, the tree view) only
+  // change the query, so they keep the scroll position.
+  useLayoutEffect(() => {
+    if (!new URLSearchParams(loc.search).get("section")) window.scrollTo(0, 0);
+  }, [loc.pathname]);
   useEffect(() => {
     const section = new URLSearchParams(loc.search).get("section");
     const content = main.current;

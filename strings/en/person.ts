@@ -68,6 +68,8 @@ export const person = {
       none: "No independent research recorded yet beyond the Ancestry citations below.",
       checks: "Automatic data checks",
       nextSteps: "Next steps",
+      noneOpen: "No open findings.",
+      resolved: (n: number) => `${n} resolved finding${n === 1 ? "" : "s"}`,
     },
   },
 
@@ -309,6 +311,8 @@ export const person = {
     noneOpen: "No open next steps.",
     finished: (n: number) => `${n} finished`,
     newTask: (name: string) => `Add a next step for ${name}…`,
+    addStep: "Add a next step",
+    cancel: "Cancel",
     where: "Where to look (archive, collection, link)",
     priorities: { high: "high", medium: "medium", low: "low" },
     mine: "mine",
