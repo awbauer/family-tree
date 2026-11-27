@@ -168,10 +168,12 @@ export function Places() {
       L.polyline(arc, { color: cssVar(`--b-${p.branch}`), weight: 1.6, opacity: 0.55, dashArray: "4 5", interactive: true })
         .bindTooltip(el("span", {}, `${p.name}: ${a.name} → ${c.name}`)).addTo(layer);
     }
+    // the first view fits the places themselves, not the zoom-dependent group markers (which can sit at a country's
+    // centre, far from every place in it)
     if (!fitted.current && pts.length) {
       fitted.current = true;
       if (sel && places[sel]) M.map.setView([places[sel].lat, places[sel].lng], 11);
-      else M.map.fitBounds(pts, { padding: [30, 30], maxZoom: 7 });
+      else M.map.fitBounds(shown.map((x) => [x.pl.lat, x.pl.lng]), { padding: [30, 30], maxZoom: 7 });
     }
   }, [M, groups, sel, journeys]); // eslint-disable-line react-hooks/exhaustive-deps
 
