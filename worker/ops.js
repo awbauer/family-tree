@@ -38,7 +38,9 @@ export const MEDIA_TYPES = ["audio", "book", "card", "electronic", "fiche", "fil
 const MEDIA_FIELDS = ["caption", "date", "place", "source", "note"];
 const MEDIA_PLACES = 30; // other places a photo or document shows or mentions (`places`)
 export const PLACE_KEY = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const PLACE_TEXTS = 200;
+const PLACE_TEXTS = 200, PLACE_NAMES = 30, PLACE_DEPTH = 12;
+/** What kind of place a place record is, broadest first (place.save `type`). */
+export const PLACE_TYPES = ["country", "region", "county", "city", "district", "street", "building", "cemetery", "church", "landmark", "other"];
 /** A transcript of a photo, scan or attachment: what it says, word for word (images and documents alike). */
 export const TRANSCRIPT_LIMIT = 100000;
 // What kind of source a catalogued source record is (source.upsert `type`).
@@ -86,11 +88,10 @@ function maxFid(list, p) {
 export function applyOps(state, ops, { actor = "unknown", knower = actor, now = new Date().toISOString(), newId } = {}) {
   if (!Array.isArray(ops) || !ops.length) throw new OpError(M.opsRequired);
   if (ops.length > 500) throw new OpError(M.tooMany);
-  const S = { people: { ...state.people }, families: { ...state.families }, sources: { ...state.sources }, statuses: { ...state.statuses }, media_map: { ...(state.media_map || {}) }, aliases: { ...(state.aliases || {}) }, place_map: { ...(state.place_map || {}) } };
-  const gazetteer = new Set(state.gazetteer || []);
+  const S = { people: { ...state.people }, families: { ...state.families }, sources: { ...state.sources }, statuses: { ...state.statuses }, media_map: { ...(state.media_map || {}) }, aliases: { ...(state.aliases || {}) }, places: { ...(state.places || {}) } };
   const before = new Map(); // key -> snapshot before first touch
   const key = (t, id) => `${t}:${id}`;
-  const coll = { person: "people", family: "families", source: "sources", status: "statuses", media_map: "media_map", place_map: "place_map" };
+  const coll = { person: "people", family: "families", source: "sources", status: "statuses", media_map: "media_map", place: "places" };
   const touch = (t, id) => {
     const k = key(t, id), c = S[coll[t]];
     if (!before.has(k)) before.set(k, { type: t, id, before: clone(c[id]) });
@@ -112,6 +113,50 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
     if (o.entity === "family") return ["family", F(o.id, i)];
     throw new OpError(M.entityInvalid, i);
   };
+  const placeOf = (k, i) => { if (!PLACE_KEY.test(k) || !Object.hasOwn(S.places, k)) throw new OpError(M.noPlace(k), i); return k; };
+  /** Facts (person and family events) linked to place `from`: re-point them to `to` (null unlinks), or just count them. */
+  const repointFacts = (from, to, countOnly = false) => {
+    let n = 0;
+    for (const [type, c] of [["person", S.people], ["family", S.families]]) for (const [id, x] of Object.entries(c)) {
+      if (!x || !(x.events || []).some((e) => e.place_ref === from)) continue;
+      n += x.events.filter((e) => e.place_ref === from).length;
+      if (countOnly) continue;
+      const y = touch(type, id);
+      y.events = y.events.map((e) => {
+        if (e.place_ref !== from) return e;
+        const { place_ref, ...rest } = e;
+        return to ? { ...rest, place_ref: to } : rest;
+      });
+    }
+    return n;
+  };
+  /** A place's full name up its parent chain, as derive shows it. */
+  const fullName = (k) => { const out = [], seen = new Set(); for (let at = k; at && S.places[at] && !seen.has(at); at = S.places[at].parent) { seen.add(at); out.push(S.places[at].name); } return out.join(", "); };
+  const descendants = (k) => { const out = [k]; for (let j = 0; j < out.length; j++) for (const [id, v] of Object.entries(S.places)) if (v && v.parent === out[j] && !out.includes(id)) out.push(id); return out; };
+  let usedTexts = null; // every place text facts and photos use, compared loosely (built once, when needed)
+  const used = (t) => {
+    if (!usedTexts) {
+      usedTexts = new Set();
+      const add = (x) => { if (x) usedTexts.add(placeText(cleanPlace(String(x)))); };
+      for (const c of [S.people, S.families]) for (const x of Object.values(c)) for (const e of (x && x.events) || []) add(e.place);
+      for (const list of Object.values(S.media_map)) for (const m of list || []) { add(m && m.place); for (const t2 of (m && m.places) || []) add(t2); }
+    }
+    return usedTexts.has(placeText(cleanPlace(String(t))));
+  };
+  /**
+   * Facts and photos matched to a place by its full name keep it when the name changes (a rename, a move, a merge):
+   * `before` is {key: old full name}; each old name that something uses becomes one of the place's texts.
+   */
+  const keepFullNames = (before, target = (k) => k) => {
+    for (const [k, old] of Object.entries(before)) {
+      const to = target(k);
+      if (!S.places[to] || !old || fullName(to) === old || !used(old)) continue;
+      const cur = { ...touch("place", to) };
+      const texts = cur.texts || [];
+      if (!texts.some((t) => placeText(cleanPlace(String(t))) === placeText(cleanPlace(old)))) S.places[to] = { ...cur, texts: [...texts, old] };
+    }
+  };
+  const fullNames = (keys) => Object.fromEntries(keys.filter((k) => S.places[k]).map((k) => [k, fullName(k)]));
   const findFact = (list, fid, i, what = "fact") => {
     const idx = (list || []).findIndex((x) => x.fid === fid);
     if (idx < 0) throw new OpError(M.noFact(what, fid), i);
@@ -121,6 +166,8 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
     if (!ev || typeof ev !== "object" || !String(ev.type || "").trim()) throw new OpError(M.eventNeedsType, i);
     const out = {};
     for (const k of EVENT_FIELDS) if (ev[k] != null && ev[k] !== "") out[k] = String(ev[k]).slice(0, 2000);
+    // the place record this fact's place text means (GEDCOM X place.descriptionRef); the text stays as recorded
+    if (ev.place_ref != null && ev.place_ref !== "") out.place_ref = placeOf(String(ev.place_ref), i);
     if (ev.citations) out.citations = ev.citations.map((c) => cleanCitation(c, i));
     return out;
   };
@@ -277,7 +324,10 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
       case "event.add": { const [t, id] = entityOf(o, i), x = touch(t, id); x.events = x.events || []; x.events.push(cleanEvent(o.event, i)); assignFids(x); break; }
       case "event.update": {
         const [t, id] = entityOf(o, i), x = touch(t, id), j = findFact(x.events, o.fid, i, "event");
-        const merged = cleanEvent({ ...x.events[j], ...(o.set || {}) }, i);
+        const set = { ...(o.set || {}) };
+        // a new place text without a place record no longer means the old record
+        if ("place" in set && !("place_ref" in set) && (set.place || "") !== (x.events[j].place || "")) set.place_ref = null;
+        const merged = cleanEvent({ ...x.events[j], ...set }, i);
         x.events[j] = { ...merged, fid: o.fid, citations: x.events[j].citations, review: x.events[j].review };
         if (!x.events[j].citations) delete x.events[j].citations;
         if (!x.events[j].review) delete x.events[j].review;
@@ -453,42 +503,109 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
         break;
       }
       case "place.save": {
-        // texts compare the way they match events (worker/derive.js): case, spacing, commas and Unicode form aside
-        const same = (t) => placeText(cleanPlace(String(t)));
-        // A place on the maps (config place_map; docs/design/edit-ops.md). A key from places.json changes that place.
+        // A place record (docs/design/edit-ops.md → Places). A new key needs a name and a point, or a parent to borrow one.
         const k = String(o.key || "");
         if (!PLACE_KEY.test(k)) throw new OpError(M.placeKey, i);
-        const cur = S.place_map[k] && !S.place_map[k].removed ? S.place_map[k] : null;
-        const known = !!cur || gazetteer.has(k);
-        const next = touch("place_map", k) && !S.place_map[k].removed ? { ...S.place_map[k] } : {};
+        const known = Object.hasOwn(S.places, k);
+        const namesBefore = known && ("name" in o || "parent" in o) ? fullNames(descendants(k)) : {};
+        const next = known ? { ...touch("place", k) } : (touch("place", k), {});
         if (o.name != null) { const n = String(o.name).trim().slice(0, 200); if (!n) throw new OpError(M.placeName, i); next.name = n; }
-        for (const [f, lim] of [["lat", 90], ["lng", 180]]) if (o[f] != null && o[f] !== "") {
+        if ("type" in o) {
+          if (o.type == null || o.type === "") delete next.type;
+          else if (!PLACE_TYPES.includes(o.type)) throw new OpError(M.placeType(PLACE_TYPES), i);
+          else next.type = o.type;
+        }
+        for (const [f, lim] of [["lat", 90], ["lng", 180]]) if (f in o) {
+          if (o[f] == null || o[f] === "") { delete next[f]; continue; }
           const v = Number(o[f]);
           if (!Number.isFinite(v) || Math.abs(v) > lim) throw new OpError(M.placeCoord(f, lim), i);
           next[f] = Math.round(v * 1e6) / 1e6;
         }
+        if ((next.lat == null) !== (next.lng == null)) throw new OpError(M.placeCoordPair, i);
+        if ("parent" in o) {
+          if (o.parent == null || o.parent === "") delete next.parent;
+          else next.parent = placeOf(String(o.parent), i);
+        }
+        if (next.parent) { // no place inside itself, and no deeper than PLACE_DEPTH
+          let at = next.parent, depth = 1;
+          while (at) {
+            if (at === k) throw new OpError(M.placeCycle, i);
+            if (++depth > PLACE_DEPTH) throw new OpError(M.placeDepth(PLACE_DEPTH), i);
+            at = S.places[at]?.parent;
+          }
+        }
+        if ("names" in o) {
+          const list = o.names == null ? [] : Array.isArray(o.names) ? o.names : [o.names];
+          if (list.length > PLACE_NAMES) throw new OpError(M.placeNames(PLACE_NAMES), i);
+          const clean = list.map((x) => {
+            const n = typeof x === "string" ? { name: x } : x || {};
+            const out = { name: String(n.name ?? "").trim().slice(0, 200) };
+            if (!out.name) return null;
+            for (const f of ["from", "to"]) if (n[f] != null && n[f] !== "") {
+              const y = Number(n[f]);
+              if (!Number.isInteger(y) || y < 0 || y > 3000) throw new OpError(M.placeYear, i);
+              out[f] = y;
+            }
+            if (n.lang) out.lang = String(n.lang).slice(0, 20);
+            return out;
+          }).filter(Boolean);
+          if (clean.length) next.names = clean; else delete next.names;
+        }
+        if ("note" in o) { const t = String(o.note ?? "").trim().slice(0, 4000); if (t) next.note = t; else delete next.note; }
+        // texts compare the way they match events (worker/derive.js): case, spacing, commas and Unicode form aside
+        const same = (t) => placeText(cleanPlace(String(t)));
         const texts = (x) => (Array.isArray(x) ? x : [x]).map((t) => String(t ?? "").replace(/\s+/g, " ").trim().slice(0, 300)).filter(Boolean);
         if (o.texts != null) next.texts = texts(o.texts);
         if (o.add_texts != null) next.texts = [...(next.texts || []), ...texts(o.add_texts)];
         if (o.remove_texts != null) { const gone = new Set(texts(o.remove_texts).map(same)); next.texts = (next.texts || []).filter((t) => !gone.has(same(t))); }
         if (next.texts) { next.texts = [...new Map(next.texts.map((t) => [same(t), t])).values()]; if (next.texts.length > PLACE_TEXTS) throw new OpError(M.placeTexts(PLACE_TEXTS), i); if (!next.texts.length) delete next.texts; }
-        if (!known && (!next.name || next.lat == null || next.lng == null)) throw new OpError(M.placeNew, i);
-        // a place's texts belong to it alone: saving them here takes them off any other place saved in the app
-        for (const t of next.texts || []) for (const [other, v] of Object.entries(S.place_map)) {
+        if (!next.name) throw new OpError(M.placeName, i);
+        if (next.lat == null && !next.parent) throw new OpError(M.placeNew, i);
+        // a place's texts belong to it alone: saving them here takes them off any other place
+        for (const t of next.texts || []) for (const [other, v] of Object.entries(S.places)) {
           if (other === k || !v || !(v.texts || []).some((x) => same(x) === same(t))) continue;
-          const o2 = touch("place_map", other);
-          S.place_map[other] = { ...o2, texts: (o2.texts || []).filter((x) => same(x) !== same(t)) };
-          if (!S.place_map[other].texts.length) delete S.place_map[other].texts;
+          const o2 = touch("place", other);
+          S.places[other] = { ...o2, texts: (o2.texts || []).filter((x) => same(x) !== same(t)) };
+          if (!S.places[other].texts.length) delete S.places[other].texts;
         }
-        S.place_map[k] = next;
+        S.places[k] = next;
+        keepFullNames(namesBefore);
+        break;
+      }
+      case "place.merge": {
+        // the same place recorded twice: facts, places inside it and its texts, patterns and names move to `keep`
+        const keep = placeOf(String(o.keep || ""), i), drop = placeOf(String(o.drop || ""), i);
+        if (keep === drop) throw new OpError(M.samePlace, i);
+        for (let at = S.places[keep].parent; at; at = S.places[at]?.parent) if (at === drop) throw new OpError(M.placeMergeInside, i);
+        const d = S.places[drop];
+        const namesBefore = fullNames(descendants(drop));
+        const kept = { ...touch("place", keep) };
+        const lower = (t) => placeText(cleanPlace(String(t)));
+        const union = (a, b, key = (x) => x) => [...new Map([...(a || []), ...(b || [])].map((x) => [key(x), x])).values()];
+        const texts = union(kept.texts, d.texts, lower), match = union(kept.match, d.match);
+        const names = union(kept.names, [{ name: d.name }, ...(d.names || [])].filter((n) => n.name !== kept.name), (n) => n.name.toLowerCase());
+        if (texts.length) kept.texts = texts;
+        if (match.length) kept.match = match;
+        if (names.length) kept.names = names.slice(0, PLACE_NAMES);
+        if (kept.lat == null && d.lat != null) { kept.lat = d.lat; kept.lng = d.lng; }
+        if (!kept.type && d.type) kept.type = d.type;
+        if (!kept.note && d.note) kept.note = d.note;
+        S.places[keep] = kept;
+        for (const [id, v] of Object.entries(S.places)) if (v && v.parent === drop) S.places[id] = { ...touch("place", id), parent: keep };
+        repointFacts(drop, keep);
+        touch("place", drop);
+        delete S.places[drop];
+        keepFullNames(namesBefore, (k) => (k === drop ? keep : k));
         break;
       }
       case "place.delete": {
-        const k = String(o.key || "");
-        if (!PLACE_KEY.test(k)) throw new OpError(M.placeKey, i);
-        if (!S.place_map[k] && !gazetteer.has(k)) throw new OpError(M.noPlace(k), i);
-        touch("place_map", k);
-        if (gazetteer.has(k)) S.place_map[k] = { removed: true }; else delete S.place_map[k];
+        const k = placeOf(String(o.key || ""), i);
+        const inside = Object.values(S.places).filter((v) => v && v.parent === k).length;
+        if (inside) throw new OpError(M.placeHasChildren(inside), i);
+        const linked = repointFacts(k, null, true);
+        if (linked) throw new OpError(M.placeLinked(linked), i);
+        touch("place", k);
+        delete S.places[k];
         break;
       }
       case "media.set_primary": {
@@ -536,7 +653,7 @@ export function referencedIds(ops) {
   const people = new Set(), families = new Set();
   for (const o of ops || []) {
     if (!o || typeof o.op !== "string") continue;
-    if (String(o.op || "").startsWith("source.")) continue; // source ids, not people: see sourceIds
+    if (String(o.op || "").startsWith("source.") || String(o.op || "").startsWith("place.")) continue; // source and place ids, not people
     for (const k of ["id", "person", "keep", "drop", "husband", "wife"]) {
       const v = o[k];
       if (typeof v !== "string" || v.startsWith("$")) continue;

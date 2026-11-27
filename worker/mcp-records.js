@@ -22,7 +22,7 @@ const personPath = (person) => `/person/${enc(idOf(person))}`;
 const personSection = (person, section) => [personPath(person), { section }];
 
 const sections = {
-  search_people: "/people", search_text: "/search", list_surnames: "/people", list_places: "/places",
+  search_people: "/people", search_text: "/search", list_surnames: "/people", list_places: "/places", get_place: "/places",
   search_events: "/timeline", list_data_issues: "/research/review", list_duplicates: "/research/review",
   list_sources: "/sources", list_stories: "/stories", list_findings: "/research/findings",
   list_research_log: "/research/overview", list_todos: "/research/todo", get_my_queue: "/research/todo",
@@ -148,6 +148,14 @@ export async function recordResult(x, tool, args, output) {
     case "list_places":
       set("places", (p) => { const label = p.standard || p.place || p.key; return card(p.key ? url(`/place/${p.key}`) : url("/people", { q: p.place || label }), label); });
       break;
+    case "get_place": {
+      const at = (p) => card(url(`/place/${enc(p.key)}`), p.name, p.type);
+      if (data.key) main = card(url(`/place/${enc(data.key)}`), data.name, line(data.type, data.people ? `${data.people} people` : ""), data.note); // strings-ok (a card line)
+      set("within", at);
+      set("places_inside", at);
+      set("places", at);
+      break;
+    }
     case "list_research_sites":
       if (x.c.access.isOwner) set("sites", (s) => card(url("/admin/sites"), s.name, s.coverage));
       break;

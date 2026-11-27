@@ -396,6 +396,20 @@ ul.plain li, ol.plain li { margin: 4px 0; }
 .geo-hits li { padding: 3px 0; border-bottom: 1px solid var(--line); }
 .geo-hits .linklike { text-align: left; font-size: 1em; }
 .place-texts { list-style: none; padding: 0; margin: 0; font-weight: 400; }
+.crumbs { display: flex; flex-wrap: wrap; gap: 2px; align-items: baseline; }
+.crumbs .linklike { font-size: inherit; }
+.place-note { max-width: 70ch; white-space: pre-wrap; }
+.place-form textarea { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-weight: 400; resize: vertical; }
+.place-form .alt-name { gap: 6px; flex-wrap: nowrap; }
+.place-form .alt-name input { min-width: 0; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-weight: 400; }
+.place-tree { padding: 0 16px 16px; }
+.pt { list-style: none; margin: 0; padding: 0 0 0 16px; }
+.pt.pt-root { padding: 0 0 12px; }
+.pt-row { display: flex; align-items: flex-start; gap: 2px; }
+.pt-toggle { flex: none; width: 24px; height: 28px; border: 0; background: none; color: var(--muted); cursor: pointer; font-size: .85rem; padding: 0; }
+.pt-name { flex: 1; min-width: 0; text-align: left; background: none; border: 0; border-radius: 8px; padding: 5px 8px; cursor: pointer; color: var(--ink); font: inherit; }
+.pt-name:hover, .pt-name:focus-visible { background: var(--paper-2); }
+.pt-row.empty-place .pl-name { color: var(--muted); font-weight: 500; }
 .btn.danger { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, var(--line)); }
 .t-place a { color: inherit; }
 .leaflet-popup-content { font-family: var(--sans); font-size: 13px; max-height: 280px; overflow: auto; }

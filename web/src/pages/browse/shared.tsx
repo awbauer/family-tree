@@ -11,7 +11,12 @@ import { S } from "../../../../strings/index.ts";
 export type BEvent = Event & { placeKey?: string; misfiled?: boolean };
 export type BPerson = Omit<Person, "events"> & { direct?: boolean; generation?: number; events: BEvent[] };
 export type BBranch = Branch & { inLaw?: boolean; intro?: string };
-export interface Place { name: string; lat: number; lng: number; texts?: string[]; added?: boolean }
+/** A place as /api/tree shows it: `name` is the full name up the parent chain, `short` its own; `approx` when its point is
+ * the enclosing place's. */
+export interface Place {
+  name: string; short?: string; lat: number; lng: number; approx?: boolean; type?: string; parent?: string;
+  names?: { name: string; from?: number; to?: number; lang?: string }[]; texts?: string[]; note?: string;
+}
 export interface Issue { severity: string; person?: string; message: string }
 export interface ContextRow { year: number; month?: number; title: string; text?: string }
 export type BTree = Tree & { people: Record<string, BPerson>; issues?: Issue[]; places?: Record<string, Place> };

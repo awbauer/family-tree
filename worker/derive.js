@@ -226,29 +226,34 @@ export function fmtDate(pd) {
 const RX_COMMA = new RegExp(`[${PY_WS}]*,[${PY_WS}]*`, "gu");
 const RX_WS2 = new RegExp(`[${PY_WS}]{2,}`, "gu");
 
+/**
+ * The places as the site and the API show them, by key: the full name built up the parent chain ("Fenwick Row,
+ * Leeds, England"), the place's own `short` name, its type, parent and other names, and a point. A place without a
+ * point of its own takes the nearest enclosing place's (`approx: true`); one with neither is left out, with the places
+ * inside it. A loop in the parents is cut where it closes.
+ */
+export function placeTree(list) {
+  const by = new Map(list.filter((pl) => pl && pl.key).map((pl) => [pl.key, pl]));
+  const chain = (k) => { const out = [], seen = new Set(); for (let at = k; at && by.has(at) && !seen.has(at); at = by.get(at).parent) { seen.add(at); out.push(by.get(at)); } return out; };
+  const out = {};
+  for (const [k, pl] of by) {
+    const up = chain(k);
+    const at = up.find((x) => x.lat != null && x.lng != null);
+    if (!at || !pl.name) continue;
+    const parent = pl.parent && by.has(pl.parent) && up.some((x) => x.key === pl.parent) ? pl.parent : null;
+    out[k] = {
+      name: up.map((x) => x.name).join(", "), short: pl.name, lat: at.lat, lng: at.lng,
+      ...(at !== pl ? { approx: true } : {}), ...(pl.type ? { type: pl.type } : {}), ...(parent ? { parent } : {}),
+      ...(pl.names && pl.names.length ? { names: pl.names } : {}), ...(pl.texts && pl.texts.length ? { texts: pl.texts } : {}),
+      ...(pl.note ? { note: pl.note } : {}),
+    };
+  }
+  for (const v of Object.values(out)) if (v.parent && !out[v.parent]) delete v.parent;
+  return out;
+}
+
 /** A place text compared loosely: case, accents' composition, spacing and a trailing comma don't matter. */
 export const placeText = (t) => String(t || "").normalize("NFC").toLowerCase().replace(/\s+/g, " ").replace(/[\s,]+$/, "").trim();
-
-/**
- * The gazetteer (places.json, config `places`) with the places saved in the app (config `place_map`, place.save)
- * applied: {key: {name, lat, lng, texts, removed}}. A saved key that is also in the gazetteer changes that place
- * (`removed` drops it); a new key is a new place.
- */
-export function withPlaceEdits(gazetteer, placeMap) {
-  const base = (gazetteer && gazetteer.places) || [];
-  const edits = placeMap || {};
-  const out = [];
-  const seen = new Set();
-  for (const pl of base) {
-    seen.add(pl.key);
-    const e = edits[pl.key];
-    if (e && e.removed) continue;
-    out.push(e ? { ...pl, ...pick(e), texts: e.texts || [] } : pl);
-  }
-  for (const [key, e] of Object.entries(edits)) if (!seen.has(key) && e && !e.removed && e.lat != null && e.lng != null) out.push({ key, ...pick(e), texts: e.texts || [], match: [], added: true });
-  return { ...(gazetteer || {}), places: out };
-}
-const pick = (e) => Object.fromEntries(["name", "lat", "lng"].filter((k) => e[k] != null).map((k) => [k, e[k]]));
 
 export function cleanPlace(p) {
   if (!p) return "";
@@ -762,7 +767,11 @@ export function derive(input, { today } = {}) {
   // stays its own place even when a town's pattern would also take it.
   const exact = new Map();
   for (const pl of gaz) for (const t of pl.texts || []) { const k = placeText(cleanPlace(String(t))); if (!exact.has(k)) exact.set(k, pl.key); }
+  // a place's full name ("Fenwick Row, Leeds, England") means it too, after any saved text
+  const tree = placeTree(gaz);
+  for (const [key, pl] of Object.entries(tree)) { const k = placeText(cleanPlace(pl.name)); if (!exact.has(k)) exact.set(k, key); }
   const compiled = gaz.map((pl) => [pl, (pl.match || []).map(compilePy)]);
+  const known = new Set(gaz.map((pl) => pl.key));
   const placeKey = (txt) => {
     const hit = exact.get(placeText(txt));
     if (hit) return hit;
@@ -770,7 +779,11 @@ export function derive(input, { today } = {}) {
     return null;
   };
   for (const coll of [P, F]) {
-    for (const x of Object.values(coll)) for (const e of x.events) if (get(e, "place")) e.placeKey = placeKey(e.place);
+    for (const x of Object.values(coll)) for (const e of x.events) {
+      // a fact linked to a place record (place_ref) is there whatever its text says
+      if (e.place_ref && known.has(e.place_ref)) e.placeKey = e.place_ref;
+      else if (get(e, "place")) e.placeKey = placeKey(e.place);
+    }
   }
   // photos and documents: where they were made or what they show (`place`), and other places they mention (`places`)
   for (const list of Object.values(get(research, "media", {}) || {})) for (const m of list || []) {
@@ -845,7 +858,7 @@ export function derive(input, { today } = {}) {
   const researchOut = {};
   for (const [k, v] of Object.entries(research)) if (k !== "overrides" && k !== "place_rules") researchOut[k] = v;
   const placesOut = {};
-  for (const pl of gaz) placesOut[pl.key] = { name: pl.name, lat: pl.lat, lng: pl.lng, ...(pl.texts && pl.texts.length ? { texts: pl.texts } : {}), ...(pl.added ? { added: true } : {}) };
+  Object.assign(placesOut, tree);
 
   return {
     generated: today,

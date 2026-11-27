@@ -149,6 +149,9 @@ export const common = {
     transcriptSet: (chars: number) => `transcript (${chars.toLocaleString("en-US")} characters)`,
     clearDetails: "clear details",
     mediaSetPrimary: <T,>(who: T) => ["make a photo the main photo of ", who],
+    placeSave: (name: string, changes: string) => `save the place ${name}${changes ? `: ${changes}` : ""}`,
+    placeMerge: (drop: string, keep: string) => `merge the place ${drop} into ${keep}`,
+    placeDelete: (name: string) => `delete the place ${name}`,
   },
 
   // ---------------------------------------------------------------- before/after diffs (web/src/ops.tsx)
@@ -185,7 +188,9 @@ export const common = {
       finding: (id: string) => `Finding #${id}`,
       status: (who: string) => `Status of ${who}`,
       source: (id: string) => `Source ${id}`,
+      place: (name: string) => `Place: ${name}`,
     },
+    placeLabel: "Place",
     empty: "No visible differences.",
   },
 

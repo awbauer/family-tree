@@ -624,7 +624,8 @@ def main(ged_path, data_dir, out_dir, raw_out=None):
         "issues": issues,
         "aliases": aliases,
         "research": {k: v for k, v in research.items() if k not in ("overrides", "place_rules")},
-        "places": {pl["key"]: {k: pl[k] for k in ("name", "lat", "lng")} for pl in gaz},
+        # flat places.json entries; worker/derive.js placeTree() also nests places saved in the app
+        "places": {pl["key"]: {"name": pl["name"], "short": pl["name"], "lat": pl["lat"], "lng": pl["lng"]} for pl in gaz},
     }
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "family.json").write_text(json.dumps(bundle, ensure_ascii=False, separators=(",", ":")))

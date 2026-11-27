@@ -7,6 +7,7 @@ import { ago } from "../../tree";
 import { Finding, useWho } from "../../ui";
 import { EVENT_TYPE_FOR_FIELD, reloadPage, usePerson } from "./context";
 import { VerifyForm } from "./LifeEvents";
+import { PlaceOptions, placeRefFor } from "../browse/PlaceOptions";
 import { S } from "../../../../strings/index.ts";
 
 const T = S.person.findings;
@@ -114,7 +115,9 @@ function FixForm({ f, target, cites, reason }: { f: any; target: any; cites: any
           if (!v("given") && !v("surname")) throw new Error(T.fix.noName);
           ops = [{ op: "name.add", person: id, name: { given: v("given"), surname: v("surname"), type: v("ntype") } }];
         } else {
-          const set = { date: v("date"), place: v("place"), value: v("value") };
+          const set: Record<string, string> = { date: v("date"), place: v("place"), value: v("value") };
+          const ref = placeRefFor(D, set.place);
+          if (ref) set.place_ref = ref;
           if (target) {
             ops = [{ op: "event.update", entity: "person", id, fid: target.fid, set }];
             for (const ci of citations) ops.push({ op: "citation.add", entity: "person", id, fid: target.fid, citation: ci });
@@ -136,7 +139,7 @@ function FixForm({ f, target, cites, reason }: { f: any; target: any; cites: any
       ) : (
         <div className="filters"><b style={{ minWidth: 110 }}>{type}</b>
           <input name="date" defaultValue={target ? target.date || "" : ""} placeholder={T.fix.date} />
-          <input name="place" defaultValue={target ? target.place || "" : ""} placeholder={T.fix.place} style={{ flex: 1, minWidth: 200 }} />
+          <input name="place" list="fx-places" defaultValue={target ? target.place || "" : ""} placeholder={T.fix.place} style={{ flex: 1, minWidth: 200 }} /><PlaceOptions id="fx-places" />
           <input name="value" defaultValue={target ? target.value || "" : ""} placeholder={T.fix.detail} /></div>
       )}
       <p className="small muted">{cites.length ? T.fix.cites(cites.map((x) => x.title).join("; ")) : T.fix.addRecord}</p>

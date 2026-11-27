@@ -1,5 +1,4 @@
 import { readTree } from "./storage.js";
-import { withPlaceEdits } from "./derive.js";
 
 // Small helpers over the D1 binding. Every write goes through `write()`, which records an audit row in `changes`
 // and bumps meta.data_version in the same batch, so readers can cache derived data per version.
@@ -49,6 +48,8 @@ export async function loadState(env) {
   ]);
   // AI-written profiles (migration 0003). Optional, so a database that hasn't been migrated yet still loads.
   const profiles = await q("SELECT person_id, text, generated_at, model FROM profiles").catch(() => []);
+  // place records (migration 0015); a database without them yet still has the places.json gazetteer in config
+  const placeRows = await q("SELECT id, data FROM place_records").catch(() => null);
   const cfg = Object.fromEntries(config.map((r) => [r.key, parse(r.value)]));
   const open = todos.filter((t) => !["done", "wont_do"].includes(t.status));
   const closed = todos.filter((t) => ["done", "wont_do"].includes(t.status));
@@ -65,7 +66,7 @@ export async function loadState(env) {
   };
   return {
     raw: { people: tree.people, families: tree.families, sources: tree.sources, media: tree.media },
-    research, places: withPlaceEdits(cfg.places || {}, cfg.place_map || {}), aliases: cfg.aliases || {}, profiles,
+    research, places: placeRows ? { places: placeList(placeRows.map((r) => ({ key: r.id, ...parse(r.data) }))) } : cfg.places || {}, aliases: cfg.aliases || {}, profiles,
   };
 }
 
@@ -78,3 +79,7 @@ export function todoOut(t) {
     updated_at: t.updated_at, updated_by: t.updated_by, closed_at: t.closed_at || null, version: t.version,
   };
 }
+
+/** Place records in the order their patterns are tried: places.json's order first, then the rest by key. */
+export const placeList = (list) => list.slice().sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+

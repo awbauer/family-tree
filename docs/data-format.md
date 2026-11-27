@@ -53,4 +53,6 @@ The map groups the raw place strings from the GEDCOM into canonical places using
 
 Matching is case-insensitive and the first match wins. The build lists every place that matched nothing, so you can add it.
 
-After cutover, places are added and changed in the app instead (the **Places** page → "Not on the map", or **Edit this place** on a place's page; agents use the `place.save` and `place.delete` edit ops in [design/edit-ops.md](design/edit-ops.md)). Those changes are kept in D1 (config `place_map`) on top of this file: a key from `places.json` can be moved, renamed or taken off the map, and new keys are new places. A place saved in the app lists the exact place texts that mean it (`texts`), and those match before any pattern, so `14 Fenwick Row, Leeds, England` can be its own place even though the `leeds` pattern would also take it.
+After cutover, places live in the app as records that nest (country › city › street › building), with types, other and historical names, and links from facts (see "Places" in [design/edit-ops.md](design/edit-ops.md)). Migration 0015 turns this file's entries into records. It keeps their patterns and their order, and adds any changes made in the app since. After that this file is no longer read.
+
+You add and change places on the **Places** page ("By place", "Not on the map"), or with **Edit this place** and **Add a place inside it** on a place's page. Agents use the `place.save`, `place.merge` and `place.delete` edit ops.

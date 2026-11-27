@@ -261,6 +261,37 @@ test("places: the big map, a place page, putting a place on the map, and the per
   assert.deepEqual(errors, []);
 });
 
+test("places as a hierarchy: browse by place, breadcrumbs, and a place added inside another", async () => {
+  const r = await page.request.post(`${srv.url}/api/edit`, { data: { reason: "hierarchy test", ops: [
+    { op: "place.save", key: "england", name: "England", type: "country", lat: 52.6, lng: -1.5 },
+    { op: "place.save", key: "leeds", name: "Leeds", type: "city", parent: "england", names: [{ name: "Loidis", to: 1200 }] },
+  ] } });
+  assert.equal(r.status(), 200, await r.text());
+  await page.goto(`${srv.url}/#/places?tab=tree`);
+  await page.reload();
+  const row = (name) => page.locator(".pt-row").filter({ has: page.locator(".pl-name", { hasText: new RegExp(`^${name}$`) }) });
+  await row("England").locator(".pt-toggle").click();
+  await row("Leeds").locator(".pt-name").click();
+  await page.getByRole("link", { name: "Open the place page" }).click();
+  await page.locator("h1").filter({ hasText: "Leeds" }).waitFor();
+  await page.locator(".crumbs").getByRole("link", { name: "England" }).waitFor();
+  await page.getByText("Loidis").waitFor();
+
+  await page.getByRole("button", { name: "Add a place inside it" }).click();
+  const form = page.locator("form.place-form");
+  await form.getByLabel("Name", { exact: true }).fill("Example Street");
+  await form.getByLabel("Kind of place").selectOption("street");
+  await form.getByText("Full name: Example Street, Leeds, England").waitFor();
+  await form.getByRole("button", { name: "Save" }).click();
+  await page.waitForEvent("load");
+  await page.locator("h1").filter({ hasText: "Example Street" }).waitFor();
+  await page.getByText("No point of its own: shown at Leeds").waitFor();
+  await page.locator(".crumbs").getByRole("link", { name: "Leeds" }).click();
+  await page.locator("h1").filter({ hasText: "Leeds" }).waitFor();
+  await page.getByRole("link", { name: "Example Street" }).waitFor();
+  assert.deepEqual(errors, []);
+});
+
 test("person attachments download and Markdown reports open in the viewer", async () => {
   await visit("#/person/I4", ["Attachments", "Add a report"]);
   await page.getByRole("button", { name: "Add an attachment" }).click();

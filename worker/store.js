@@ -13,15 +13,16 @@ const M = Strings.api.ops;
 export async function loadEditable(env) {
   const tree = await readTree(env);
   const [cfg, statuses] = await Promise.all([
-    env.DB.prepare("SELECT key, value, version FROM config WHERE key IN ('media_map', 'aliases', 'place_map', 'places')").all().then((r) => r.results),
+    env.DB.prepare("SELECT key, value, version FROM config WHERE key IN ('media_map', 'aliases')").all().then((r) => r.results),
     env.DB.prepare("SELECT person_id, data, version FROM statuses").all().then((r) => r.results),
   ]);
+  const placeRows = await env.DB.prepare("SELECT id, data, version FROM place_records").all().then((r) => r.results).catch(() => []);
   const versions = { ...tree.versions };
   const c = Object.fromEntries(cfg.map((r) => { versions[`config:${r.key}`] = r.version; return [r.key, parse(r.value, {})]; }));
   const statusMap = Object.fromEntries(statuses.map((r) => { versions[`status:${r.person_id}`] = r.version; return [r.person_id, parse(r.data)]; }));
+  const places = Object.fromEntries(placeRows.map((r) => { versions[`place:${r.id}`] = r.version; return [r.id, parse(r.data)]; }));
   return {
-    state: { people: tree.people, families: tree.families, sources: tree.sources, statuses: statusMap, media_map: c.media_map || {}, aliases: c.aliases || {},
-      place_map: c.place_map || {}, gazetteer: ((c.places || {}).places || []).map((pl) => pl.key) },
+    state: { people: tree.people, families: tree.families, sources: tree.sources, statuses: statusMap, media_map: c.media_map || {}, aliases: c.aliases || {}, places },
     versions, mode: tree.mode,
   };
 }
@@ -32,10 +33,9 @@ export function commitStatements(env, { touched, versions, state, actor, actorKi
   const st = [];
   // the evidence cited for this change (prov:used), kept with every row of the batch
   const src = Array.isArray(sources) && sources.length ? J(sources.filter((x) => x && (x.title || x.url || x.note)).slice(0, 50)) : null;
-  let mediaTouched = false, aliasesTouched = false, placesTouched = false;
+  let mediaTouched = false, aliasesTouched = false;
   for (const x of touched) {
     if (x.type === "media_map") { mediaTouched = true; continue; }
-    if (x.type === "place_map") { placesTouched = true; continue; }
     if (x.type === "aliases") { aliasesTouched = true; continue; }
     if (x.type === "status" && x.after != null) st.push(guard(env, "NOT EXISTS (SELECT 1 FROM people WHERE id = ?)", x.id));
     const w = writeRecord(env, mode, x, versions, t, actor);
@@ -56,7 +56,7 @@ export function commitStatements(env, { touched, versions, state, actor, actorKi
       st.push(env.DB.prepare("UPDATE comments SET entity_id = ? WHERE entity_type = 'person' AND entity_id = ?").bind(keep, drop));
     }
   }
-  for (const [key, flag, value] of [["media_map", mediaTouched, state.media_map], ["aliases", aliasesTouched, state.aliases], ["place_map", placesTouched, state.place_map]]) {
+  for (const [key, flag, value] of [["media_map", mediaTouched, state.media_map], ["aliases", aliasesTouched, state.aliases]]) {
     if (!flag) continue;
     const v = versions[`config:${key}`];
     const before = touched.filter((x) => x.type === key || (key === "aliases" && x.type === "aliases"));
@@ -176,7 +176,7 @@ export async function revertBatch(env, batchId, { actor, actorKind, reason, extr
       st.push(...await storyRevert(env, r, { t, actor, actorKind, reason: reason || `revert ${batchId}`, batch: nb }));
       continue;
     }
-    if (!["person", "family", "source", "status"].includes(r.entity_type)) continue;
+    if (!["person", "family", "source", "status", "place"].includes(r.entity_type)) continue;
     // allowed only if the record still holds exactly what this batch wrote (content, not version: undoing a later
     // change restores this batch's result, after which this batch can be undone too)
     st.push(...await restoreRecord(env, mode, r.entity_type, r.entity_id, before, after, t, actor));
