@@ -11,4 +11,14 @@ export default defineConfig({
     flue({ providers: ["cloudflare"] }), // Claude is reached through the Workers AI binding → AI Gateway; nothing else ships
     cloudflare({ configPath: process.env.WRANGLER_CONFIG || "wrangler.jsonc", config: flueWorkerConfig() }),
   ],
+  build: {
+    rolldownOptions: {
+      // Flue reads each agent's 'use agent' line before bundling; the bundler then warns that it drops the line, once
+      // per agent. Hide only that warning, so real ones stay visible in build logs.
+      onLog(level, log, handler) {
+        if (log.code === "MODULE_LEVEL_DIRECTIVE" && /["']use agent["']/.test(log.message)) return;
+        handler(level, log);
+      },
+    },
+  },
 });
