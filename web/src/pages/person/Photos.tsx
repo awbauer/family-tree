@@ -20,7 +20,7 @@ export function Photos() {
   const list: any[] = (((D.research as any).media || {})[id] || []).filter((m: { file: string }) => !documentType(m.file));
   const [open, setOpen] = useState<any | null>(null);
   if (!live) return ( // the static preview (tools/serve.py): no API, nothing to change
-    <section className="card" id="w-photos" style={{ marginTop: 20 }}>
+    <section className="card side side-photos" id="w-photos">
       <h2>{T.title}</h2>
       {list.length ? <div className="photo-grid">{list.map((m, i) => (
         <figure key={i} className={`photo${m.portrait ? " main" : ""}`}>{isPdf(m.file) ? <div className="doc">{T.pdf}</div> : <img referrerPolicy="no-referrer" loading="lazy" src={mediaUrl(m.file, tree, D.previewView)} alt={m.caption || p.name} />}<figcaption>{m.caption || ""}</figcaption></figure>
@@ -29,7 +29,7 @@ export function Photos() {
   );
   const gedcomOnly = (p.media || []).length;
   return (
-    <section className="card" id="w-photos" style={{ marginTop: 20 }}>
+    <section className="card side side-photos" id="w-photos">
       <h2>{T.title}{list.length > 0 && <> <span className="count">{list.length}</span></>}</h2>
       {list.length ? <div className="photo-grid">{list.map((m, i) => (
         <figure key={i} className={`photo${m.portrait ? " main" : ""}`} data-i={i} tabIndex={0} role="button" aria-label={T.open(label(m))}

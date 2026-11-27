@@ -27,6 +27,7 @@ function LiveTodos() {
   const { api } = useData();
   const { id, p } = usePerson();
   const [state, setState] = useState<{ todos?: any[]; error?: string }>({});
+  const [adding, setAdding] = useState(false);
   const load = useCallback(async () => {
     try { setState({ todos: (await api("GET", `todos?person=${encodeURIComponent(id)}`)).todos }); }
     catch (e: any) { setState({ error: e.message }); }
@@ -42,17 +43,18 @@ function LiveTodos() {
     <>
       {active.length ? <ul className="todo-list">{active.map((t) => <TodoRow key={t.id} t={t} reload={load} />)}</ul> : <p className="muted small">{T.noneOpen}</p>}
       {closed.length > 0 && <details><summary className="small">{T.finished(closed.length)}</summary><ul className="todo-list">{closed.map((t) => <TodoRow key={t.id} t={t} reload={load} />)}</ul></details>}
-      <form className="filters todo-new" onSubmit={async (ev) => {
+      {!adding ? <div className="btn-row"><button className="btn" onClick={() => setAdding(true)}>{T.addStep}</button></div> : <form className="filters todo-new" onSubmit={async (ev) => {
         ev.preventDefault();
         const f = ev.currentTarget, v = (k: string) => (f.elements.namedItem(k) as HTMLInputElement);
-        try { await api("POST", "todos", { person: id, task: v("task").value, where: v("where").value || undefined, priority: v("priority").value, assignee: v("mine").checked ? "me" : undefined }); f.reset(); load(); }
+        try { await api("POST", "todos", { person: id, task: v("task").value, where: v("where").value || undefined, priority: v("priority").value, assignee: v("mine").checked ? "me" : undefined }); f.reset(); setAdding(false); load(); }
         catch (e: any) { alert(e.message); }
       }}>
-        <input name="task" placeholder={T.newTask(p.given || p.name)} required style={{ flex: 2, minWidth: 220 }} />
+        <input name="task" placeholder={T.newTask(p.given || p.name)} required autoFocus style={{ flex: 2, minWidth: 220 }} />
         <input name="where" placeholder={T.where} style={{ flex: 1, minWidth: 180 }} />
         <select name="priority" defaultValue="medium"><option value="high">{T.priorities.high}</option><option value="medium">{T.priorities.medium}</option><option value="low">{T.priorities.low}</option></select>
-        <label className="small"><input type="checkbox" name="mine" /> {T.mine}</label><button className="btn">{T.add}</button>
-      </form>
+        <label className="small"><input type="checkbox" name="mine" /> {T.mine}</label><button className="btn primary">{T.add}</button>
+        <button type="button" className="btn" onClick={() => setAdding(false)}>{T.cancel}</button>
+      </form>}
     </>
   );
 }

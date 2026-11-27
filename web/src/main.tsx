@@ -29,6 +29,9 @@ function Layout() {
   return <DataProvider><Shell><Outlet /></Shell></DataProvider>;
 }
 
+// Every page change scrolls to the top (Shell.tsx); stop the browser restoring an old position on back and forward.
+if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+
 const router = createHashRouter([{
   element: <Layout />,
   children: [

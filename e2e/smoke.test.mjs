@@ -155,6 +155,50 @@ test("about and not found", async () => {
   await visit("#/no-such-page", ["Not found"]);
 });
 
+test("person page: photos and attachments on the left, resolved findings folded away, next steps behind a button", async () => {
+  const call = async (name, args) => JSON.parse((await (await page.request.post(`${srv.url}/mcp`, { data: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } } })).json()).result.content[0].text);
+  const f = (await call("list_findings", { person: "I6" })).findings[0];
+  await call("update_finding", { id: f.id, status: "dismissed", note: "Example note.", version: f.version });
+  await page.goto(`${srv.url}/#/person/I6`);
+  await page.reload(); // a hash change alone keeps the tree the page already loaded
+  await visit("#/person/I6", ["Photos and documents", "1 resolved finding"]);
+  const box = async (sel) => (await page.locator(sel).boundingBox());
+  assert.ok((await box("#w-photos")).x + (await box("#w-photos")).width <= (await box("#w-research")).x, "photos sit in the left column");
+  assert.ok((await box("#w-attachments")).x < (await box("#w-research")).x, "attachments too");
+  const resolved = page.locator(".resolved-findings");
+  assert.equal(await resolved.evaluate((d) => d.open), false);
+  assert.equal(await page.locator(`#finding-${f.id}`).isVisible(), false);
+  await resolved.locator("summary").click();
+  assert.equal(await page.locator(`#finding-${f.id}`).isVisible(), true);
+  // a link straight to a resolved finding opens the list
+  await page.goto(`${srv.url}/#/person/I6?section=finding-${f.id}`);
+  await page.reload();
+  await page.locator(`#finding-${f.id}`).waitFor({ state: "visible" });
+  // the next-step form appears on demand
+  assert.equal(await page.locator(".todo-new").count(), 0);
+  await page.getByRole("button", { name: "Add a next step" }).click();
+  await page.locator(".todo-new input[name='task']").fill("Look for an example record");
+  await page.locator(".todo-new").getByRole("button", { name: "Add", exact: true }).click();
+  await page.locator(".todo-list").getByText("Look for an example record").waitFor();
+  assert.equal(await page.locator(".todo-new").count(), 0, "the form closes after adding");
+  assert.deepEqual(errors, []);
+});
+
+test("a new page starts at the top, back and forward included", async () => {
+  await visit("#/person/I4", ["Life events"]);
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  assert.ok(await page.evaluate(() => window.scrollY) > 300);
+  await page.locator(".facts .rel-list a").first().click();
+  // the new page has drawn (clicking scrolled the link into view first, so the old position isn't the bottom)
+  await page.waitForFunction(() => !location.hash.includes("/person/I4") && document.querySelector(".person-head h1")?.textContent !== "George Hartley");
+  assert.equal(await page.evaluate(() => window.scrollY), 0);
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.goBack();
+  await page.waitForFunction(() => document.querySelector(".person-head h1")?.textContent === "George Hartley");
+  await page.waitForTimeout(150);
+  assert.equal(await page.evaluate(() => window.scrollY), 0);
+});
+
 test("person attachments download and Markdown reports open in the viewer", async () => {
   await visit("#/person/I4", ["Attachments", "Add a report"]);
   await page.getByRole("button", { name: "Add an attachment" }).click();

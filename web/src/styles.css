@@ -214,8 +214,25 @@ table.data th { font-size: .75rem; text-transform: uppercase; letter-spacing: .0
 .person-head .life { font: 400 1.15rem var(--serif); color: var(--ink-2); }
 .person-head .tags { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
 @media (max-width: 560px) { .person-head { grid-template-columns: 1fr; } .portrait { width: 84px; height: 84px; font-size: 1.8rem; } }
-.person-layout { display: grid; grid-template-columns: 320px 1fr; gap: 24px; margin-top: 20px; align-items: start; }
-@media (max-width: 900px) { .person-layout { grid-template-columns: 1fr; } }
+/* Person page: the side cards (facts, grandparents, photos, attachments) stack in the left column beside the main
+   column, which spans every row; the last row takes the slack so the side cards stay packed at the top. On a phone
+   it's one column: facts, grandparents and photos first, then the main content, then the attachments. */
+.person-layout { display: grid; grid-template-columns: 320px 1fr; grid-template-rows: repeat(4, auto) 1fr; gap: 20px 24px; margin-top: 20px; align-items: start; }
+.person-layout > .side { grid-column: 1; }
+.person-layout > .person-main { grid-column: 2; grid-row: 1 / -1; }
+.side h2 { font-size: 1.25rem; }
+.side .photo-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 110px), 1fr)); gap: 10px; }
+@media (max-width: 900px) {
+  .person-layout { grid-template-columns: 1fr; grid-template-rows: none; }
+  .person-layout > .side, .person-layout > .person-main { grid-column: auto; grid-row: auto; }
+  .side-facts { order: 1; } .side-ped { order: 2; } .side-photos { order: 3; } .person-main { order: 4; } .side-attachments { order: 5; }
+}
+.btn.sm { padding: 4px 10px; font-size: .8rem; border-radius: 8px; }
+.attachment-list .doc-acts { margin: .45rem 0 0; gap: 6px; }
+.resolved-findings { margin-top: 10px; }
+.resolved-findings > summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
+.resolved-findings[open] > summary { margin-bottom: 8px; }
+dialog.report-dialog h3 { margin: 0 32px 8px 0; }
 .facts dl { display: grid; grid-template-columns: 76px 1fr; gap: 6px 12px; margin: 0; }
 .facts dt { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; padding-top: 3px; }
 .facts dd { margin: 0; }
@@ -527,6 +544,8 @@ table.audit .audit-row:focus-visible { outline: 2px solid var(--accent); outline
 .attachment-list { list-style: none; padding: 0; }
 .attachment-list > li { border-bottom: 1px solid var(--line); padding: 0.8rem 0; overflow-wrap: anywhere; }
 .attachment-list .btn-row { margin: 0.4rem 0; }
+.side .attachment-list > li { padding: .65rem 0; }
+.side .attachment-list > li:first-child { padding-top: 0; }
 .report-viewer { display: block; width: 100%; height: min(65vh, 38rem); border: 1px solid var(--line); border-radius: 6px; margin: 0.5rem 0; }
 
 /* Tree page views (web/src/pages/TreeChart.tsx) */

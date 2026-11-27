@@ -1,7 +1,7 @@
 // A person's page: who they were, their family, life events with sources, stories, research, photos and, when the
 // API is live, the tools to verify, fix, discuss and edit.
 import { Fragment, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import { useData } from "../../data";
 import { PersonLink, isUnknown, useTitle, years } from "../../lib";
 import { byBirth, homeFirst, initials, mediaUrl, mentionsFor, parentsOf, siblingsOf, spousesOf, storiesFor, STATUS_LABEL } from "../../tree";
@@ -54,11 +54,12 @@ function MiniPedigree() {
   const [fa, mo] = par(id);
   if (!fa && !mo) return null;
   const gp = [...par(fa), ...par(mo)];
+  if (!gp.some((x) => x && P[x] && !isUnknown(P[x]))) return null; // four "unknown" boxes say nothing the family graph doesn't
   const cell = (x: string | null, lbl: string) => x && P[x] && !isUnknown(P[x])
     ? <Link to={`/person/${x}`} style={bstyle(P[x].branch)}>{P[x].name}<br /><span className="muted small">{years(P[x])}</span></Link>
     : <span className="unk">{T.grandparents.unknown(lbl)}</span>;
   return (
-    <div className="card" style={{ marginTop: 16 }}><h4 style={{ marginTop: 0 }}>{T.grandparents.title}</h4>
+    <div className="card side side-ped"><h4 style={{ marginTop: 0 }}>{T.grandparents.title}</h4>
       <div className="mini-ped">{cell(gp[0], T.grandparents.paternalGrandfather)}{cell(gp[2], T.grandparents.maternalGrandfather)}{cell(gp[1], T.grandparents.paternalGrandmother)}{cell(gp[3], T.grandparents.maternalGrandmother)}</div></div>
   );
 }
@@ -68,7 +69,7 @@ function Facts() {
   const { id, p } = usePerson();
   const parents = parentsOf(D, id), spouses = spousesOf(D, id), sibs = siblingsOf(D, id);
   return (
-    <div className="card facts">
+    <div className="card facts side side-facts">
       <h4>{T.facts.title}</h4>
       <dl>
         <dt>{T.facts.born}</dt><dd>{p.birth ? <>{p.birth.date || T.facts.dateUnknown}{p.birth.place && <><br /><span className="muted">{p.birth.place}</span></>}</> : <span className="muted">{T.unknown}</span>}</dd>
@@ -115,14 +116,20 @@ const ACTIONABLE = ["conflict", "correction", "data-error", "new-fact"];
 function Research() {
   const { D, live } = useData();
   const { id, p } = usePerson();
-  const findings = ((D.research as any).findings || []).filter((f: any) => f.person === id).slice().sort((a: any, b: any) => (a.resolution ? 1 : 0) - (b.resolution ? 1 : 0));
-  const toAct = findings.filter((f: any) => !f.resolution && ACTIONABLE.includes(f.kind)).length;
+  const findings = ((D.research as any).findings || []).filter((f: any) => f.person === id);
+  const open = findings.filter((f: any) => !f.resolution), done = findings.filter((f: any) => f.resolution);
+  const toAct = open.filter((f: any) => ACTIONABLE.includes(f.kind)).length;
   const issues = p.issues || [];
+  const show = (f: any, i: number) => live ? <FindingWithActions key={f.id ?? i} f={f} /> : <Finding key={f.id ?? i} f={f} here={id} />;
+  // a link to a resolved finding (?section=finding-<id>) opens the resolved list so it can scroll there
+  const target = useSearchParams()[0].get("section") || "";
+  const linked = done.some((f: any) => target === `finding-${f.id}`);
   return (
     <section id="w-research" className="card" style={{ marginTop: 20 }}>
       <h2>{T.research.title}</h2>
       {findings.length ? <><h3>{T.research.findings}{toAct > 0 && <> <span className="count">{T.research.toActOn(toAct)}</span></>}</h3>
-        {findings.map((f: any, i: number) => live ? <FindingWithActions key={f.id ?? i} f={f} /> : <Finding key={f.id ?? i} f={f} here={id} />)}</>
+        {open.length ? open.map(show) : <p className="muted small">{T.research.noneOpen}</p>}
+        {done.length > 0 && <details className="resolved-findings" open={linked}><summary className="small">{T.research.resolved(done.length)}</summary>{done.map(show)}</details>}</>
         : <p className="muted small">{T.research.none}</p>}
       {issues.length > 0 && <><h3 style={{ marginTop: 18 }}>{T.research.checks}</h3>{issues.map((x: any, i: number) => <Issue key={i} i={x} here={id} />)}</>}
       <h3 style={{ marginTop: 18 }}>{T.research.nextSteps}</h3>
@@ -156,12 +163,14 @@ function PersonPage() {
       </div>
       {dup.length > 0 && <div className="callout err"><b>{T.duplicate.title}</b> {T.duplicate.before} {dup.map((d, i) => <span key={d}>{i > 0 && ", "}<PersonLink id={d} /></span>)}{T.duplicate.after}</div>}
       {p.statusNote && <div className={`callout ${p.status === "verified" ? "ok" : p.status === "disputed" ? "err" : ""}`}><b>{STATUS_LABEL[p.status!]}:</b> {p.statusNote}</div>}
+      {/* Side cards and the main column are siblings so a phone can put the photos near the top and the attachments
+          after the main content (styles.css, .person-layout). */}
       <div className="person-layout">
-        <aside className="side">
-          <Facts />
-          <MiniPedigree />
-        </aside>
-        <div>
+        <Facts />
+        <MiniPedigree />
+        {!p.private && D.scope?.view.media !== false && <Photos />}
+        <Attachments />
+        <div className="person-main">
           {stories.length > 0 && <div className="grid g2" style={{ marginBottom: mentions.length ? 10 : 20 }}>{stories.map((s) => <StoryCard key={s.slug} story={s} />)}</div>}
           {mentions.length > 0 && <p className="small story-mentions" style={{ margin: "0 0 20px" }}><span className="muted">{stories.length ? T.alsoMentionedIn : T.mentionedIn}</span>{" "}
             {mentions.map((s, i) => <span key={s.slug}>{i > 0 && " · "}<Link to={`/story/${s.slug}`}>{s.title}</Link>{s.era && <> <span className="muted">({s.era})</span></>}</span>)}</p>}
@@ -169,8 +178,6 @@ function PersonPage() {
           {live && <Graph />}
           <LifeEvents />
           {!p.private && (D.scope?.view.research !== false) && <Research />}
-          {!p.private && D.scope?.view.media !== false && <Photos />}
-          <Attachments />
           <Sources />
         </div>
       </div>
