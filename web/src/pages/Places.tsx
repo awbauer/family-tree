@@ -84,6 +84,13 @@ export function Places() {
     return t;
   }, [shown]); // eslint-disable-line react-hooks/exhaustive-deps
   // the chosen place, with everything inside it
+  // the list, under the outermost place each is in (a country, usually), biggest first, each heading with its totals
+  const sections = useMemo(() => {
+    const by = new Map<string, typeof shown>();
+    for (const x of shown) { const r = enclosing(D, x.pl.key)[0] || x.pl.key; by.set(r, [...(by.get(r) || []), x]); }
+    return [...by.entries()].map(([root, items]) => ({ root, items }))
+      .sort((a, b) => (totals[b.root]?.people.size || 0) - (totals[a.root]?.people.size || 0) || (places[a.root]?.name || "").localeCompare(places[b.root]?.name || ""));
+  }, [shown, totals]); // eslint-disable-line react-hooks/exhaustive-deps
   // the chosen place, with what passes the filters in it and inside it
   const current = useMemo(() => {
     if (!sel || !places[sel]) return null;
@@ -99,11 +106,14 @@ export function Places() {
   const anchor = (k: string) => { let at = k; for (let i = 0; i < 20 && places[at]?.approx && places[at].parent; i++) at = places[at].parent!; return at; };
   const depth = grouped ? Math.max(groupDepth(zoom), inKey && places[inKey] ? enclosing(D, inKey).length + 1 : 0) : Infinity;
   const groups = useMemo(() => {
-    const g = new Map<string, { key: string; visits: Visit[]; artifacts: any[]; people: Set<string>; keys: string[] }>();
+    const g = new Map<string, { key: string; visits: Visit[]; artifacts: any[]; people: Set<string>; keys: string[]; at: [number, number]; most: number }>();
     for (const x of shown) {
       const k = anchor(depth === Infinity ? x.pl.key : atDepth(D, anchor(x.pl.key), depth));
-      const e = g.get(k) || { key: k, visits: [], artifacts: [], people: new Set<string>(), keys: [] };
+      const own = places[anchor(x.pl.key)] || x.pl;
+      const e = g.get(k) || { key: k, visits: [], artifacts: [], people: new Set<string>(), keys: [], at: [own.lat, own.lng] as [number, number], most: -1 };
       e.visits.push(...x.visits); e.artifacts.push(...x.artifacts); x.people.forEach((id) => e.people.add(id)); e.keys.push(x.pl.key);
+      // a group's marker sits where most of its people were (a country's centre can be far from all of them)
+      if (x.people.length + x.artifacts.length > e.most) { e.most = x.people.length + x.artifacts.length; e.at = [own.lat, own.lng]; }
       g.set(k, e);
     }
     return [...g.values()];
@@ -138,7 +148,7 @@ export function Places() {
       const col = cssVar(`--b-${top}`);
       const on = x.keys.includes(sel) || x.key === sel;
       const docsOnly = !x.visits.length;
-      const m = L.circleMarker([pl.lat, pl.lng], {
+      const m = L.circleMarker(x.at, {
         radius: 5 + Math.sqrt(Math.max(x.people.size, docsOnly ? 1 : 0)) * 2.4 + (on ? 3 : 0), color: on ? cssVar("--ink", "#222") : col, weight: on ? 3 : 2,
         fillColor: col, fillOpacity: docsOnly ? 0.15 : 0.45, dashArray: docsOnly ? "3 3" : undefined,
       });
@@ -152,7 +162,7 @@ export function Places() {
       });
       m.addTo(layer);
       for (const k of [x.key, ...x.keys]) markers.current[k] = m;
-      pts.push([pl.lat, pl.lng]);
+      pts.push(x.at);
     }
     if (journeys) for (const p of people) {
       if ((branch && p.branch !== branch) || (direct && !p.direct)) continue;
@@ -181,8 +191,13 @@ export function Places() {
   useEffect(() => {
     if (!M || !sel || !places[sel]) return;
     if (skipFly.current) { skipFly.current = false; return; }
-    const pl = places[sel];
-    M.map.flyTo([pl.lat, pl.lng], Math.max(M.map.getZoom(), 9), { duration: 0.6 });
+    // a place with places inside it (a country, a city) is fitted to them; one without is flown to
+    // (its own point is only its centre, so it counts only when nothing inside it is on the map)
+    const used = within(built, sel).filter((k) => index[k]);
+    const inside = used.filter((k) => k !== sel && anchor(k) !== sel);
+    const inner = (inside.length ? inside : used).map((k) => places[anchor(k)]).filter(Boolean).map((p) => [p.lat, p.lng] as [number, number]);
+    if (new Set(inner.map((p) => p.join())).size > 1) M.map.flyToBounds(inner, { padding: [40, 40], maxZoom: 13, duration: 0.6 });
+    else { const pl = inner[0] ? { lat: inner[0][0], lng: inner[0][1] } : places[sel]; const t = places[sel].type; M.map.flyTo([pl.lat, pl.lng], Math.max(M.map.getZoom(), t === "country" ? 7 : t === "region" || t === "county" ? 9 : 11), { duration: 0.6 }); }
   }, [M, sel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fitAll = () => { if (M && shown.length) M.map.fitBounds(shown.map((x) => [x.pl.lat, x.pl.lng]), { padding: [30, 30], maxZoom: inKey ? 12 : 7 }); };
@@ -224,13 +239,24 @@ export function Places() {
           {tab !== "unplaced" && filters}
           {tab === "tree" ? <PlaceTree onPick={(k) => set({ place: k })} live={live} totals={totals} root={inside ? inKey : ""} /> : tab === "places" ? <>
             <ul className="places-list">
-              {shown.map((x) => (
-                <li key={x.pl.key}><button onClick={() => set({ place: x.pl.key })} onMouseEnter={() => markers.current[x.pl.key]?.openTooltip()} onMouseLeave={() => markers.current[x.pl.key]?.closeTooltip()}>
-                  <span className="pl-name">{places[x.pl.key]?.short || x.pl.name}</span>
-                  {places[x.pl.key]?.parent && <span className="pl-in">{T.inPlace(places[places[x.pl.key].parent!]?.name || "")}</span>}
-                  <span className="pl-meta">{T.counts(x.people.length, x.visits.filter((v) => !v.again).length, x.artifacts.length)}{x.pl.from ? ` · ${x.pl.from === x.pl.to ? x.pl.from : `${x.pl.from}–${x.pl.to}`}` : ""}</span>
-                </button></li>
-              ))}
+              {sections.map(({ root, items }) => {
+                const t = totals[root];
+                return (
+                  <li key={root} className="pl-section">
+                    <button className="pl-head" onClick={() => set({ place: root })} onMouseEnter={() => markers.current[root]?.openTooltip()} onMouseLeave={() => markers.current[root]?.closeTooltip()}>
+                      <span className="pl-name">{places[root]?.short || places[root]?.name}</span>
+                      <span className="pl-meta">{t ? T.counts(t.people.size, t.events, t.docs.size) : ""}{items.length > 1 || items[0]?.pl.key !== root ? ` · ${T.placesCount(items.filter((x) => x.pl.key !== root).length)}` : ""}</span>
+                    </button>
+                    <ul className="places-list nested">{items.filter((x) => x.pl.key !== root).map((x) => (
+                      <li key={x.pl.key}><button onClick={() => set({ place: x.pl.key })} onMouseEnter={() => markers.current[x.pl.key]?.openTooltip()} onMouseLeave={() => markers.current[x.pl.key]?.closeTooltip()}>
+                        <span className="pl-name">{places[x.pl.key]?.short || x.pl.name}</span>
+                        {(() => { const up = enclosing(D, x.pl.key).slice(1).map((k) => places[k]?.short || places[k]?.name).reverse(); return up.length ? <span className="pl-in">{T.inPlace(up.join(", "))}</span> : null; })()}
+                        <span className="pl-meta">{T.counts(x.people.length, x.visits.filter((v) => !v.again).length, x.artifacts.length)}{x.pl.from ? ` · ${x.pl.from === x.pl.to ? x.pl.from : `${x.pl.from}–${x.pl.to}`}` : ""}</span>
+                      </button></li>
+                    ))}</ul>
+                  </li>
+                );
+              })}
               {!shown.length && <li className="muted small" style={{ padding: 12 }}>{T.noneShown}</li>}
             </ul>
           </> : <Unplaced fix={fix} setFix={(t) => set({ fix: t })} live={live} />}
@@ -268,7 +294,10 @@ function PlacePanel({ x, filtered, onBack, onPick, tree, preview }: { x: { key: 
       <p className="small muted">{pl.type ? `${S.places.place.types[pl.type as keyof typeof S.places.place.types] || pl.type} · ` : ""}{T.counts(x.people.length, events.length, x.artifacts.length)}{x.from ? ` · ${x.from === x.to ? x.from : `${x.from}–${x.to}`}` : ""}</p>
       {filtered && <p className="small muted">{T.panelFiltered}</p>}
       <p><Link className="btn sm primary" to={`/place/${x.key}`}>{T.open}</Link></p>
-      {kids.length > 0 && <><h4>{T.inside}</h4><ul className="plain">{kids.map((k) => <li key={k}><button className="linklike" onClick={() => onPick(k)}>{places[k].short || places[k].name}</button></li>)}</ul></>}
+      {kids.length > 0 && <><h4>{T.inside}</h4><ul className="plain">{kids.map((k) => {
+        const here = new Set(within(built, k)), n = new Set(x.visits.filter((v) => here.has(v.at)).map((v) => v.p.id)).size;
+        return <li key={k}><button className="linklike" onClick={() => onPick(k)}>{places[k].short || places[k].name}</button>{n > 0 && <span className="small muted"> · {S.places.place.people(n)}</span>}</li>;
+      })}</ul></>}
       {photos.length > 0 && <div className="photo-grid mini">{photos.map((a) => (
         <Link key={a.m.file} to={`/person/${a.pid}?section=w-photos`} className="photo" title={a.m.caption || ""}>
           <img referrerPolicy="no-referrer" loading="lazy" alt={a.m.caption || ""} src={documentType(a.m.file) ? attachmentImageUrl(a.m.file, tree, preview) : mediaUrl(a.m.file, tree, preview)} />

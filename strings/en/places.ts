@@ -18,6 +18,7 @@ export const places = {
     tabPlaces: (n: number) => `On the map (${n})`,
     tabUnplaced: (n: number) => `Not on the map (${n})`,
     tabTree: "By place",
+    placesCount: (n: number) => plural(n, "place", "places"),
     panelFiltered: "Showing only what the filters let through.",
     within: "Only places in",
     inPlace: (name: string) => `in ${name}`,

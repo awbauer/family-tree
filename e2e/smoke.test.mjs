@@ -297,8 +297,9 @@ test("places as a hierarchy: browse by place, breadcrumbs, and a place added ins
   await page.locator(".places-list .pl-name").first().waitFor();
   assert.ok((await names()).includes("Leeds"));
   assert.ok(!(await names()).some((n) => /Portland|Duluth|Plzeň/.test(n)), "only places in England");
-  await page.locator(".places-list .pl-in").first().waitFor();
-  await page.getByRole("link", { name: "Leeds" }).count();
+  // the list sits under the outermost place, with its totals rolled up
+  const head = page.locator(".pl-head").first();
+  assert.match(await head.innerText(), /^England\n\d+ people/);
   await page.goto(`${srv.url}/#/people?place=england`);
   await page.locator("#pf-pl").waitFor();
   assert.equal(await page.locator("#pf-pl").inputValue(), "england");
