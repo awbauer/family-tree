@@ -2,12 +2,6 @@
 import { S } from "../strings/index.ts";
 
 const L = S.api.mcp.cards;
-export const cardResource = {
-  uri: "ui://family-tree/records.html",
-  name: "family-tree-records",
-  title: L.title,
-  mimeType: "text/html;profile=mcp-app",
-};
 
 // Keep the sandbox script self-contained when Wrangler bundles the Worker.
 const cardScript = String.raw`
@@ -114,3 +108,15 @@ a:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 <script>${cardScript}
 mountCards(${JSON.stringify(L)});</script>
 </html>`;
+
+// The card's address carries a hash of its HTML: clients may keep a card by its address, so a changed card gets a new
+// one and is fetched again instead of an old copy being shown (an old copy without the "didn't load" timeout stays on
+// "Loading records…" for good).
+const hash = (text) => { let h = 0x811c9dc5; for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193); return (h >>> 0).toString(36); };
+export const cardResource = {
+  uri: `ui://family-tree/records-${hash(cardHtml)}.html`,
+  name: "family-tree-records",
+  title: L.title,
+  mimeType: "text/html;profile=mcp-app",
+};
+export const isCardUri = (uri) => /^ui:\/\/family-tree\/records(-[a-z0-9]+)?\.html$/.test(String(uri || ""));

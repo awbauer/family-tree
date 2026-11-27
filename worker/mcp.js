@@ -21,7 +21,7 @@ import { PERSON_STATUSES } from "./ops.js";
 import { safeMediaType } from "./media-types.js";
 import { documentType, documentsFor, FILE_LIMIT } from "./documents.ts";
 import { presentsRecords, recordResult } from "./mcp-records.js";
-import { cardResource, cardHtml } from "./mcp-card-view.js";
+import { cardResource, cardHtml, isCardUri } from "./mcp-card-view.js";
 import { fitImage } from "./mcp-images.js";
 import { stripImageMetadata } from "./image-meta.js";
 import { createSlot, sniffType, SLOT_MINUTES } from "./upload-slots.js";
@@ -417,8 +417,10 @@ function schemaOf(t) {
 }
 // MCP_CARDS=off (a dashboard variable) turns the inline record cards off for clients that show them but never fill them.
 const cardsOn = (env) => String((env && env.MCP_CARDS) || "").toLowerCase() !== "off";
+// Cards only on reads: after a write the card would just repeat the link the reply already gives. (The result still
+// carries structuredContent.cards, so nothing changes for a client that reads it.)
 const listed = (t, cards = true) => ({ name: t.name, title: t.title, description: t.description, inputSchema: schemaOf(t),
-  ...(cards && presentsRecords(t.name) ? { _meta: { ui: { resourceUri: cardResource.uri } } } : {}),
+  ...(cards && t.readOnly && presentsRecords(t.name) ? { _meta: { ui: { resourceUri: cardResource.uri } } } : {}),
   annotations: { title: t.title, readOnlyHint: !!t.readOnly, destructiveHint: !!t.destructive, idempotentHint: !!t.readOnly, openWorldHint: false } });
 
 /** Light argument check against the tool's schema: required fields and types, unknown fields refused. */
@@ -698,7 +700,8 @@ async function dispatch(c, deps, msg) {
     case "tools/call": return isNote ? null : ok(await callTool(c, deps, p.name, p.arguments));
     case "resources/list": return ok({ resources: cardsOn(c.env) && (c.access.grants.length || c.access.isOwner) ? [cardResource] : [] });
     case "resources/read":
-      if (p.uri === cardResource.uri && (c.access.grants.length || c.access.isOwner)) {
+      // any version's address gets the current card, so a client still holding an older one isn't left with nothing
+      if (isCardUri(p.uri) && (c.access.grants.length || c.access.isOwner)) {
         return ok({ contents: [{ uri: cardResource.uri, mimeType: cardResource.mimeType, text: cardHtml }] });
       }
       return isNote ? null : rpcError(msg.id, -32002, M.resourceNotFound);

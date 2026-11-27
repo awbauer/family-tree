@@ -461,6 +461,13 @@ test("MCP Apps resource is available and record cards preserve the selected tree
   assert.equal(resource.body.result.contents[0].mimeType, "text/html;profile=mcp-app");
   assert.match(resource.body.result.contents[0].text, /ui\/notifications\/tool-result/);
   assert.ok((await rpc("resources/read", { uri: template }, { as: STRANGER })).body.error);
+  // the address changes with the card, and the old fixed one still gets the current card
+  assert.match(template, /^ui:\/\/family-tree\/records-[a-z0-9]+\.html$/);
+  assert.equal((await rpc("resources/read", { uri: "ui://family-tree/records.html" }, { as: MEMBER })).body.result.contents[0].text, resource.body.result.contents[0].text);
+  // cards only on reads: a write's card would only repeat the reply's link
+  const tools = Object.fromEntries(list.body.result.tools.map((t) => [t.name, t]));
+  for (const name of ["create_todo", "update_todo", "suggest_edit", "add_comment"]) assert.equal(tools[name]._meta, undefined, name);
+  assert.ok(tools.get_person._meta && tools.list_todos._meta);
   const person = await tool("get_person", { id: "I4", tree: "one" }, MEMBER);
   assert.equal(person.data.page_url, "https://tree.example.test/?tree=one#/person/I4");
   assert.equal(person.cards[0].page_url, person.data.page_url);
