@@ -23,6 +23,8 @@ import { documentType, documentsFor, FILE_LIMIT } from "./documents.ts";
 import { presentsRecords, recordResult } from "./mcp-records.js";
 import { cardResource, cardHtml } from "./mcp-card-view.js";
 import { fitImage } from "./mcp-images.js";
+import { stripImageMetadata } from "./image-meta.js";
+import { createSlot, sniffType, SLOT_MINUTES } from "./upload-slots.js";
 import * as V from "./mcp-views.js";
 import { S } from "../strings/index.ts";
 
@@ -52,8 +54,10 @@ How to work:
 - A person shown as {private: true} is a name only in this member's view: use them to walk the family, never research or change them.
 - Never invent records. Cite only what you actually retrieved and read; a guess is a to-do, not a finding. Negative searches count: log them.
 - Members suggest (suggest_research, suggest_edit); editors review suggestions and edit directly (edit_tree), always with a reason and sources. Use preview_edit to show a change before making it. Never delete people: merge duplicates with person.merge.
+- Files: for a file in your workspace use get_upload_link (a one-time link you send it to with curl); for a public link pass url. Don't write whole files out as data_base64.
 - Ask the member before any write: edits, suggestions, to-dos, comments, uploads, sharing changes.`;
 
+const FILE_HELP = "Give the file one of three ways. url: a public https link the server downloads itself (a record image on an archive's site). get_upload_link: for a file in your own workspace; you get a one-time link and send the file with curl, so it never passes through this conversation. data_base64: only for small files (a few KB); every character is written out in the call, about 1.4 million per MB, and one slip corrupts the file. Don't shrink a scan or family photo to make it fit: use get_upload_link, or ask the member to upload the original on the person's page.";
 const OPS_HELP = `Edit ops (applied in order, all or nothing). People I…, families F…, sources S…; new records get ids when "id" is left out. Facts are addressed by fid.
 person.create {id?, names:[{given,surname,suffix?,type?}], sex?:"M"|"F"|"U", events?:[event]} · person.update {id, set:{sex?, notes?, research_status?:"unverified"|"partly-verified"|"verified"|"disputed", status_note?:string|null}} · person.merge {keep, drop} · person.delete {id} (only if in no family; prefer merge)
 name.add {person, name} · name.update {person, fid, set} · name.remove {person, fid}
@@ -263,17 +267,40 @@ W("add_comment", { title: "Comment", description: "Add a comment to the discussi
   run: async (x, a) => x.api("POST", "/api/comments", { tree: x.treeId, type: a.type || "person", id: a.id, fid: a.fid, body: a.body }) });
 W("resolve_comment", { title: "Resolve a comment", description: "Mark a comment resolved (its author or an editor).", props: { id: int("comment id") }, required: ["id"],
   run: async (x, a) => x.api("POST", `/api/comments/${+a.id}/resolve`, {}) });
-W("upload_media", { title: "Upload a photo or document", description: "Upload a photo (JPEG, PNG, WebP, GIF) or PDF, up to 20 MB, base64-encoded. Returns its file key; attach it to someone with a media.attach op (edit_tree, or suggest_edit for members).",
-  props: { name: str("file name"), content_type: en(["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"], "file type"), data_base64: str("the file, base64") }, required: ["content_type", "data_base64"],
+W("upload_media", { title: "Upload a photo or document", description: `Upload a photo (JPEG, PNG, WebP, GIF) or PDF, up to 20 MB. Returns its file key; attach it to someone with a media.attach op (edit_tree, or suggest_edit for members). ${FILE_HELP}`,
+  props: { name: str("file name"), content_type: en(["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"], "file type (worked out from the file when left out)"), url: str("public https link to the file"), data_base64: str("the file, base64 (small files only)") },
   run: async (x, a) => {
-    const bytes = uploadBytes(a.data_base64);
-    return x.api("POST", `/api/media/upload${qs({ name: a.name || "upload" })}`, bytes, { "Content-Type": a.content_type, "Content-Length": String(bytes.byteLength) });
+    const file = await fileFrom(x, a);
+    const type = a.content_type || sniffType(file.bytes) || file.type;
+    return x.api("POST", `/api/media/upload${qs({ name: a.name || file.name || "upload" })}`, file.bytes, { "Content-Type": type || "application/octet-stream", "Content-Length": String(file.bytes.byteLength) });
   } });
-W("add_attachment", { title: "Add an attachment", description: "Upload any file (up to 20 MB) and attach it to a person (and optionally to more people, via also), optionally linking an existing source. Members submit it for review.",
-  props: { person: str("person id"), also: { type: "array", items: { type: "string" }, description: "more person ids to attach the same file to" }, name: str("original filename"), title: str("optional display title"), source: str("existing catalogued source id from get_source"), data_base64: str("file bytes as base64"),
+W("add_attachment", { title: "Add an attachment", description: `Upload any file (up to 20 MB) and attach it to a person (and optionally to more people, via also), optionally linking an existing source. Members submit it for review. ${FILE_HELP}`,
+  props: { person: str("person id"), also: { type: "array", items: { type: "string" }, description: "more person ids to attach the same file to" }, name: str("original filename (taken from url when left out)"), title: str("optional display title"), source: str("existing catalogued source id from get_source"),
+    url: str("public https link to the file"), data_base64: str("file bytes as base64 (small files only)"),
     transcript: str("optional: what the document says, word for word (editors: saved with it; members: add it with set_transcript once the attachment is approved)") },
-  required: ["person", "name", "data_base64"],
-  run: async (x, a) => withTranscript(x, a, await addDocument(x, a, "attachment", uploadBytes(a.data_base64))) });
+  required: ["person"],
+  run: async (x, a) => {
+    const file = await fileFrom(x, a);
+    const name = a.name || file.name;
+    if (!name) fail(400, M.missing("name"));
+    return withTranscript(x, a, await addDocument(x, { ...a, name }, "attachment", file.bytes));
+  } });
+W("get_upload_link", { title: "Get a one-time upload link", description: `For a file in your own workspace (a download, a scan, a photo the member gave you): returns a link to send the file to with one command (curl -T), so it never passes through this conversation. Up to 20 MB, stored as sent except that photos lose their location data. kind "attachment" (default) attaches it to person like add_attachment; kind "photo" uploads a JPEG, PNG, WebP, GIF or PDF like upload_media and returns its key. The link works once, for ${SLOT_MINUTES} minutes. Ask the member before uploading.`,
+  props: { kind: en(["attachment", "photo"], "default attachment"), person: str("person id (attachments)"), also: { type: "array", items: { type: "string" }, description: "more person ids to attach it to" }, name: str("filename"), title: str("optional display title"), source: str("existing catalogued source id from get_source") },
+  required: ["name"],
+  run: async (x, a) => {
+    const kind = a.kind || "attachment";
+    const people = [...new Set([a.person, ...(a.also || [])].filter(Boolean))];
+    if (kind === "attachment") {
+      if (!people.length) fail(400, S.api.uploadLinks.personRequired);
+      const b = await x.bundle();
+      for (const pid of people) if (!b.people[pid] || b.people[pid].private) fail(404, M.notInTree(pid));
+    }
+    const slot = await createSlot(x.c.env, x.c.url.origin, { principal: x.c.access.principal, tree: x.treeId, kind, params: { name: String(a.name).slice(0, 180), title: a.title, people, source: a.source } });
+    if (slot.error) fail(429, slot.error);
+    return { upload_url: slot.url, method: "PUT", expires_at: slot.expires_at, max_bytes: FILE_LIMIT,
+      command: `curl --fail-with-body -sS -T '<path to the file>' '${slot.url}'`, how: S.api.uploadLinks.how };
+  } });
 W("add_report", { title: "Add a report", description: "Attach UTF-8 Markdown as a report with a built-in viewer, to a person (and optionally to more people, via also), and optionally link an existing source. For an already uploaded report, use media.update with set.source; to link it to someone else later, use link_document. Members submit it for review.",
   props: { person: str("person id"), also: { type: "array", items: { type: "string" }, description: "more person ids to attach the same report to" }, name: str("filename ending in .md or .markdown"), title: str("optional display title"), source: str("existing catalogued source id from get_source"), markdown: str("the report in Markdown"), transcript: str("optional: a transcript of the source the report is about") },
   required: ["person", "name", "markdown"],
@@ -427,10 +454,55 @@ async function callRoute(c, route, method, path, body, headers = {}) {
   return data;
 }
 
+/** The file a tool was given, as url or data_base64, with location and camera metadata removed from photos (the
+ *  site's form does that in the browser; files from AI clients arrive as they are). */
+async function fileFrom(x, a) {
+  if (!a.url === !a.data_base64) fail(400, M.oneSource);
+  if (a.data_base64) return { bytes: stripImageMetadata(uploadBytes(a.data_base64)) };
+  const file = await download(x, a.url);
+  return { ...file, bytes: stripImageMetadata(file.bytes) };
+}
+
 function uploadBytes(encoded) {
   const data = encoded.replace(/\s+/g, "");
   if (data.length > Math.ceil(FILE_LIMIT / 3) * 4) fail(413, S.api.uploads.tooLarge);
   try { return Uint8Array.fromBase64(data); } catch { fail(400, M.badBase64); }
+}
+
+/** Download a public https file for upload_media / add_attachment. Not this site (that would skip Access), not an
+ *  address or a local name, redirects followed by hand so each hop is checked, at most FILE_LIMIT bytes. */
+async function download(x, raw) {
+  let url;
+  try { url = new URL(raw); } catch { fail(400, M.badUrl); }
+  for (let hop = 0; hop < 5; hop++) {
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== "https:" || url.username || url.password || host === x.c.url.hostname.toLowerCase()
+      || /^\[|^\d+(\.\d+){3}$|^localhost$|\.local$|\.internal$/.test(host) || !host.includes(".")) fail(400, M.badUrl);
+    let res;
+    try {
+      res = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(30_000), headers: { "User-Agent": "family-tree-uploader/1", Accept: "*/*" } });
+    } catch { fail(502, M.urlUnreachable); }
+    if (res.status >= 300 && res.status < 400 && res.headers.get("Location")) { url = new URL(res.headers.get("Location"), url); continue; }
+    if (!res.ok) fail(502, M.urlFailed(res.status));
+    if (Number(res.headers.get("Content-Length")) > FILE_LIMIT) fail(413, S.api.uploads.tooLarge);
+    const reader = res.body?.getReader();
+    const chunks = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = reader ? await reader.read() : { done: true };
+      if (done) break;
+      size += value.byteLength;
+      if (size > FILE_LIMIT) { await reader.cancel(); fail(413, S.api.uploads.tooLarge); }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(size);
+    let o = 0;
+    for (const c of chunks) { bytes.set(c, o); o += c.byteLength; }
+    let name = "";
+    try { name = decodeURIComponent(url.pathname.split("/").pop() || ""); } catch { /* keep it empty */ }
+    return { bytes, type: (res.headers.get("Content-Type") || "").split(";")[0].trim(), name: name.slice(-180) };
+  }
+  fail(400, M.badUrl);
 }
 
 const b64 = (buffer) => new Uint8Array(buffer).toBase64();

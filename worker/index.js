@@ -53,6 +53,7 @@ import { followAlias, scrubFor, validTreeDefinition, validViewFilter } from "./s
 import * as Mcp from "./mcp.js";
 import { UPLOAD_TYPES, safeMediaType } from "./media-types.js";
 import { documentType, FILE_LIMIT, REPORT_LIMIT } from "./documents.ts";
+import { isUploadPath, handleUpload } from "./upload-slots.js";
 import { S } from "../strings/index.ts";
 
 const TODO_STATUSES = ["open", "in_progress", "needs_review", "done", "wont_do"];
@@ -65,6 +66,8 @@ export default {
     const isApi = url.pathname.startsWith("/api/");
     const isMedia = url.pathname.startsWith("/media/");
     const isMcp = Mcp.isMcpPath(url.pathname);
+    // one-time upload links (get_upload_link): the token is the credential, so this comes before the Access check
+    if (isUploadPath(url.pathname)) return uploadLink(request, env, ctx, url);
     if (!isApi && !isMedia && !isMcp) return env.ASSETS.fetch(request);
 
     // the MCP endpoint may sit behind its own Access application (Managed OAuth), with its own audience tag
@@ -88,6 +91,29 @@ export default {
     }
   },
 };
+
+/** PUT /upload/<token>: the file goes through the site's own upload route as the member who asked for the link. */
+async function uploadLink(request, env, ctx, url) {
+  if (!env.DB) return json({ error: S.api.http.noDatabase }, 500);
+  try {
+    return await handleUpload(request, env, {
+      run: async (principal, path, bytes, headers) => {
+        const ident = { ok: true, principal, kind: /^(service|agent):/.test(principal) ? "agent" : "person", email: principal };
+        const access = await resolveAccess(env, ident);
+        const inner = new Request(`${url.origin}${path}`, { method: "POST", body: bytes, headers: { ...headers, "Content-Length": String(bytes.byteLength) } });
+        try {
+          return await route({ request: inner, env, ctx, url: new URL(inner.url), access, ident });
+        } catch (e) {
+          if (e instanceof HttpError) return json({ error: e.message, ...(e.extra || {}) }, e.status);
+          throw e;
+        }
+      },
+    });
+  } catch (e) {
+    console.error("upload link failed", { name: e?.name });
+    return json({ error: S.api.http.internalError }, 500);
+  }
+}
 
 async function route(c) {
   const { request, url } = c;

@@ -283,6 +283,19 @@ test("upload a photo, attach it, read it back as an image", async () => {
   assert.equal((await tool("get_media", { file: key }, NAMES)).error, false); // I4 is fully visible to them
 });
 
+test("photos uploaded over MCP lose their location and camera data", async () => {
+  const photo = readFileSync(join(ROOT, "tests", "fixtures", "gps.jpg"));
+  assert.ok(photo.includes("ExampleCam"));
+  const up = await tool("upload_media", { name: "phone.jpg", content_type: "image/jpeg", data_base64: photo.toString("base64") }, EDITOR);
+  assert.equal(up.error, false, up.data);
+  const stored = Buffer.from(await (await env.MEDIA.get(up.data.key)).arrayBuffer());
+  assert.ok(!stored.includes("ExampleCam"));
+  assert.ok(stored.length < photo.length);
+  const doc = await tool("add_attachment", { person: "I4", name: "scan.jpg", data_base64: photo.toString("base64") }, EDITOR);
+  assert.equal(doc.error, false, doc.data);
+  assert.ok(!Buffer.from(await (await env.MEDIA.get(doc.data.file)).arrayBuffer()).includes("ExampleCam"));
+});
+
 test("photos too large for AI clients: scaled down with the Images binding, or a link without it", async () => {
   const be32 = (n) => [(n >>> 24) & 255, (n >> 16) & 255, (n >> 8) & 255, n & 255];
   const big = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, ...be32(4032), ...be32(3024), 8, 2, 0, 0, 0]).toString("base64");
@@ -593,5 +606,84 @@ test("every tool omitted for a role is also denied when called directly", async 
       assert.equal(denied.error, true, `${name} accepted an unlisted call`);
       assert.match(denied.data, /needs a role you don't have/);
     }
+  }
+});
+
+// ---- getting files in without writing them out as base64 (worker/upload-slots.js, url on upload tools)
+const put = (link, bytes, method = "PUT") => worker.fetch(new Request(link, { method, ...(method === "GET" ? {} : { body: bytes }) }), env, { waitUntil() {} });
+
+test("upload link: the file goes in with one PUT, as the member who asked, without location data, once", async () => {
+  const photo = readFileSync(join(ROOT, "tests", "fixtures", "gps.jpg"));
+  const link = await tool("get_upload_link", { person: "I4", name: "Draft card.jpg", title: "Example draft card" }, EDITOR);
+  assert.equal(link.error, false, link.data);
+  assert.match(link.data.upload_url, /^https:\/\/tree\.example\.test\/upload\/[\w-]{40,}$/);
+  assert.match(link.data.command, /^curl .*-T '<path to the file>'/);
+  // no Access session needed: the token is the credential
+  const res = await put(link.data.upload_url, photo);
+  assert.equal(res.status, 201, await res.clone().text());
+  const out = await res.json();
+  assert.ok(out.batch, "an editor's attachment is added directly");
+  const stored = Buffer.from(await (await env.MEDIA.get(out.file)).arrayBuffer());
+  assert.ok(!stored.includes("ExampleCam"));
+  assert.equal((await put(link.data.upload_url, photo)).status, 404, "a link works once");
+  assert.equal((await put(link.data.upload_url.replace(/.$/, "x"), photo)).status, 404, "a made-up token does nothing");
+});
+
+test("upload link: a member's upload is a suggestion; a failed upload leaves the link usable; expired links don't work", async () => {
+  const link = (await tool("get_upload_link", { person: "I17", name: "letter.pdf" }, MEMBER)).data;
+  assert.ok(link.upload_url, JSON.stringify(link));
+  assert.equal((await put(link.upload_url, new Uint8Array(0))).status, 400, "empty");
+  const res = await put(link.upload_url, new TextEncoder().encode("%PDF-1.4 example letter"));
+  assert.equal(res.status, 201);
+  assert.ok((await res.json()).proposal, "members' attachments go to review");
+
+  const photo = (await tool("get_upload_link", { kind: "photo", name: "notes.txt" }, EDITOR)).data;
+  assert.equal((await put(photo.upload_url, new TextEncoder().encode("not a picture"))).status, 415);
+  const ok = await put(photo.upload_url, readFileSync(join(ROOT, "tests", "fixtures", "gps.png")));
+  assert.equal(ok.status, 201, "still usable after the refused file");
+  assert.match((await ok.json()).key, /^uploads\/.*\.png$/);
+
+  const old = (await tool("get_upload_link", { person: "I1", name: "late.pdf" }, EDITOR)).data;
+  await env.DB.prepare("UPDATE upload_slots SET expires_at = ?").bind("2000-01-01T00:00:00Z").run();
+  assert.equal((await put(old.upload_url, new TextEncoder().encode("%PDF-1.4"))).status, 404);
+  assert.equal((await put(old.upload_url, new TextEncoder().encode("%PDF-1.4"), "GET")).status, 405);
+});
+
+test("upload link: only for people in the member's view, and attachments need a person", async () => {
+  assert.equal((await tool("get_upload_link", { name: "x.pdf" }, EDITOR)).error, true);
+  assert.equal((await tool("get_upload_link", { person: "I99999", name: "x.pdf" }, EDITOR)).error, true);
+});
+
+test("url: the server downloads public https files itself, and refuses this site, addresses and plain http", async () => {
+  const real = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (u) => {
+    const url = String(u);
+    seen.push(url);
+    if (url === "https://archive.example.org/moved") return new Response(null, { status: 302, headers: { Location: "/images/Record%201.png" } });
+    if (url === "https://archive.example.org/images/Record%201.png") return new Response(readFileSync(join(ROOT, "tests", "fixtures", "gps.png")), { headers: { "Content-Type": "image/png" } });
+    if (url === "https://archive.example.org/sneaky") return new Response(null, { status: 302, headers: { Location: "https://tree.example.test/api/tree" } });
+    if (url === "https://archive.example.org/private") return new Response("sign in", { status: 403 });
+    return real(u);
+  };
+  try {
+    const up = await tool("add_attachment", { person: "I4", url: "https://archive.example.org/moved" }, EDITOR);
+    assert.equal(up.error, false, up.data);
+    assert.equal(up.data.people[0], "I4");
+    assert.ok(!Buffer.from(await (await env.MEDIA.get(up.data.file)).arrayBuffer()).includes("ExampleCam"));
+    const media = await tool("upload_media", { url: "https://archive.example.org/images/Record%201.png" }, EDITOR);
+    assert.match(media.data.key, /Record-1\.png$|\.png$/);
+    for (const url of ["https://archive.example.org/sneaky", "http://archive.example.org/x", "https://127.0.0.1/x", "https://tree.example.test/media/x", "https://localhost/x", "https://user:pw@archive.example.org/x"]) {
+      const r = await tool("add_attachment", { person: "I4", url, name: "x.png" }, EDITOR);
+      assert.equal(r.error, true, url);
+    }
+    assert.ok(!seen.some((u) => u.includes("tree.example.test") || u.startsWith("http:") || u.includes("127.0.0.1")), "never fetched");
+    const denied = await tool("add_attachment", { person: "I4", url: "https://archive.example.org/private" }, EDITOR);
+    assert.equal(denied.error, true);
+    assert.match(JSON.stringify(denied.data), /get_upload_link/);
+    assert.equal((await tool("add_attachment", { person: "I4", name: "x.png" }, EDITOR)).error, true, "no file at all");
+    assert.equal((await tool("add_attachment", { person: "I4", name: "x.png", url: "https://archive.example.org/moved", data_base64: "AAAA" }, EDITOR)).error, true, "two files");
+  } finally {
+    globalThis.fetch = real;
   }
 });
