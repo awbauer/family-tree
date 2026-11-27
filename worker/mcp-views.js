@@ -326,7 +326,7 @@ export function surnames(b, { min_count = 1 } = {}) {
       top_places: [...r.places].sort((x, y) => y[1] - x[1]).slice(0, 5).map(([place, n]) => ({ place, events: n })) })) };
 }
 
-export function places(b, { query } = {}) {
+export function places(b, { query, unmapped } = {}) {
   const q = norm(query), m = new Map();
   const add = (e, who) => {
     if (!e.place || (q && !norm(e.place).includes(q))) return;
@@ -340,10 +340,18 @@ export function places(b, { query } = {}) {
   };
   for (const p of Object.values(b.people)) if (!p.private) for (const e of p.events || []) add(e, p.id);
   for (const f of Object.values(b.families)) for (const e of f.events || []) add(e, null);
-  return { places: [...m.values()].sort((x, y) => y.events - x.events).slice(0, 300).map((r) => {
+  // photos and documents placed there (media `place` / `places`), for people whose documents this view shows
+  const docs = {};
+  if (b.scope?.view?.media !== false) for (const [pid, list] of Object.entries((b.research && b.research.media) || {})) {
+    if (!b.people[pid] || b.people[pid].private) continue;
+    for (const md of list || []) for (const k of md.placeKeys || []) (docs[k] = docs[k] || new Set()).add(md.file);
+  }
+  const rows = [...m.values()].filter((r) => !unmapped || !(r.key && (b.places || {})[r.key]));
+  return { places: rows.sort((x, y) => y.events - x.events).slice(0, 300).map((r) => {
     const geo = r.key && (b.places || {})[r.key];
-    return compact({ place: r.place, standard: geo && geo.name, lat: geo && geo.lat, lng: geo && geo.lng, events: r.events, people: r.people.size, years: r.from ? `${r.from}–${r.to}` : undefined, types: r.types });
-  }) };
+    return compact({ place: r.place, key: geo ? r.key : undefined, on_map: !!geo, standard: geo && geo.name, lat: geo && geo.lat, lng: geo && geo.lng, events: r.events, people: r.people.size,
+      documents: geo && docs[r.key] ? docs[r.key].size : undefined, years: r.from ? `${r.from}–${r.to}` : undefined, types: r.types });
+  }), unmapped_total: [...m.values()].filter((r) => !(r.key && (b.places || {})[r.key])).length };
 }
 
 export function issues(b, q = {}) {

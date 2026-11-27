@@ -41,6 +41,7 @@ export async function batchVisible(env, bundle, batchId) {
     if (type === "config" && id === "media_map") {
       return bundle.scope.view.media && [row.before, row.after].every((value) => Object.keys(parse(value) || {}).every(person));
     }
+    if (type === "config" && id === "place_map") return true; // places on the maps carry no one's details
     if (type === "config" && id === "aliases") {
       const before = parse(row.before)?.["*"] || {}, after = parse(row.after)?.["*"] || {};
       return [...new Set([...Object.keys(before), ...Object.keys(after)])].every((from) =>

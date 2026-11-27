@@ -640,7 +640,7 @@ async function previewEdit(c) {
   const g = grantOrFail(c, d.tree);
   if (!can.propose(g)) fail(403, S.api.edit.cantEditOrSuggest);
   const { bundle: b, preview } = await checkEdit(c, g, d, { uploader: null });
-  const touched = preview.touched.filter((x) => ["media_map", "person", "family", "source", "status"].includes(x.type) && visibleEditItem(b, x));
+  const touched = preview.touched.filter((x) => ["media_map", "person", "family", "source", "status", "place_map"].includes(x.type) && visibleEditItem(b, x));
   return json({ touched: await scopedStrings(c, b, touched.map((x) =>
     fullDetails(b) ? x : { ...x, before: x.before == null ? null : {}, after: x.after == null ? null : {} })) });
 }
@@ -725,6 +725,7 @@ const visibleRow = (c, b) => (r) => {
   if (r.entity_type === "finding") return (b.research.findings || []).some((f) => String(f.id) === id);
   if (r.entity_type === "source") return b.scope.view.sources && Object.hasOwn(b.sources, id);
   if (r.entity_type === "story") return Stories.storyVisible(b, parse(r.before)) && Stories.storyVisible(b, parse(r.after));
+  if (r.entity_type === "config" && id === "place_map") return true; // the places on the maps: no one's details
   return r.entity_type === "config" && id === "media_map" ? b.scope.view.media : c.access.isOwner;
 };
 

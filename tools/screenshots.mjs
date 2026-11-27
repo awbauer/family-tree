@@ -22,7 +22,7 @@ const SHOTS = [
   ["tree", "#/tree", { width: 1280, height: 800 }],
   ["person", "#/person/I5", { width: 1280, height: 800 }],
   ["story", "#/story/eva-comes-to-england", { width: 1280, height: 800 }],
-  ["map", "#/map", { width: 1280, height: 800 }, { wait: 2500 }],
+  ["map", "#/places", { width: 1280, height: 800 }, { wait: 3000 }],
   ["research", "#/research/findings", { width: 1280, height: 800 }],
   ["search", "#/search?q=novak", { width: 1280, height: 800 }],
   ["mobile-home", "#/", { width: 390, height: 844 }, { mobile: true }],

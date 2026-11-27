@@ -11,7 +11,7 @@ import { S } from "../../../../strings/index.ts";
 export type BEvent = Event & { placeKey?: string; misfiled?: boolean };
 export type BPerson = Omit<Person, "events"> & { direct?: boolean; generation?: number; events: BEvent[] };
 export type BBranch = Branch & { inLaw?: boolean; intro?: string };
-export interface Place { name: string; lat: number; lng: number }
+export interface Place { name: string; lat: number; lng: number; texts?: string[]; added?: boolean }
 export interface Issue { severity: string; person?: string; message: string }
 export interface ContextRow { year: number; month?: number; title: string; text?: string }
 export type BTree = Tree & { people: Record<string, BPerson>; issues?: Issue[]; places?: Record<string, Place> };

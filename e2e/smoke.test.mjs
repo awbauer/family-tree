@@ -118,7 +118,8 @@ test("stories and a story", async () => {
   assert.ok(await page.locator('a[href="#/person/I5"]').count() > 0, "people in the story are linked");
 });
 test("map and timeline", async () => {
-  await visit("#/map", ["Map"]);
+  await visit("#/map", ["Places", "Leeds, England"]);
+  assert.match(page.url(), /#\/places/, "the old map address opens the Places page");
   await visit("#/timeline", ["Timeline"]);
 });
 test("research tabs", async () => {
@@ -215,6 +216,48 @@ test("an attachment that is an image shows in the photo gallery, not the attachm
   await box.getByRole("link", { name: "Download" }).waitFor();
   await box.getByRole("button", { name: "Link to more people" }).waitFor();
   assert.equal(await box.locator("[data-a=main]").count(), 0, "an attachment can't be the main photo");
+  assert.deepEqual(errors, []);
+});
+
+test("places: the big map, a place page, putting a place on the map, and the person page's map", async () => {
+  const edit = (ops) => page.request.post(`${srv.url}/api/edit`, { data: { reason: "places test", ops } });
+  let r = await edit([{ op: "event.add", entity: "person", id: "I10", event: { type: "Residence", date: "1950", place: "3 Harbour Steps, Whitby, Yorkshire" } }]);
+  assert.equal(r.status(), 200, await r.text());
+  const doc = await page.request.post(`${srv.url}/api/attachments?person=I10&type=attachment`, { data: Buffer.from("%PDF-1.4\n%example\n"), headers: { "X-Document-Name": "Example letters.pdf", "X-Document-Title": encodeURIComponent("Example letters") } });
+  assert.equal(doc.status(), 201, await doc.text());
+  r = await edit([{ op: "media.update", person: "I10", file: (await doc.json()).file, set: { places: ["Leeds, England"] } }]);
+  assert.equal(r.status(), 200, await r.text());
+
+  await page.goto(`${srv.url}/#/places`);
+  await page.reload();
+  await page.locator(".places-list button").filter({ hasText: "Leeds, England" }).click();
+  await page.getByRole("link", { name: "Open the place page" }).waitFor();
+  assert.match(page.url(), /place=leeds/);
+  await page.getByRole("link", { name: "Example letters" }).waitFor();
+  await page.getByRole("link", { name: "Open the place page" }).click();
+  await page.locator("h1").filter({ hasText: "Leeds, England" }).waitFor();
+  for (const t of ["Who was here", "What happened here", "Photos and documents", "Example letters", "names this place"]) await page.getByText(t).first().waitFor();
+
+  // a place text that isn't on the map yet: put it on with a point typed in
+  await page.goto(`${srv.url}/#/places?tab=unplaced`);
+  const row = page.locator(".unplaced li").filter({ hasText: "3 Harbour Steps, Whitby, Yorkshire" });
+  await row.getByRole("button", { name: "Put on the map" }).click();
+  const form = page.locator("form.place-form");
+  await form.getByLabel("Name").fill("3 Harbour Steps, Whitby");
+  await form.getByLabel("Latitude").fill("54.4858");
+  await form.getByLabel("Longitude").fill("-0.6206");
+  await form.getByRole("button", { name: "Save" }).click();
+  await page.waitForEvent("load");
+  await page.goto(`${srv.url}/#/person/I10`);
+  const card = page.locator("#w-places");
+  await card.getByRole("link", { name: "3 Harbour Steps, Whitby" }).waitFor();
+  await page.waitForFunction(() => document.querySelectorAll("#w-places .leaflet-marker-icon.pl-num").length > 0, null, { timeout: 10000 }).catch(() => {}); // Leaflet comes from a CDN
+  await card.getByRole("link", { name: "3 Harbour Steps, Whitby" }).click();
+  await page.locator("h1").filter({ hasText: "3 Harbour Steps, Whitby" }).waitFor();
+  assert.ok(await page.getByText("3 Harbour Steps, Whitby, Yorkshire").count() > 0, "the place text it came from is listed");
+  // the fact's place on the person page links to the place
+  await page.goto(`${srv.url}/#/person/I10`);
+  await page.locator(".t-place a").filter({ hasText: "3 Harbour Steps" }).waitFor();
   assert.deepEqual(errors, []);
 });
 

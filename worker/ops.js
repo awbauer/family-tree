@@ -3,6 +3,7 @@
 // and record an audit trail that can be reverted.
 import { RANK } from "./research.js";
 import { documentType } from "./documents.ts";
+import { cleanPlace, placeText } from "./derive.js";
 import { S as Strings } from "../strings/index.ts";
 
 const M = Strings.api.ops; // `S` below is the working state
@@ -35,6 +36,9 @@ export const CITATION_ENUMS = {
 // GEDCOM 7 MEDI enumeration, lower-cased.
 export const MEDIA_TYPES = ["audio", "book", "card", "electronic", "fiche", "film", "magazine", "manuscript", "map", "newspaper", "photo", "tombstone", "video", "other"];
 const MEDIA_FIELDS = ["caption", "date", "place", "source", "note"];
+const MEDIA_PLACES = 30; // other places a photo or document shows or mentions (`places`)
+export const PLACE_KEY = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const PLACE_TEXTS = 200;
 /** A transcript of a photo, scan or attachment: what it says, word for word (images and documents alike). */
 export const TRANSCRIPT_LIMIT = 100000;
 // What kind of source a catalogued source record is (source.upsert `type`).
@@ -82,10 +86,11 @@ function maxFid(list, p) {
 export function applyOps(state, ops, { actor = "unknown", knower = actor, now = new Date().toISOString(), newId } = {}) {
   if (!Array.isArray(ops) || !ops.length) throw new OpError(M.opsRequired);
   if (ops.length > 500) throw new OpError(M.tooMany);
-  const S = { people: { ...state.people }, families: { ...state.families }, sources: { ...state.sources }, statuses: { ...state.statuses }, media_map: { ...(state.media_map || {}) }, aliases: { ...(state.aliases || {}) } };
+  const S = { people: { ...state.people }, families: { ...state.families }, sources: { ...state.sources }, statuses: { ...state.statuses }, media_map: { ...(state.media_map || {}) }, aliases: { ...(state.aliases || {}) }, place_map: { ...(state.place_map || {}) } };
+  const gazetteer = new Set(state.gazetteer || []);
   const before = new Map(); // key -> snapshot before first touch
   const key = (t, id) => `${t}:${id}`;
-  const coll = { person: "people", family: "families", source: "sources", status: "statuses", media_map: "media_map" };
+  const coll = { person: "people", family: "families", source: "sources", status: "statuses", media_map: "media_map", place_map: "place_map" };
   const touch = (t, id) => {
     const k = key(t, id), c = S[coll[t]];
     if (!before.has(k)) before.set(k, { type: t, id, before: clone(c[id]) });
@@ -149,6 +154,12 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
       const t = o.transcript == null ? "" : String(o.transcript).replace(/\r\n?/g, "\n");
       if (t.length > TRANSCRIPT_LIMIT) throw new OpError(M.transcriptTooLong(TRANSCRIPT_LIMIT), i);
       if (t.trim()) m.transcript = t; else delete m.transcript;
+    }
+    if ("places" in o) {
+      const list = o.places == null || o.places === "" ? [] : Array.isArray(o.places) ? o.places : [o.places];
+      if (list.length > MEDIA_PLACES) throw new OpError(M.mediaPlaces(MEDIA_PLACES), i);
+      const clean = [...new Set(list.map((x) => String(x ?? "").trim().slice(0, 300)).filter(Boolean))];
+      if (clean.length) m.places = clean; else delete m.places;
     }
     const document = documentType(m.file);
     if (document) {
@@ -439,6 +450,45 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
         const m = list.find((x) => x.file === o.file);
         if (!m) throw new OpError(M.noMedia(o.file), i);
         cleanMedia(o.set || {}, m, i);
+        break;
+      }
+      case "place.save": {
+        // texts compare the way they match events (worker/derive.js): case, spacing, commas and Unicode form aside
+        const same = (t) => placeText(cleanPlace(String(t)));
+        // A place on the maps (config place_map; docs/design/edit-ops.md). A key from places.json changes that place.
+        const k = String(o.key || "");
+        if (!PLACE_KEY.test(k)) throw new OpError(M.placeKey, i);
+        const cur = S.place_map[k] && !S.place_map[k].removed ? S.place_map[k] : null;
+        const known = !!cur || gazetteer.has(k);
+        const next = touch("place_map", k) && !S.place_map[k].removed ? { ...S.place_map[k] } : {};
+        if (o.name != null) { const n = String(o.name).trim().slice(0, 200); if (!n) throw new OpError(M.placeName, i); next.name = n; }
+        for (const [f, lim] of [["lat", 90], ["lng", 180]]) if (o[f] != null && o[f] !== "") {
+          const v = Number(o[f]);
+          if (!Number.isFinite(v) || Math.abs(v) > lim) throw new OpError(M.placeCoord(f, lim), i);
+          next[f] = Math.round(v * 1e6) / 1e6;
+        }
+        const texts = (x) => (Array.isArray(x) ? x : [x]).map((t) => String(t ?? "").replace(/\s+/g, " ").trim().slice(0, 300)).filter(Boolean);
+        if (o.texts != null) next.texts = texts(o.texts);
+        if (o.add_texts != null) next.texts = [...(next.texts || []), ...texts(o.add_texts)];
+        if (o.remove_texts != null) { const gone = new Set(texts(o.remove_texts).map(same)); next.texts = (next.texts || []).filter((t) => !gone.has(same(t))); }
+        if (next.texts) { next.texts = [...new Map(next.texts.map((t) => [same(t), t])).values()]; if (next.texts.length > PLACE_TEXTS) throw new OpError(M.placeTexts(PLACE_TEXTS), i); if (!next.texts.length) delete next.texts; }
+        if (!known && (!next.name || next.lat == null || next.lng == null)) throw new OpError(M.placeNew, i);
+        // a place's texts belong to it alone: saving them here takes them off any other place saved in the app
+        for (const t of next.texts || []) for (const [other, v] of Object.entries(S.place_map)) {
+          if (other === k || !v || !(v.texts || []).some((x) => same(x) === same(t))) continue;
+          const o2 = touch("place_map", other);
+          S.place_map[other] = { ...o2, texts: (o2.texts || []).filter((x) => same(x) !== same(t)) };
+          if (!S.place_map[other].texts.length) delete S.place_map[other].texts;
+        }
+        S.place_map[k] = next;
+        break;
+      }
+      case "place.delete": {
+        const k = String(o.key || "");
+        if (!PLACE_KEY.test(k)) throw new OpError(M.placeKey, i);
+        if (!S.place_map[k] && !gazetteer.has(k)) throw new OpError(M.noPlace(k), i);
+        touch("place_map", k);
+        if (gazetteer.has(k)) S.place_map[k] = { removed: true }; else delete S.place_map[k];
         break;
       }
       case "media.set_primary": {

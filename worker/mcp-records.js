@@ -22,7 +22,7 @@ const personPath = (person) => `/person/${enc(idOf(person))}`;
 const personSection = (person, section) => [personPath(person), { section }];
 
 const sections = {
-  search_people: "/people", search_text: "/search", list_surnames: "/people", list_places: "/map",
+  search_people: "/people", search_text: "/search", list_surnames: "/people", list_places: "/places",
   search_events: "/timeline", list_data_issues: "/research/review", list_duplicates: "/research/review",
   list_sources: "/sources", list_stories: "/stories", list_findings: "/research/findings",
   list_research_log: "/research/overview", list_todos: "/research/todo", get_my_queue: "/research/todo",
@@ -146,7 +146,7 @@ export async function recordResult(x, tool, args, output) {
       set("surnames", (s) => card(url("/people", { q: s.surname }), s.surname, s.people));
       break;
     case "list_places":
-      set("places", (p) => { const label = p.name || p.place || p.key; return card(url("/people", { q: label }), label); });
+      set("places", (p) => { const label = p.standard || p.place || p.key; return card(p.key ? url(`/place/${p.key}`) : url("/people", { q: p.place || label }), label); });
       break;
     case "list_research_sites":
       if (x.c.access.isOwner) set("sites", (s) => card(url("/admin/sites"), s.name, s.coverage));

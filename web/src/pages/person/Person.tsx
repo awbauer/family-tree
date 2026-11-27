@@ -15,6 +15,7 @@ import { FactsChip, LifeEvents, Sources } from "./LifeEvents";
 import { Attachments } from "./Attachments";
 import { documentType } from "../../documents";
 import { Photos } from "./Photos";
+import { PlacesCard } from "./PlacesCard";
 import { Todos } from "./Todos";
 import { Work } from "./Work";
 import { S } from "../../../../strings/index.ts";
@@ -170,6 +171,7 @@ function PersonPage() {
         <MiniPedigree />
         {!p.private && D.scope?.view.media !== false && <Photos />}
         <Attachments />
+        <PlacesCard />
         <div className="person-main">
           {stories.length > 0 && <div className="grid g2" style={{ marginBottom: mentions.length ? 10 : 20 }}>{stories.map((s) => <StoryCard key={s.slug} story={s} />)}</div>}
           {mentions.length > 0 && <p className="small story-mentions" style={{ margin: "0 0 20px" }}><span className="muted">{stories.length ? T.alsoMentionedIn : T.mentionedIn}</span>{" "}

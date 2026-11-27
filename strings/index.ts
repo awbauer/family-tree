@@ -13,7 +13,8 @@ import { person } from "./en/person.ts";
 import { research } from "./en/research.ts";
 import { admin } from "./en/admin.ts";
 import { api } from "./en/api.ts";
+import { places } from "./en/places.ts";
 
-export const S = { common, browse, person, research, admin, api } as const;
+export const S = { common, browse, person, research, admin, api, places } as const;
 export type Strings = typeof S;
 export { plural, list } from "./format.ts";
