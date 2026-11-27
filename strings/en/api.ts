@@ -188,6 +188,15 @@ export const api = {
     addReport: "Add a report",
   },
 
+  /** One-time upload links for AI clients (worker/upload-slots.js, get_upload_link in worker/mcp.js). */
+  uploadLinks: {
+    putOnly: "Send the file with PUT (curl -T file '<link>').",
+    invalid: "This upload link doesn't work: it was already used, has expired, or was never issued. Ask for a new one with get_upload_link.",
+    tooManyOpen: (n: number) => `You already have ${n} unused upload links. Use or let some expire (15 minutes) first.`,
+    personRequired: "Say who the attachment is about (person).",
+    how: "Send the file from your workspace with the command below, within 15 minutes, once. The reply is the same as add_attachment's (or upload_media's for a photo). Nothing is uploaded until you run it. If the link can't be reached (a sign-in page, or a network error), the site owner hasn't opened /upload to upload links yet, or your workspace can't reach this site: ask the member to upload the file on the person's page instead.",
+  },
+
   /** Exports and imports (worker/index.js). */
   export: {
     editorsOnly: "Only editors and the owner can export.",
@@ -382,6 +391,10 @@ export const api = {
     postOnly: "The MCP endpoint takes JSON-RPC over POST (Streamable HTTP, no SSE stream).",
     mediaTooLarge: (mb: number) => `That file is over ${mb} MB, too large to return through MCP. Open it on the site.`,
     badBase64: "data_base64 isn't valid base64.",
+    oneSource: "Give the file as either url or data_base64.",
+    badUrl: "url must be a public https link to the file (no sign-in, not this site).",
+    urlFailed: (status: number) => `Couldn't download the file from url (HTTP ${status}). If it needs a sign-in, download it in your workspace and use get_upload_link instead.`,
+    urlUnreachable: "Couldn't download the file from url. If it needs a sign-in, download it in your workspace and use get_upload_link instead.",
     transcriptReason: "Transcript of the file, as read",
     transcriptAfterReview: "Not saved yet: the attachment is waiting for review. Add the transcript with set_transcript once it's approved.",
     failed: (status: number, msg: string) => `${msg} (HTTP ${status})`,
