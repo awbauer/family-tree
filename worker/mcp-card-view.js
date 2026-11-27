@@ -27,7 +27,9 @@ function mountCards(labels) {
     return node;
   };
   const status = (text) => root.replaceChildren(element("p", text));
+  let shown = false; // a result (or cancellation) has been drawn
   function render(result) {
+    shown = true;
     if (result?.isError) return status(result.content?.[0]?.text || labels.failed);
     const cards = result?.structuredContent?.cards;
     if (!cards?.length) return status(labels.empty);
@@ -48,7 +50,9 @@ function mountCards(labels) {
         open.href = card.page_url;
         open.target = "_blank";
         open.rel = "noopener noreferrer";
-        if (hostOpensLinks) open.addEventListener("click", (event) => {
+        // Checked at click time: a result can arrive before the initialize answer that says whether the host opens links.
+        open.addEventListener("click", (event) => {
+          if (!hostOpensLinks) return;
           event.preventDefault();
           send("ui/open-link", { url: card.page_url }, ++requestId);
         });
@@ -64,14 +68,16 @@ function mountCards(labels) {
   addEventListener("message", (event) => {
     if (event.source !== parent || (hostOrigin !== "*" && hostOrigin !== event.origin) || event.data?.jsonrpc !== "2.0") return;
     const message = event.data;
-    if (message.id === 1 && message.result && !active) {
+    // Any answer to ui/initialize starts the card, an error too (e.g. a host that doesn't know this protocol version):
+    // waiting for a result that never comes would leave "Loading" up for good.
+    if (message.id === 1 && ("result" in message || "error" in message) && !message.method && !active) {
       hostOrigin = event.origin === "null" ? "*" : event.origin;
-      hostOpensLinks = Boolean(message.result.hostCapabilities?.openLinks);
+      hostOpensLinks = Boolean(message.result?.hostCapabilities?.openLinks);
       active = true;
       send("ui/notifications/initialized", {});
       resize();
-    } else if (active && message.method === "ui/notifications/tool-result") render(message.params);
-    else if (active && message.method === "ui/notifications/tool-cancelled") status(labels.cancelled);
+    } else if (message.method === "ui/notifications/tool-result") { render(message.params); resize(); } // even if it beats the handshake
+    else if (message.method === "ui/notifications/tool-cancelled") { shown = true; status(labels.cancelled); resize(); }
     else if (active && message.method === "ping") parent.postMessage({ jsonrpc: "2.0", id: message.id, result: {} }, hostOrigin);
     else if (active && message.method === "ui/resource-teardown") {
       active = false;
@@ -81,6 +87,9 @@ function mountCards(labels) {
     }
   });
   status(labels.loading);
+  // Some hosts show the card but never send the result (for example when it scrolls into view after the call). Say
+  // so instead of loading forever; the records are in the reply text either way.
+  setTimeout(() => { if (!shown) { status(labels.unavailable); resize(); } }, 8000);
   send("ui/initialize", { protocolVersion: "2026-01-26", appInfo: { name: "family-tree-records", version: "1.0.0" }, appCapabilities: { availableDisplayModes: ["inline"] } }, 1);
 }
 `;

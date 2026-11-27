@@ -22,6 +22,7 @@ import { safeMediaType } from "./media-types.js";
 import { documentType, documentsFor, FILE_LIMIT } from "./documents.ts";
 import { presentsRecords, recordResult } from "./mcp-records.js";
 import { cardResource, cardHtml } from "./mcp-card-view.js";
+import { fitImage } from "./mcp-images.js";
 import * as V from "./mcp-views.js";
 import { S } from "../strings/index.ts";
 
@@ -387,8 +388,10 @@ function schemaOf(t) {
   if (!["whoami"].includes(t.name) && t.role !== "owner") properties.tree = TREE;
   return { type: "object", properties, ...(t.required ? { required: t.required } : {}), additionalProperties: false };
 }
-const listed = (t) => ({ name: t.name, title: t.title, description: t.description, inputSchema: schemaOf(t),
-  ...(presentsRecords(t.name) ? { _meta: { ui: { resourceUri: cardResource.uri } } } : {}),
+// MCP_CARDS=off (a dashboard variable) turns the inline record cards off for clients that show them but never fill them.
+const cardsOn = (env) => String((env && env.MCP_CARDS) || "").toLowerCase() !== "off";
+const listed = (t, cards = true) => ({ name: t.name, title: t.title, description: t.description, inputSchema: schemaOf(t),
+  ...(cards && presentsRecords(t.name) ? { _meta: { ui: { resourceUri: cardResource.uri } } } : {}),
   annotations: { title: t.title, readOnlyHint: !!t.readOnly, destructiveHint: !!t.destructive, idempotentHint: !!t.readOnly, openWorldHint: false } });
 
 /** Light argument check against the tool's schema: required fields and types, unknown fields refused. */
@@ -492,9 +495,12 @@ async function openDocument(x, file, type) {
   const uri = documentUrl(x, file);
   const response = await x.downloadDocument(uri, file);
   if (type === "report") return { file, markdown: await response.text(), download_url: uri };
-  const row = await x.c.env.DB.prepare("SELECT bytes, original_name FROM uploads WHERE key = ?").bind(file).first();
+  const row = await x.c.env.DB.prepare("SELECT bytes, original_name, content_type FROM uploads WHERE key = ?").bind(file).first();
   const size = row && row.bytes, name = (row && row.original_name) || file;
   const mimeType = "application/octet-stream";
+  // a photo or scan attached as a file goes back as an image the client can see, scaled to fit
+  const imageType = /^image\//.test((row && row.content_type) || "") ? row.content_type : IMAGE_EXT[(name.match(/\.(\w+)$/) || [])[1]?.toLowerCase()];
+  if (imageType && !(size > FILE_LIMIT)) return imageResult(x, await response.arrayBuffer(), imageType, uri, file);
   if (size > MEDIA_MAX) {
     // too big to embed: a plain link in text, not a resource_link the client would try to fetch as a file
     await response.body?.cancel();
@@ -517,20 +523,33 @@ async function media(x, file) {
   if (!x.c.env.MEDIA || !files.has(file)) fail(404, M.notInTree(file));
   const obj = await x.c.env.MEDIA.get(file);
   if (!obj) fail(404, M.notInTree(file));
-  if (obj.size > MEDIA_MAX) {
-    await obj.body?.cancel?.();
-    fail(413, M.mediaTooLarge(MEDIA_MAX / 1024 / 1024));
-  }
-  const buf = await new Response(obj.body).arrayBuffer();
-  if (buf.byteLength > MEDIA_MAX) fail(413, M.mediaTooLarge(MEDIA_MAX / 1024 / 1024));
   const h = new Headers();
   if (obj.writeHttpMetadata) obj.writeHttpMetadata(h);
   const type = safeMediaType(h.get("Content-Type"));
-  const data = b64(buf);
+  // images may be bigger than MEDIA_MAX: they're scaled down before sending (the Images binding takes up to 20 MB)
+  const limit = type.startsWith("image/") ? FILE_LIMIT : MEDIA_MAX;
+  if (obj.size > limit) {
+    await obj.body?.cancel?.();
+    fail(413, M.mediaTooLarge(limit / 1024 / 1024));
+  }
+  const buf = await new Response(obj.body).arrayBuffer();
+  if (buf.byteLength > limit) fail(413, M.mediaTooLarge(limit / 1024 / 1024));
+  const link = `${x.c.url.origin}/media/${file.split("/").map(enc).join("/")}${qs({ tree: x.treeId })}`;
   const transcript = await storedTranscript(x, file);
-  return { content: [type.startsWith("image/") ? { type: "image", data, mimeType: type }
-    : { type: "resource", resource: { uri: `${x.c.url.origin}/media/${file.split("/").map(enc).join("/")}${qs({ tree: x.treeId })}`, mimeType: type, blob: data } },
-    ...(transcript ? [transcriptPart(transcript)] : [])] };
+  const extra = transcript ? [transcriptPart(transcript)] : [];
+  if (type.startsWith("image/")) return imageResult(x, buf, type, link, file, extra);
+  return { content: [{ type: "resource", resource: { uri: link, mimeType: type, blob: b64(buf) } }, ...extra] };
+}
+
+const IMAGE_EXT = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif", heic: "image/heic", heif: "image/heif" };
+
+/** An image the AI client will accept (worker/mcp-images.js), or a link to it when it can't be made to fit. */
+async function imageResult(x, buf, type, link, file, extra = []) {
+  const fitted = await fitImage(x.c.env, buf, type);
+  if (!fitted) return { content: [{ type: "text", text: JSON.stringify({ file, download_url: link, note: M.imageTooLarge }) }, ...extra] };
+  const parts = [{ type: "image", data: b64(fitted.bytes), mimeType: fitted.type }];
+  if (fitted.resized) parts.push({ type: "text", text: JSON.stringify({ file, download_url: link, note: M.imageScaled(fitted.original) }) });
+  return { content: [...parts, ...extra] };
 }
 
 const textResult = (v) => ({ content: [{ type: "text", text: typeof v === "string" ? v : JSON.stringify(v) }] });
@@ -603,9 +622,9 @@ async function dispatch(c, deps, msg) {
       return ok({ protocolVersion: PROTOCOLS.includes(p.protocolVersion) ? p.protocolVersion : PROTOCOLS[0],
         capabilities: { tools: { listChanged: false }, resources: {} }, serverInfo: SERVER, instructions: INSTRUCTIONS });
     case "ping": return ok({});
-    case "tools/list": return ok({ tools: T.filter((t) => allowed(t, c.access)).map(listed) });
+    case "tools/list": return ok({ tools: T.filter((t) => allowed(t, c.access)).map((t) => listed(t, cardsOn(c.env))) });
     case "tools/call": return isNote ? null : ok(await callTool(c, deps, p.name, p.arguments));
-    case "resources/list": return ok({ resources: c.access.grants.length || c.access.isOwner ? [cardResource] : [] });
+    case "resources/list": return ok({ resources: cardsOn(c.env) && (c.access.grants.length || c.access.isOwner) ? [cardResource] : [] });
     case "resources/read":
       if (p.uri === cardResource.uri && (c.access.grants.length || c.access.isOwner)) {
         return ok({ contents: [{ uri: cardResource.uri, mimeType: cardResource.mimeType, text: cardHtml }] });

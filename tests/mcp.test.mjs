@@ -283,6 +283,39 @@ test("upload a photo, attach it, read it back as an image", async () => {
   assert.equal((await tool("get_media", { file: key }, NAMES)).error, false); // I4 is fully visible to them
 });
 
+test("photos too large for AI clients: scaled down with the Images binding, or a link without it", async () => {
+  const be32 = (n) => [(n >>> 24) & 255, (n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const big = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, ...be32(4032), ...be32(3024), 8, 2, 0, 0, 0]).toString("base64");
+  const up = await tool("upload_media", { name: "phone-photo.png", content_type: "image/png", data_base64: big }, EDITOR);
+  assert.equal(up.error, false, up.data);
+  await tool("edit_tree", { ops: [{ op: "media.attach", person: "I4", file: up.data.key, caption: "Big photo" }], reason: "test" }, EDITOR);
+  // no binding: a link, never an image the client would refuse
+  const plain = await tool("get_media", { file: up.data.key }, EDITOR);
+  assert.equal(plain.error, false);
+  assert.ok(!plain.content.some((c) => c.type === "image"));
+  assert.match(plain.data.download_url, /\/media\//);
+  assert.match(plain.data.note, /too large/);
+  // with the binding: a smaller JPEG, and a note pointing at the full-size file
+  env.IMAGES = { input: () => ({ transform() { return this; }, async output() { return { response: () => new Response(new Uint8Array([0xff, 0xd8, 1, 2])) }; } }) };
+  try {
+    const m = await tool("get_media", { file: up.data.key }, EDITOR);
+    assert.equal(m.content[0].type, "image");
+    assert.equal(m.content[0].mimeType, "image/jpeg");
+    assert.match(JSON.parse(m.content[1].text).note, /4032×3024/);
+  } finally { delete env.IMAGES; }
+});
+
+test("MCP_CARDS=off: no inline cards advertised", async () => {
+  const on = (await rpc("tools/list", {})).body.result.tools;
+  assert.ok(on.some((t) => t._meta?.ui?.resourceUri));
+  env.MCP_CARDS = "off";
+  try {
+    const off = (await rpc("tools/list", {})).body.result.tools;
+    assert.ok(!off.some((t) => t._meta), "no tool points at the card view");
+    assert.deepEqual((await rpc("resources/list", {})).body.result.resources, []);
+  } finally { delete env.MCP_CARDS; }
+});
+
 test("owner tools: sharing settings and the audit trail of tool calls", async () => {
   const a = (await tool("admin_overview")).data;
   assert.ok(a.grants.some((g) => g.principal === MEMBER));
@@ -297,6 +330,16 @@ test("owner tools: sharing settings and the audit trail of tool calls", async ()
   for (const r of rows) assert.doesNotMatch(String(r.after) + String(r.reason), /Hartley|query/);
   const audit = (await tool("audit_log", { type: "mcp", limit: 5 })).data;
   assert.ok(audit.batches.length >= 1);
+});
+
+test("an attached photo comes back as an image a client can show, not an opaque file", async () => {
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+  const up = await tool("add_attachment", { person: "I1", name: "Scan of a letter.png", data_base64: png });
+  assert.equal(up.error, false, up.data);
+  const get = await tool("get_attachment", { file: up.data.file });
+  assert.equal(get.content[0].type, "image");
+  assert.equal(get.content[0].mimeType, "image/png");
+  assert.equal(get.content[0].data, png);
 });
 
 test("exports respect the caller's view", async () => {

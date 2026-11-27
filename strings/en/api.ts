@@ -349,6 +349,9 @@ export const api = {
   /** The MCP server (worker/mcp.js): JSON-RPC errors and tool errors an AI client shows its user. */
   mcp: {
     tooLargeToEmbed: "This file is larger than 8 MB, so it isn't embedded. The member can open it from download_url while signed in to the site.",
+    imageTooLarge: "This image is too large for the AI client to accept and couldn't be scaled down here. The member can open it from download_url while signed in to the site.",
+    imageScaled: (original: { width: number; height: number } | null | undefined) =>
+      `Scaled down to fit the AI client's image limits${original ? ` (the original is ${original.width}×${original.height} px)` : ""}. The full-size file is at download_url for a signed-in member.`,
     cards: {
       title: "Family tree records",
       open: "Open on family tree",
@@ -356,6 +359,7 @@ export const api = {
       empty: "No linked records in this result.",
       failed: "Could not load the records.",
       cancelled: "Request cancelled.",
+      unavailable: "These cards didn't load in this app. The records are in the reply, with links to the site.",
       suggestion: (id: number) => `Suggestion #${id}`,
       run: (id: string) => `Agent run ${id}`,
       todo: (id: number) => `To-do #${id}`,
