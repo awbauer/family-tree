@@ -5,7 +5,7 @@ import { plural } from "../format.ts";
 
 export const common = {
   // ---------------------------------------------------------------- the frame (web/src/Shell.tsx)
-  nav: { tree: "Tree", people: "People", stories: "Stories", map: "Map", timeline: "Timeline", research: "Research", admin: "Admin" },
+  nav: { tree: "Tree", people: "People", stories: "Stories", places: "Places", timeline: "Timeline", research: "Research", admin: "Admin" },
   shell: {
     skip: "Skip to content",
     brand: "Family History",

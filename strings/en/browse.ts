@@ -81,13 +81,9 @@ export const browse = {
   },
 
   map: {
-    title: "Map",
-    heading: "Where the family lived",
-    journeys: "Show journeys",
     loading: "Loading map…",
     failed: "The map library could not be loaded (offline?).",
     leafletFailed: "Leaflet didn't load",
-    place: (people: number, events: number) => `${people} people · ${events} events`,
   },
 
   tree: {

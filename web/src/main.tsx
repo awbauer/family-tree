@@ -1,7 +1,7 @@
 // The site's entry point. Routes are hash-based (#/person/I12), so links from earlier versions keep working.
 import { StrictMode, type ComponentType } from "react";
 import { createRoot } from "react-dom/client";
-import { createHashRouter, Outlet, RouterProvider } from "react-router";
+import { createHashRouter, Navigate, Outlet, RouterProvider, useLocation } from "react-router";
 import "./styles.css";
 import { DataProvider } from "./data";
 import { Shell } from "./Shell";
@@ -17,13 +17,19 @@ import { Timeline } from "./pages/Timeline";
 // The larger pages load when first opened.
 const lazy = (load: () => Promise<{ [k: string]: ComponentType }>, name: string) => async () => ({ Component: (await load())[name] });
 const TreeChart = lazy(() => import("./pages/TreeChart"), "TreeChart");
-const MapPage = lazy(() => import("./pages/MapPage"), "MapPage");
+const Places = lazy(() => import("./pages/Places"), "Places");
+const Place = lazy(() => import("./pages/Place"), "Place");
 const Person = lazy(() => import("./pages/person/Person"), "Person");
 const Research = lazy(() => import("./pages/research/Research"), "Research");
 const Admin = lazy(() => import("./pages/admin/Admin"), "Admin");
 const Sources = lazy(() => import("./pages/Sources"), "Sources");
 const Source = lazy(() => import("./pages/Source"), "Source");
 const Search = lazy(() => import("./pages/Search"), "Search");
+
+/** The old map's address (#/map?branch=…) opens the Places page with the same filters. */
+function MapRedirect() {
+  return <Navigate to={`/places${useLocation().search}`} replace />;
+}
 
 function Layout() {
   return <DataProvider><Shell><Outlet /></Shell></DataProvider>;
@@ -39,7 +45,9 @@ const router = createHashRouter([{
     { path: "/branch/:key", element: <Branch /> },
     { path: "/people", element: <People /> },
     { path: "/timeline", element: <Timeline /> },
-    { path: "/map", lazy: MapPage },
+    { path: "/places", lazy: Places },
+    { path: "/place/:key", lazy: Place },
+    { path: "/map", element: <MapRedirect /> },
     { path: "/tree", lazy: TreeChart },
     { path: "/tree/:id", lazy: TreeChart },
     { path: "/person/:id", lazy: Person },

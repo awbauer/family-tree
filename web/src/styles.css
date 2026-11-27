@@ -217,7 +217,7 @@ table.data th { font-size: .75rem; text-transform: uppercase; letter-spacing: .0
 /* Person page: the side cards (facts, grandparents, photos, attachments) stack in the left column beside the main
    column, which spans every row; the last row takes the slack so the side cards stay packed at the top. On a phone
    it's one column: facts, grandparents and photos first, then the main content, then the attachments. */
-.person-layout { display: grid; grid-template-columns: 320px 1fr; grid-template-rows: repeat(4, auto) 1fr; gap: 20px 24px; margin-top: 20px; align-items: start; }
+.person-layout { display: grid; grid-template-columns: 320px 1fr; grid-template-rows: repeat(5, auto) 1fr; gap: 20px 24px; margin-top: 20px; align-items: start; }
 .person-layout > .side { grid-column: 1; }
 .person-layout > .person-main { grid-column: 2; grid-row: 1 / -1; }
 .side h2 { font-size: 1.25rem; }
@@ -225,7 +225,7 @@ table.data th { font-size: .75rem; text-transform: uppercase; letter-spacing: .0
 @media (max-width: 900px) {
   .person-layout { grid-template-columns: 1fr; grid-template-rows: none; }
   .person-layout > .side, .person-layout > .person-main { grid-column: auto; grid-row: auto; }
-  .side-facts { order: 1; } .side-ped { order: 2; } .side-photos { order: 3; } .person-main { order: 4; } .side-attachments { order: 5; }
+  .side-facts { order: 1; } .side-ped { order: 2; } .side-photos { order: 3; } .person-main { order: 4; } .side-places { order: 5; } .side-attachments { order: 6; }
 }
 .btn.sm { padding: 4px 10px; font-size: .8rem; border-radius: 8px; }
 .attachment-list .doc-acts { margin: .45rem 0 0; gap: 6px; }
@@ -328,9 +328,76 @@ sup.cite a { text-decoration: none; font-size: .72rem; padding: 0 1px; }
 .p-card .badge { margin-left: auto; }
 .letter-head { font: 600 1.4rem var(--serif); margin: 24px 0 8px; color: var(--muted); }
 
-/* ---------- map ---------- */
+/* ---------- places: the Places page (a side panel beside a full-height map), place pages, the person page's map ---------- */
+.places-page { display: grid; grid-template-columns: 360px 1fr; height: calc(100vh - 60px); min-height: 480px; }
+.places-side { border-right: 1px solid var(--line); background: var(--card); overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
+.places-side > * { flex-shrink: 0; }
+.places-head { padding: 16px 16px 4px; }
+.places-head h1 { font-size: 1.5rem; margin: 0 0 4px; }
+.places-tabs { margin: 6px 16px 10px; align-self: flex-start; }
+.places-filters { display: flex; flex-wrap: wrap; gap: 8px 12px; padding: 0 16px 10px; border-bottom: 1px solid var(--line); align-items: center; }
+.places-filters input[type=search], .unplaced input[type=search] { flex: 1 1 100%; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); font: inherit; font-size: .9rem; }
+.places-filters select { flex: 1 1 100%; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: .9rem; }
+.places-filters .years { display: flex; gap: 8px; font-size: .8rem; color: var(--muted); }
+.places-filters .years label { display: flex; align-items: center; gap: 4px; }
+.places-filters .years input { width: 76px; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; }
+.places-list { list-style: none; margin: 0; padding: 4px 8px 16px; }
+.places-list > li > button { display: block; width: 100%; text-align: left; background: none; border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; color: var(--ink); font: inherit; }
+.places-list > li > button:hover, .places-list > li > button:focus-visible { background: var(--paper-2); }
+.pl-name { display: block; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.pl-meta { display: block; font-size: .78rem; color: var(--muted); }
+.unplaced { padding: 0 16px; }
+.unplaced input[type=search] { display: block; width: 100%; box-sizing: border-box; }
+.unplaced .places-list { padding: 8px 0 16px; }
+.unplaced .un-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.unplaced .un-row .pl-meta { grid-column: 1; }
+.unplaced .un-row .btn { grid-column: 2; grid-row: 1 / span 2; }
+.place-panel { padding: 14px 16px 24px; }
+.place-panel h2 { margin: 8px 0 2px; font-size: 1.35rem; }
+.place-panel h4, .place-page h4 { font: 600 .75rem var(--sans); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin: 16px 0 6px; }
+.photo-grid.mini { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.photo-grid.mini .photo img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; display: block; }
+ul.plain, ol.plain { list-style: none; padding: 0; margin: 0; }
+ul.plain li, ol.plain li { margin: 4px 0; }
+.visits .v-date { display: inline-block; min-width: 82px; }
+.places-map { position: relative; min-width: 0; }
+.places-map #map { height: 100%; min-height: 0; }
+.map-fit { position: absolute; right: 12px; bottom: 26px; z-index: 500; box-shadow: var(--shadow); }
 #map { height: calc(100vh - 60px - 58px); min-height: 420px; }
-.map-bar { display: flex; gap: 10px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--card); flex-wrap: wrap; }
+@media (max-width: 900px) {
+  .places-page { grid-template-columns: 1fr; grid-template-rows: 46vh auto; height: auto; }
+  .places-map { grid-row: 1; height: 46vh; }
+  .places-side { grid-row: 2; border-right: 0; border-top: 1px solid var(--line); overflow: visible; }
+}
+.place-layout { display: grid; grid-template-columns: 340px 1fr; gap: 24px; margin-top: 16px; align-items: start; }
+.place-layout > aside { position: sticky; top: 76px; }
+.place-map { height: 260px; border-radius: 10px; overflow: hidden; margin-bottom: 8px; }
+.place-main > section { margin-bottom: 28px; }
+.place-main h2 { font-size: 1.3rem; }
+.p-where { display: flex; flex-direction: column; gap: 4px; }
+.p-where > .small { padding-left: 16px; }
+.place-page .photo-grid .photo { text-decoration: none; color: var(--ink); }
+.place-page .photo-grid .photo img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 8px; display: block; }
+.place-page .photo-grid .cap { display: block; font-size: .8rem; margin-top: 4px; }
+.doc-list { padding-left: 18px; }
+.doc-list li { margin: 6px 0; }
+@media (max-width: 900px) { .place-layout { grid-template-columns: 1fr; } .place-layout > aside { position: static; } }
+.person-map { height: 200px; border-radius: 10px; overflow: hidden; margin: 6px 0 10px; }
+.pl-stops { list-style: none; padding: 0; margin: 0 0 8px; }
+.pl-stops li { display: grid; grid-template-columns: 26px 1fr; gap: 8px; align-items: start; margin: 8px 0; }
+.pl-num { display: grid !important; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--card); border: 2px solid var(--bc, var(--accent)); color: var(--ink); font: 600 .72rem var(--sans); box-shadow: 0 1px 3px rgb(0 0 0 / .25); }
+.pl-num.static { box-shadow: none; margin-top: 1px; }
+.place-form { display: grid; gap: 10px; }
+.place-form .field { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; font-weight: 600; }
+.place-form .field input, .place-form .field select, .place-form input[type=search] { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-weight: 400; }
+.place-form .field .small { font-weight: 400; }
+.place-pick { height: 220px; border-radius: 8px; overflow: hidden; cursor: crosshair; }
+.geo-hits { list-style: none; padding: 0; margin: 0; max-height: 160px; overflow: auto; font-size: .85rem; }
+.geo-hits li { padding: 3px 0; border-bottom: 1px solid var(--line); }
+.geo-hits .linklike { text-align: left; font-size: 1em; }
+.place-texts { list-style: none; padding: 0; margin: 0; font-weight: 400; }
+.btn.danger { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, var(--line)); }
+.t-place a { color: inherit; }
 .leaflet-popup-content { font-family: var(--sans); font-size: 13px; max-height: 280px; overflow: auto; }
 .leaflet-popup-content h4 { font-family: var(--serif); margin: 0 0 6px; font-size: 15px; }
 .leaflet-popup-content ul { padding-left: 16px; margin: 0; }

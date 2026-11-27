@@ -1,4 +1,5 @@
 import { readTree } from "./storage.js";
+import { withPlaceEdits } from "./derive.js";
 
 // Small helpers over the D1 binding. Every write goes through `write()`, which records an audit row in `changes`
 // and bumps meta.data_version in the same batch, so readers can cache derived data per version.
@@ -64,7 +65,7 @@ export async function loadState(env) {
   };
   return {
     raw: { people: tree.people, families: tree.families, sources: tree.sources, media: tree.media },
-    research, places: cfg.places || {}, aliases: cfg.aliases || {}, profiles,
+    research, places: withPlaceEdits(cfg.places || {}, cfg.place_map || {}), aliases: cfg.aliases || {}, profiles,
   };
 }
 

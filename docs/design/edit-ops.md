@@ -28,14 +28,25 @@ IDs: people `I…`, families `F…`, sources `S…`, media `O…` (new ones get 
 | `source.upsert` | `id?`, `data: {title, type?, author?, publication?, url?, repository?, apid?, note?, text?}` | Creates the source, or updates the fields given (an empty value removes one). `type`: `original` record, `derivative` (index or transcript), compiled `tree`, `book`, `website`. `text` is a transcription. A title is required |
 | `source.merge` | `keep`, `drop` | Re-points every use of `drop` to `keep`: citations on people, names, person and family events, fact-review evidence, and photos' `source`. Fills `keep`'s empty fields from `drop`, then removes `drop`. One batch, so one undo restores both |
 | `source.delete` | `id` | Only when nothing cites it; merge a cited duplicate instead |
-| `media.attach` | `person`, `file`, `caption?`, `type?`, `date?`, `place?`, `note?`, `source?`, `transcript?`, `portrait?` | `file` is an R2 key already uploaded. `portrait: true` makes it the main photo |
-| `media.update` | `person`, `file`, `set: {caption?, type?, date?, place?, note?, source?, transcript?}` | An empty value removes the field. To link an existing report to a catalogued source, set `source` to its id on the report’s media entry. |
+| `media.attach` | `person`, `file`, `caption?`, `type?`, `date?`, `place?`, `places?`, `note?`, `source?`, `transcript?`, `portrait?` | `file` is an R2 key already uploaded. `portrait: true` makes it the main photo |
+| `media.update` | `person`, `file`, `set: {caption?, type?, date?, place?, places?, note?, source?, transcript?}` | An empty value removes the field. To link an existing report to a catalogued source, set `source` to its id on the report’s media entry. |
 | `media.set_primary` | `person`, `file` | The person's main photo (their icon); exactly one per person. Exported as GEDCOM `_PRIM Y` |
 | `media.detach` | `person`, `file` or `object` | `object` unlinks a media object imported from GEDCOM (`O…`) from the person; the object itself stays |
 
 Every op list comes with `reason` (required for direct edits) and optional `sources: [{title, url?, note?}]`. A direct edit or an edit suggestion may also carry `resolves: [findingId]`. Those findings are marked resolved in the same change, so undoing the change reopens them. `POST /api/edit/preview` returns the before/after of every record an op list would touch, without saving; the app uses it to show diffs.
 
 ### Transcripts
+
+A photo or document's `place` is where it was made or what it shows; `places` (up to 30 place texts) are other places it names, such as the addresses in a letter. Both put it on the maps when the text resolves to a place there (`placeKeys` in `/api/tree` → `research.media`), and the place pages list it.
+
+### Places
+
+| Op | Fields | Notes |
+|---|---|---|
+| `place.save` | `key`, `name?`, `lat?`, `lng?`, `texts?`, `add_texts?`, `remove_texts?` | A place on the maps. `key` is lower-case letters, digits and hyphens. A new key needs `name`, `lat` and `lng`; a key from `places.json` (or one saved before) takes only what changes. `texts` are place texts exactly as the tree writes them (case and spacing don't matter); they match this place before any `places.json` pattern, and a text belongs to one place, so saving it here takes it off any other place saved in the app. Look coordinates up (OpenStreetMap); never guess them |
+| `place.delete` | `key` | Takes the place off the maps. The facts keep their place text. A `places.json` key is hidden rather than deleted, and `place.save` brings it back |
+
+Place changes are stored in config `place_map`, shown in the history and reverted like any other change. Members' place changes are suggestions.
 
 A photo, scan, attachment or report can carry a `transcript`: what it says, word for word (a census page, a letter, a gravestone). Set it with `media.attach` or `media.update` (`set: {transcript}`), up to 100,000 characters; an empty value or `null` clears it. It belongs to each person's copy of the file, like the caption. Linking a document to more people copies it, and the MCP server's `set_transcript` sets it on every copy the caller can see. It's shown wherever the file is (the person in `/api/tree` → `research.media`; MCP `get_person`, `list_attachments`, `get_media`, `get_attachment`), only to viewers whose view shows media. Keyword search, AI Search and the agents' file reader use it, and the GEDCOM and GEDCOM X exports carry it (GEDCOM: in the media object's `NOTE`; GEDCOM X: `ft:transcript`).
 

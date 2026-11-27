@@ -226,6 +226,30 @@ export function fmtDate(pd) {
 const RX_COMMA = new RegExp(`[${PY_WS}]*,[${PY_WS}]*`, "gu");
 const RX_WS2 = new RegExp(`[${PY_WS}]{2,}`, "gu");
 
+/** A place text compared loosely: case, accents' composition, spacing and a trailing comma don't matter. */
+export const placeText = (t) => String(t || "").normalize("NFC").toLowerCase().replace(/\s+/g, " ").replace(/[\s,]+$/, "").trim();
+
+/**
+ * The gazetteer (places.json, config `places`) with the places saved in the app (config `place_map`, place.save)
+ * applied: {key: {name, lat, lng, texts, removed}}. A saved key that is also in the gazetteer changes that place
+ * (`removed` drops it); a new key is a new place.
+ */
+export function withPlaceEdits(gazetteer, placeMap) {
+  const base = (gazetteer && gazetteer.places) || [];
+  const edits = placeMap || {};
+  const out = [];
+  const seen = new Set();
+  for (const pl of base) {
+    seen.add(pl.key);
+    const e = edits[pl.key];
+    if (e && e.removed) continue;
+    out.push(e ? { ...pl, ...pick(e), texts: e.texts || [] } : pl);
+  }
+  for (const [key, e] of Object.entries(edits)) if (!seen.has(key) && e && !e.removed && e.lat != null && e.lng != null) out.push({ key, ...pick(e), texts: e.texts || [], match: [], added: true });
+  return { ...(gazetteer || {}), places: out };
+}
+const pick = (e) => Object.fromEntries(["name", "lat", "lng"].filter((k) => e[k] != null).map((k) => [k, e[k]]));
+
 export function cleanPlace(p) {
   if (!p) return "";
   p = pyStrip(pyStrip(p).replace(/^`+/, ""));
@@ -734,13 +758,25 @@ export function derive(input, { today } = {}) {
 
   // places
   const gaz = get(places, "places", []);
-  const compiled = gaz.map((pl) => [pl, pl.match.map(compilePy)]);
+  // Place texts tied to a place in the app (place.save) match exactly and before any pattern, so a street address
+  // stays its own place even when a town's pattern would also take it.
+  const exact = new Map();
+  for (const pl of gaz) for (const t of pl.texts || []) { const k = placeText(cleanPlace(String(t))); if (!exact.has(k)) exact.set(k, pl.key); }
+  const compiled = gaz.map((pl) => [pl, (pl.match || []).map(compilePy)]);
   const placeKey = (txt) => {
+    const hit = exact.get(placeText(txt));
+    if (hit) return hit;
     for (const [pl, rxs] of compiled) if (rxs.some((r) => r.test(txt))) return pl.key;
     return null;
   };
   for (const coll of [P, F]) {
     for (const x of Object.values(coll)) for (const e of x.events) if (get(e, "place")) e.placeKey = placeKey(e.place);
+  }
+  // photos and documents: where they were made or what they show (`place`), and other places they mention (`places`)
+  for (const list of Object.values(get(research, "media", {}) || {})) for (const m of list || []) {
+    if (!m || typeof m !== "object") continue;
+    const keys = [m.place, ...(Array.isArray(m.places) ? m.places : [])].filter(Boolean).map((t) => placeKey(cleanPlace(String(t))));
+    if (keys.some(Boolean)) m.placeKeys = [...new Set(keys.filter(Boolean))];
   }
 
   // relationships & branches
@@ -809,7 +845,7 @@ export function derive(input, { today } = {}) {
   const researchOut = {};
   for (const [k, v] of Object.entries(research)) if (k !== "overrides" && k !== "place_rules") researchOut[k] = v;
   const placesOut = {};
-  for (const pl of gaz) placesOut[pl.key] = { name: pl.name, lat: pl.lat, lng: pl.lng };
+  for (const pl of gaz) placesOut[pl.key] = { name: pl.name, lat: pl.lat, lng: pl.lng, ...(pl.texts && pl.texts.length ? { texts: pl.texts } : {}), ...(pl.added ? { added: true } : {}) };
 
   return {
     generated: today,

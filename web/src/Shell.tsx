@@ -10,7 +10,7 @@ import { S } from "../../strings/index.ts";
 const T = S.common.shell;
 
 const N = S.common.nav;
-const NAV: [string, string][] = [["/tree", N.tree], ["/people", N.people], ["/stories", N.stories], ["/map", N.map], ["/timeline", N.timeline], ["/research", N.research]];
+const NAV: [string, string][] = [["/tree", N.tree], ["/people", N.people], ["/stories", N.stories], ["/places", N.places], ["/timeline", N.timeline], ["/research", N.research]];
 
 /** Per-branch colours from the tree's config, as CSS variables (light and dark). */
 function BranchColors() {

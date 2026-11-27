@@ -10,6 +10,7 @@ import { ago, apidLink, eventLabel, spousesOf } from "../../tree";
 import { Linkify, useBranchStyle, useWho } from "../../ui";
 import type { Tree } from "../../types";
 import { usePerson } from "./context";
+import { placeIndex } from "../../places";
 import { S } from "../../../../strings/index.ts";
 
 const T = S.person.lifeEvents;
@@ -67,9 +68,11 @@ export function FactBadge({ r }: { r?: any }) {
 const KIN_KEY = "lifeEvents:family";
 
 export function LifeEvents() {
-  const { D, live } = useData();
+  const { D, live, people } = useData();
   const { id, p } = usePerson();
   const bstyle = useBranchStyle();
+  const { byText } = placeIndex(D as any, people as any);
+  const placeKeyOf = (e: any) => (e.placeKey && (D as any).places?.[e.placeKey] ? e.placeKey : byText.get(e.place)) || null;
   const [showKin, setShowKin] = useState(() => store.get(KIN_KEY) !== "0");
   const all = buildTimeline(D, id).rows;
   const hasKin = all.some((r) => r.kind === "kin");
@@ -99,7 +102,7 @@ export function LifeEvents() {
               <li key={i} className={kind === "kin" ? "kin" : e.misfiled ? "misfiled" : ""}>
                 <div className="t-date">{e.dateDisplay || T.undated}</div><span className="t-dot"></span>
                 <div className={`t-body${own && e.fid === target ? " fact-target" : ""}`} data-fid={own ? e.fid : undefined}>
-                  {what}{e.place && <> <span className="t-place">· {e.place}</span></>}
+                  {what}{e.place && <> <span className="t-place">· {placeKeyOf(e) ? <Link to={`/place/${placeKeyOf(e)}`}>{e.place}</Link> : e.place}</span></>}
                   {it.cites.length > 0 && <sup className="cite">{it.cites.map((n: number, j: number) => <span key={j}>{j > 0 && ","}<FnLink n={n} /></span>)}</sup>}
                   {e.note ? <div className="t-note">{e.note}</div> : e.address ? <div className="t-note">{e.address}</div> : null}
                   {e.misfiled && <div className="t-note sev-warn">{T.misfiled}</div>}
