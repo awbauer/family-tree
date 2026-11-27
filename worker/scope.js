@@ -207,7 +207,9 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
 
   const aliases = Object.fromEntries(Object.entries(full.aliases || {}).filter(([, to]) => ids.has(to)));
   // a view that hides no one gets every place record (places nothing points at yet included); others only theirs
-  const places = !hidden.size && !reduced.size && v.media ? full.places : scopePlaces(full.places, people, families, research.media);
+  let places = !hidden.size && !reduced.size && v.media ? full.places : scopePlaces(full.places, people, families, research.media);
+  // a place's note is free text like any other note: a view without notes gets none
+  if (!v.notes) places = Object.fromEntries(Object.entries(places || {}).map(([k, { note, ...pl }]) => [k, pl]));
   const out = { generated: full.generated, home, people, families, sources, media, issues, aliases, research,
     places, scope: { tree: tree.id, treeName: tree.name, view: v } };
 

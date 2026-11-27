@@ -130,6 +130,33 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
     }
     return n;
   };
+  /** A place's full name up its parent chain, as derive shows it. */
+  const fullName = (k) => { const out = [], seen = new Set(); for (let at = k; at && S.places[at] && !seen.has(at); at = S.places[at].parent) { seen.add(at); out.push(S.places[at].name); } return out.join(", "); };
+  const descendants = (k) => { const out = [k]; for (let j = 0; j < out.length; j++) for (const [id, v] of Object.entries(S.places)) if (v && v.parent === out[j] && !out.includes(id)) out.push(id); return out; };
+  let usedTexts = null; // every place text facts and photos use, compared loosely (built once, when needed)
+  const used = (t) => {
+    if (!usedTexts) {
+      usedTexts = new Set();
+      const add = (x) => { if (x) usedTexts.add(placeText(cleanPlace(String(x)))); };
+      for (const c of [S.people, S.families]) for (const x of Object.values(c)) for (const e of (x && x.events) || []) add(e.place);
+      for (const list of Object.values(S.media_map)) for (const m of list || []) { add(m && m.place); for (const t2 of (m && m.places) || []) add(t2); }
+    }
+    return usedTexts.has(placeText(cleanPlace(String(t))));
+  };
+  /**
+   * Facts and photos matched to a place by its full name keep it when the name changes (a rename, a move, a merge):
+   * `before` is {key: old full name}; each old name that something uses becomes one of the place's texts.
+   */
+  const keepFullNames = (before, target = (k) => k) => {
+    for (const [k, old] of Object.entries(before)) {
+      const to = target(k);
+      if (!S.places[to] || !old || fullName(to) === old || !used(old)) continue;
+      const cur = { ...touch("place", to) };
+      const texts = cur.texts || [];
+      if (!texts.some((t) => placeText(cleanPlace(String(t))) === placeText(cleanPlace(old)))) S.places[to] = { ...cur, texts: [...texts, old] };
+    }
+  };
+  const fullNames = (keys) => Object.fromEntries(keys.filter((k) => S.places[k]).map((k) => [k, fullName(k)]));
   const findFact = (list, fid, i, what = "fact") => {
     const idx = (list || []).findIndex((x) => x.fid === fid);
     if (idx < 0) throw new OpError(M.noFact(what, fid), i);
@@ -480,6 +507,7 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
         const k = String(o.key || "");
         if (!PLACE_KEY.test(k)) throw new OpError(M.placeKey, i);
         const known = Object.hasOwn(S.places, k);
+        const namesBefore = known && ("name" in o || "parent" in o) ? fullNames(descendants(k)) : {};
         const next = known ? { ...touch("place", k) } : (touch("place", k), {});
         if (o.name != null) { const n = String(o.name).trim().slice(0, 200); if (!n) throw new OpError(M.placeName, i); next.name = n; }
         if ("type" in o) {
@@ -541,6 +569,7 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
           if (!S.places[other].texts.length) delete S.places[other].texts;
         }
         S.places[k] = next;
+        keepFullNames(namesBefore);
         break;
       }
       case "place.merge": {
@@ -549,6 +578,7 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
         if (keep === drop) throw new OpError(M.samePlace, i);
         for (let at = S.places[keep].parent; at; at = S.places[at]?.parent) if (at === drop) throw new OpError(M.placeMergeInside, i);
         const d = S.places[drop];
+        const namesBefore = fullNames(descendants(drop));
         const kept = { ...touch("place", keep) };
         const lower = (t) => placeText(cleanPlace(String(t)));
         const union = (a, b, key = (x) => x) => [...new Map([...(a || []), ...(b || [])].map((x) => [key(x), x])).values()];
@@ -565,6 +595,7 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
         repointFacts(drop, keep);
         touch("place", drop);
         delete S.places[drop];
+        keepFullNames(namesBefore, (k) => (k === drop ? keep : k));
         break;
       }
       case "place.delete": {

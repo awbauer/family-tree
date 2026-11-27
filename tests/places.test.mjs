@@ -296,3 +296,39 @@ test("migration 0015 turns places.json and the places saved in the app into plac
   assert.deepEqual(rows["mill-row"], { name: "Mill Row, Leeds", lat: 53.79, lng: -1.54, texts: ["Mill Row, Leeds"] });
 });
 
+
+test("a view without notes gets no place notes, whether or not it hides anyone", async () => {
+  await edit([{ op: "place.save", key: "england", note: "Household details" }]);
+  const QUIET = "quiet@example.test";
+  await call("PUT", "/api/admin/views/quiet", { body: { name: "No notes", filter: { living: "full", notes: false } } });
+  await call("PUT", "/api/admin/grants", { body: { principal: QUIET, tree_id: "all", role: "member", view_id: "quiet" } });
+  const d = (await call("GET", "/api/tree?tree=all", { as: QUIET })).data;
+  assert.ok(Object.keys(d.places).length);
+  assert.ok(Object.values(d.places).every((pl) => pl.note === undefined));
+  assert.equal((await tree()).places.england.note, "Household details");
+});
+
+test("facts matched by a place's full name keep it when the place is renamed, moved or merged", async () => {
+  let r = await edit([
+    { op: "place.save", key: "old-cottage", name: "Old Cottage", lat: 54, lng: -1 },
+    { op: "place.save", key: "old-cottage-gate", name: "Gate", parent: "old-cottage" },
+    { op: "event.add", entity: "person", id: any, event: { type: "Residence", date: "1920", place: "Old Cottage" } },
+    { op: "event.add", entity: "person", id: any, event: { type: "Residence", date: "1921", place: "Gate, Old Cottage" } },
+  ]);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const at = async (place) => (await tree()).people[any].events.find((e) => e.place === place).placeKey;
+  assert.equal(await at("Old Cottage"), "old-cottage");
+  assert.equal(await at("Gate, Old Cottage"), "old-cottage-gate");
+  r = await edit([{ op: "place.save", key: "old-cottage", name: "Rose Cottage" }]);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(await at("Old Cottage"), "old-cottage", "renamed: the old full name is kept as a text");
+  assert.equal(await at("Gate, Old Cottage"), "old-cottage-gate", "and so is the old full name of a place inside it");
+  r = await edit([
+    { op: "place.save", key: "new-cottage", name: "New Cottage", lat: 54.1, lng: -1.1 },
+    { op: "place.merge", keep: "new-cottage", drop: "old-cottage" },
+  ]);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(await at("Old Cottage"), "new-cottage", "merged: facts follow to the kept place");
+  assert.equal(await at("Gate, Old Cottage"), "old-cottage-gate");
+  assert.equal((await tree()).places["old-cottage-gate"].name, "Gate, New Cottage");
+});
