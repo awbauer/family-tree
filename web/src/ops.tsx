@@ -160,9 +160,14 @@ export function OpText({ o }: { o: any }) {
     case "media.detach": return parts(document ? O.documentDetach(S.person.attachments[document], W(o.person)) : O.mediaDetach(W(o.person)));
     case "media.update": return parts(O.mediaUpdate(W(o.person), Object.entries(o.set || {}).filter(([, v]) => v).map(([k, v]) => (k === "transcript" ? O.transcriptSet(String(v).length) : O.mediaSet(k, String(v)))).join(", ") || O.clearDetails));
     case "media.set_primary": return parts(O.mediaSetPrimary(W(o.person)));
+    case "place.save": return <>{O.placeSave(placeName(D, o.key, o.name), ["type", "parent", "lat", "lng", "names", "texts", "add_texts", "remove_texts", "note"].filter((k) => k in o).join(", "))}</>;
+    case "place.merge": return <>{O.placeMerge(placeName(D, o.drop), placeName(D, o.keep))}</>;
+    case "place.delete": return <>{O.placeDelete(placeName(D, o.key))}</>;
     default: return <>{o.op}</>;
   }
 }
+
+const placeName = (D: Tree, key: string, name?: string) => ((D as any).places || {})[key]?.name || name || key;
 
 // ---------------------------------------------------------------- diffs
 const evText = (e: any) => [e.type, e.date, e.place, e.value].filter(Boolean).join(", ");
@@ -213,6 +218,12 @@ function mediaDiff(a: any[] = [], b: any[] = []) {
 export function diffItems(D: Tree, ch: any): ReactNode[] {
   const a = ch.before, b = ch.after, t = ch.type;
   if (t === "media" || t === "media_map") return mediaDiff(a, b);
+  if (t === "place") {
+    if (!a || !b) return [b ? <Add label={X.placeLabel}>{b.name}</Add> : <Del label={X.placeLabel}>{a?.name || ch.id}</Del>];
+    const show = (x: any, k: string) => (x == null ? "" : k === "parent" ? placeName(D, x) : Array.isArray(x) ? x.map((n: any) => (typeof n === "string" ? n : [n.name, n.from && n.to ? `${n.from}–${n.to}` : n.from || n.to].filter(Boolean).join(" "))).join("; ") : String(x));
+    return ["name", "type", "parent", "lat", "lng", "names", "texts", "match", "note"].filter((k) => keyOf(a[k] ?? null) !== keyOf(b[k] ?? null))
+      .map((k) => <Chg label={X.field(X.placeLabel, k)} from={show(a[k], k)} to={show(b[k], k)} />);
+  }
   if (t === "finding") return [b ? <li className="d-chg"><b>{X.finding}</b> {b.status}{b.note ? X.note(b.note) : ""}</li> : <li className="d-chg"><b>{X.finding}</b> {X.reopened}</li>];
   if (t === "status") return [
     ...((a?.status || "unverified") !== (b?.status || "unverified") ? [<Chg label={X.researchStatus} from={a?.status || "unverified"} to={b?.status || "unverified"} />] : []),
@@ -254,7 +265,7 @@ export function Diff({ changes }: { changes?: any[] }) {
     const items = diffItems(D, ch);
     if (!items.length) return null;
     const t = ch.type, w = whoName(D, ch.id);
-    const title = t === "person" ? w : t === "family" ? X.titles.family(ch.id) : t === "media" || t === "media_map" ? X.titles.photos(w) : t === "finding" ? X.titles.finding(ch.id) : t === "status" ? X.titles.status(w) : t === "source" ? X.titles.source(ch.id) : `${t} ${ch.id}`;
+    const title = t === "person" ? w : t === "family" ? X.titles.family(ch.id) : t === "media" || t === "media_map" ? X.titles.photos(w) : t === "finding" ? X.titles.finding(ch.id) : t === "status" ? X.titles.status(w) : t === "source" ? X.titles.source(ch.id) : t === "place" ? X.titles.place(placeName(D, ch.id, (ch.after || ch.before)?.name)) : `${t} ${ch.id}`;
     return <div className="diff" key={i}><div className="small muted">{title}</div><ul>{items.map((x, j) => <Fragment key={j}>{x}</Fragment>)}</ul></div>;
   }).filter(Boolean);
   return blocks.length ? <>{blocks}</> : <p className="small muted">{X.empty}</p>;

@@ -389,6 +389,7 @@ export const person = {
       correct: "Correct:",
       date: "Date (e.g. 12 Sep 1891, abt 1890)",
       place: "Place",
+      placeHelp: "Type the place as the record has it, or choose a place from the list to link the fact to it",
       detail: "Detail (occupation, etc.)",
       note: "Note",
       removeFact: "remove this fact",

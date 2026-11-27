@@ -14,14 +14,22 @@ export interface PlaceInfo extends Place {
   artifacts: Artifact[];       // one per file (the first person it's linked to)
   from: number | null; to: number | null;
   texts: string[];             // the place texts in the tree that resolve here
-  added?: boolean;             // saved in the app (place.save), not in places.json
 }
 export interface Unplaced { text: string; visits: Visit[]; people: string[] }
 
 export const yearOf = (e: { sort?: number | null }) => (e.sort ? Math.floor(e.sort / 10000) : null);
+export const PLACE_TYPES = ["country", "region", "county", "city", "district", "street", "building", "cemetery", "church", "landmark", "other"] as const;
+
 export const isPhoto = (m: { file: string; image?: boolean }) => !documentType(m.file) || !!m.image;
 
-const cache = new WeakMap<object, { index: Record<string, PlaceInfo>; unplaced: Unplaced[]; byText: Map<string, string> }>();
+interface Built {
+  index: Record<string, PlaceInfo>;          // places something points at, with what
+  unplaced: Unplaced[];                      // place texts on no place
+  byText: Map<string, string>;               // place text → key
+  kids: Record<string, string[]>;            // key → the places directly inside it, by name
+  roots: string[];                           // places inside no other, by name
+}
+const cache = new WeakMap<object, Built>();
 
 function build(D: BTree, people: BPerson[]) {
   const places = D.places || {};
@@ -63,12 +71,49 @@ function build(D: BTree, people: BPerson[]) {
   for (const pl of Object.values(index)) pl.visits.sort((a, b) => (a.e.sort || 9e9) - (b.e.sort || 9e9));
   const byText = new Map<string, string>();
   for (const pl of Object.values(index)) for (const t of pl.texts) byText.set(t, pl.key);
+  for (const [k, pl] of Object.entries(places)) if (!byText.has(pl.name)) byText.set(pl.name, k);
   const unplaced = [...loose.values()].sort((a, b) => b.visits.length - a.visits.length || a.text.localeCompare(b.text));
-  return { index, unplaced, byText };
+  const kids: Record<string, string[]> = {}, roots: string[] = [];
+  const short = (k: string) => places[k].short || places[k].name;
+  for (const [k, pl] of Object.entries(places)) if (pl.parent && places[pl.parent]) (kids[pl.parent] = kids[pl.parent] || []).push(k); else roots.push(k);
+  for (const list of [roots, ...Object.values(kids)]) list.sort((a, b) => short(a).localeCompare(short(b)));
+  return { index, unplaced, byText, kids, roots };
+}
+
+/** The place and every place inside it, nearest first. */
+export function within(b: Built, key: string) {
+  const out = [key];
+  for (let i = 0; i < out.length; i++) out.push(...(b.kids[out[i]] || []));
+  return out;
+}
+
+/** The places that enclose a place, outermost first. */
+export function enclosing(D: BTree, key: string) {
+  const places = D.places || {}, out: string[] = [];
+  for (let at = places[key]?.parent; at && places[at] && !out.includes(at) && out.length < 20; at = places[at].parent) out.unshift(at);
+  return out;
+}
+
+/** What happened at a place and inside it: visits and artifacts, each with the key of where exactly. */
+export function rollup(b: Built, key: string) {
+  const visits: (Visit & { at: string })[] = [], artifacts: (Artifact & { at: string })[] = [], people: string[] = [];
+  let from: number | null = null, to: number | null = null;
+  const files = new Set<string>();
+  for (const k of within(b, key)) {
+    const pl = b.index[k];
+    if (!pl) continue;
+    for (const v of pl.visits) visits.push({ ...v, at: k });
+    for (const a of pl.artifacts) if (!files.has(a.m.file)) { files.add(a.m.file); artifacts.push({ ...a, at: k }); }
+    for (const id of pl.people) if (!people.includes(id)) people.push(id);
+    if (pl.from != null) from = from == null ? pl.from : Math.min(from, pl.from);
+    if (pl.to != null) to = to == null ? pl.to : Math.max(to, pl.to);
+  }
+  visits.sort((a, c) => (a.e.sort || 9e9) - (c.e.sort || 9e9));
+  return { visits, artifacts, people, from, to };
 }
 
 /** Every place on the map that something in this tree points at, by key (computed once per loaded tree). */
-export function placeIndex(D: BTree, people: BPerson[]) {
+export function placeIndex(D: BTree, people: BPerson[]): Built {
   let c = cache.get(D);
   if (!c) cache.set(D, (c = build(D, people)));
   return c;
@@ -85,8 +130,8 @@ export function km(a: { lat: number; lng: number }, b: { lat: number; lng: numbe
 export const shortName = (name: string) => String(name || "").split(",")[0].trim();
 
 /** Stories that name the place (its short name, or one of the place texts that resolve to it). */
-export function storiesAt(D: BTree, pl: PlaceInfo) {
-  const words = [...new Set([shortName(pl.name), ...pl.texts.map(shortName)])].filter((w) => w.length >= 4);
+export function storiesAt(D: BTree, pl: { name: string; short?: string; texts: string[]; names?: { name: string }[] }) {
+  const words = [...new Set([pl.short || shortName(pl.name), ...pl.texts.map(shortName), ...(pl.names || []).map((n) => n.name)])].filter((w) => w.length >= 4);
   if (!words.length) return [];
   const rx = new RegExp(`(?<![\\p{L}\\p{N}])(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})(?![\\p{L}\\p{N}])`, "iu");
   return (D.research.stories || []).filter((s) => rx.test(`${s.title} ${s.body || ""}`));

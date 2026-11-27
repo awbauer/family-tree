@@ -206,7 +206,8 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
   for (const p of Object.values(people)) if (p.issues) p.issues = issues.filter((i) => i.person === p.id);
 
   const aliases = Object.fromEntries(Object.entries(full.aliases || {}).filter(([, to]) => ids.has(to)));
-  const places = scopePlaces(full.places, people, families, research.media);
+  // a view that hides no one gets every place record (places nothing points at yet included); others only theirs
+  const places = !hidden.size && !reduced.size && v.media ? full.places : scopePlaces(full.places, people, families, research.media);
   const out = { generated: full.generated, home, people, families, sources, media, issues, aliases, research,
     places, scope: { tree: tree.id, treeName: tree.name, view: v } };
 
@@ -274,7 +275,8 @@ export function scrub(out, hidden, allPeople, visiblePeople, nameOnly = new Set(
 }
 
 /**
- * Only the places this view's records use, each with only the place texts those records carry. A place saved in the
+ * Only the places this view's records use (and the places that enclose them), each with only the place texts those
+ * records carry. A place saved in the
  * app can be a street address (someone's home), so a place, its point and its texts show only to viewers who can see
  * an event or a photo or document there. People this view hides, or shows as a name only, have no events here by now.
  */
@@ -291,9 +293,14 @@ function scopePlaces(all, people, families, mediaMap) {
   for (const list of Object.values(mediaMap || {})) for (const m of list || []) {
     for (const k of (m && m.placeKeys) || []) use(k, [m.place, ...(Array.isArray(m.places) ? m.places : [])]);
   }
+  // the places that enclose them, for their full names and breadcrumbs (only their names and points: no texts)
+  const enclosing = new Set();
+  for (const key of [...used.keys()]) for (let at = all[key].parent; at && Object.hasOwn(all, at) && !used.has(at); at = all[at].parent) { used.set(at, new Set()); enclosing.add(at); }
   const out = {};
   for (const [key, set] of used) {
-    const { texts, ...pl } = all[key];
+    const { texts, note, ...pl } = all[key];
+    if (enclosing.has(key)) { out[key] = pl; continue; }
+    if (note) pl.note = note;
     const shown = (texts || []).filter((t) => set.has(placeText(cleanPlace(String(t)))));
     out[key] = shown.length ? { ...pl, texts: shown } : pl;
   }

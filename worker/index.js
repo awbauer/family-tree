@@ -640,7 +640,7 @@ async function previewEdit(c) {
   const g = grantOrFail(c, d.tree);
   if (!can.propose(g)) fail(403, S.api.edit.cantEditOrSuggest);
   const { bundle: b, preview } = await checkEdit(c, g, d, { uploader: null });
-  const touched = preview.touched.filter((x) => ["media_map", "person", "family", "source", "status", "place_map"].includes(x.type) && visibleEditItem(b, x));
+  const touched = preview.touched.filter((x) => ["media_map", "person", "family", "source", "status", "place"].includes(x.type) && visibleEditItem(b, x));
   return json({ touched: await scopedStrings(c, b, touched.map((x) =>
     fullDetails(b) ? x : { ...x, before: x.before == null ? null : {}, after: x.after == null ? null : {} })) });
 }
@@ -725,7 +725,8 @@ const visibleRow = (c, b) => (r) => {
   if (r.entity_type === "finding") return (b.research.findings || []).some((f) => String(f.id) === id);
   if (r.entity_type === "source") return b.scope.view.sources && Object.hasOwn(b.sources, id);
   if (r.entity_type === "story") return Stories.storyVisible(b, parse(r.before)) && Stories.storyVisible(b, parse(r.after));
-  if (r.entity_type === "config" && id === "place_map") return true; // the places on the maps: no one's details
+  // a place record can be someone's street address: shown to viewers whose view has the place (the owner sees all)
+  if (r.entity_type === "place") return c.access.isOwner || Object.hasOwn(b.places || {}, id);
   return r.entity_type === "config" && id === "media_map" ? b.scope.view.media : c.access.isOwner;
 };
 
@@ -739,7 +740,7 @@ async function history(c) {
   else if (id) rows = await entityRows(c, g, b, id);
   else {
     if (!can.review(g)) fail(403, S.api.history.editorsFull);
-    rows = (await c.env.DB.prepare("SELECT * FROM changes WHERE entity_type IN ('person','family','source','config','status','story') ORDER BY id DESC LIMIT 200").all()).results.filter(visibleRow(c, b));
+    rows = (await c.env.DB.prepare("SELECT * FROM changes WHERE entity_type IN ('person','family','source','config','status','story','place') ORDER BY id DESC LIMIT 200").all()).results.filter(visibleRow(c, b));
   }
   const batches = {};
   for (const r of rows) {
@@ -967,7 +968,7 @@ async function exportJson(c) {
   if (!c.access.isOwner) fail(403, S.api.export.ownerWholeDatabase);
   const st = await loadState(c.env);
   const cfg = Object.fromEntries((await c.env.DB.prepare("SELECT key, value FROM config").all()).results.map((r) => [r.key, parse(r.value)]));
-  return json({ format: "family-tree-export/1", exported_at: now(), raw: st.raw, config: cfg, research: st.research },
+  return json({ format: "family-tree-export/1", exported_at: now(), raw: st.raw, config: cfg, research: st.research, places: st.places },
     200, { "Content-Disposition": `attachment; filename="family-tree-${now().slice(0, 10)}.json"`, "Cache-Control": "private, no-store" });
 }
 

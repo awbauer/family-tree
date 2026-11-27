@@ -433,3 +433,43 @@ export function story(b, slug) {
   const s = ((b.research && b.research.stories) || []).find((x) => x.slug === slug);
   return s ? compact({ ...s, people: (s.people || []).map((x) => brief(b, x)) }) : null;
 }
+
+/**
+ * One place record: its full name, type, the places that enclose it and those inside it, its other names, the place
+ * texts that mean it, and everything there (inside places included, each marked with where): events with who, and
+ * photos and documents. Without a key: the outermost places, with how many places and events are inside each.
+ */
+export function place(b, { key, limit = 200 } = {}) {
+  const all = b.places || {};
+  const kids = {};
+  for (const [k, v] of Object.entries(all)) if (v.parent) (kids[v.parent] = kids[v.parent] || []).push(k);
+  const within = (k) => { const out = [k]; for (let i = 0; i < out.length; i++) out.push(...(kids[out[i]] || [])); return out; };
+  const evAt = new Map();
+  const add = (e, who, spouse) => { if (e.placeKey && all[e.placeKey]) { if (!evAt.has(e.placeKey)) evAt.set(e.placeKey, []); evAt.get(e.placeKey).push({ e, who, spouse }); } };
+  for (const p of Object.values(b.people)) if (!p.private) for (const e of p.events || []) add(e, p.id);
+  for (const f of Object.values(b.families)) for (const e of f.events || []) add(e, f.husband || f.wife, f.husband && f.wife ? f.wife : null);
+  const count = (k) => within(k).reduce((n, x) => n + (evAt.get(x) || []).length, 0);
+  const brief = (k) => compact({ key: k, name: all[k].name, type: all[k].type });
+  if (!key) return { places: Object.keys(all).filter((k) => !all[k].parent).sort((x, y) => all[x].name.localeCompare(all[y].name))
+    .map((k) => compact({ ...brief(k), places_inside: within(k).length - 1 || undefined, events: count(k) || undefined })) };
+  const pl = all[key];
+  if (!pl) return { error: `No place ${key} in your view.` };
+  const up = [];
+  for (let at = pl.parent; at && all[at] && up.length < 20; at = all[at].parent) up.unshift(brief(at));
+  const here = within(key);
+  const events = here.flatMap((k) => (evAt.get(k) || []).map((x) => ({ ...x, k }))).sort((x, y) => (x.e.sort || 9e9) - (y.e.sort || 9e9));
+  const docs = [];
+  if (b.scope?.view?.media !== false) for (const [pid, list] of Object.entries((b.research && b.research.media) || {})) {
+    if (!b.people[pid] || b.people[pid].private) continue;
+    for (const m of list || []) { const k = (m.placeKeys || []).find((x) => here.includes(x)); if (k) docs.push(compact({ file: m.file, caption: m.caption, date: m.date, person: pid, at: k === key ? undefined : all[k].name })); }
+  }
+  return compact({
+    key, name: pl.name, short: pl.short, type: pl.type, lat: pl.lat, lng: pl.lng, approximate_point: pl.approx || undefined,
+    within: up.length ? up : undefined, other_names: pl.names, texts: pl.texts, note: pl.note,
+    places_inside: (kids[key] || []).map((k) => compact({ ...brief(k), events: count(k) || undefined })),
+    people: [...new Set(events.map((x) => x.who).filter(Boolean))].length,
+    events: events.slice(0, limit).map((x) => compact({ person: x.who, with: x.spouse || undefined, type: x.e.type, date: x.e.date, place: x.e.place, at: x.k === key ? undefined : all[x.k].name })),
+    more_events: events.length > limit ? events.length - limit : undefined,
+    documents: docs.length ? docs : undefined,
+  });
+}

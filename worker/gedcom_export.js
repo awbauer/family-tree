@@ -188,6 +188,13 @@ export function exportGedcom(bundle, { title, now } = {}) {
     g.opt(level + 1, "TYPE", typeLine);
     g.opt(level + 1, "DATE", e.date);
     g.opt(level + 1, "PLAC", e.place);
+    // the point of the place it's on the map as (GEDCOM 7 PLAC.MAP), unless that's only the enclosing place's
+    const pl = nonEmpty(e.place) && e.placeKey && (bundle.places || {})[e.placeKey];
+    if (pl && !pl.approx && Number.isFinite(pl.lat) && Number.isFinite(pl.lng)) {
+      g.raw(level + 2, "MAP", "");
+      g.raw(level + 3, "LATI", `${pl.lat < 0 ? "S" : "N"}${Math.abs(pl.lat)}`);
+      g.raw(level + 3, "LONG", `${pl.lng < 0 ? "W" : "E"}${Math.abs(pl.lng)}`);
+    }
     g.opt(level + 1, "ADDR", e.address);
     g.opt(level + 1, "AGE", e.age);
     g.opt(level + 1, "NOTE", e.note);

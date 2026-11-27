@@ -39,7 +39,7 @@ export async function readTree(env) {
 }
 
 const guard = (env, cond, ...args) => env.DB.prepare(`INSERT INTO _guard (x) SELECT NULL WHERE ${cond}`).bind(...args);
-const TABLE = { person: "people", family: "families", source: "sources", status: "statuses" };
+const TABLE = { person: "people", family: "families", source: "sources", status: "statuses", place: "place_records" };
 const keyColumn = (type) => type === "status" ? "person_id" : "id";
 const toStored = (m, type, v) => (m === "working" ? v : type === "person" ? GX.personToGx(v) : type === "source" ? GX.sourceToGx(v) : v);
 

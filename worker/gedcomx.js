@@ -107,11 +107,11 @@ function reviewToGx(r) {
 const reviewFromGx = (g) => g[ft("review")];
 
 // ---------------------------------------------------------------- facts and names
-const EVENT_KEYS = ["type", "date", "place", "note", "value", "age", "subtype", "address", "fid", "citations", "review"];
+const EVENT_KEYS = ["type", "date", "place", "place_ref", "note", "value", "age", "subtype", "address", "fid", "citations", "review"];
 function eventToGx(e) {
   const g = { id: e.fid, type: factTypeUri(e.type), [ft("type")]: e.type };
   if (e.date !== undefined) { g.date = { original: e.date }; const f = formalDate(e.date); if (f) g.date.formal = f; }
-  if (e.place !== undefined) g.place = { original: e.place };
+  if (e.place !== undefined || e.place_ref !== undefined) g.place = { ...(e.place !== undefined ? { original: e.place } : {}), ...(e.place_ref ? { descriptionRef: `#${e.place_ref}` } : {}) };
   if (e.value !== undefined) g.value = e.value;
   if (e.note !== undefined) g.notes = [{ text: e.note }];
   if (e.age !== undefined) g.qualifiers = [{ name: GX + "Age", value: e.age }];
@@ -124,7 +124,8 @@ function eventFromGx(g) {
   const e = {};
   e.type = factTypeBack(g.type, g[ft("type")]);
   if (g.date) e.date = g.date.original;
-  if (g.place) e.place = g.place.original;
+  if (g.place && g.place.original !== undefined) e.place = g.place.original;
+  if (g.place && typeof g.place.descriptionRef === "string" && g.place.descriptionRef.startsWith("#")) e.place_ref = g.place.descriptionRef.slice(1);
   if (g.notes) e.note = g.notes[0].text;
   if (g.value !== undefined) e.value = g.value;
   const age = (g.qualifiers || []).find((q) => q.name === GX + "Age");
@@ -356,7 +357,19 @@ export function fromGx(doc) {
 }
 
 // ---------------------------------------------------------------- export: what a viewer can see, as a GEDCOM X document
-const pickEvent = (e) => pick(e, EVENT_KEYS);
+// in an export, a fact matched to a place by its text points at that place too
+const pickEvent = (e) => ({ ...pick(e, EVENT_KEYS), ...(e.placeKey && !e.place_ref ? { place_ref: e.placeKey } : {}) });
+
+/** A place (as /api/tree shows it) → a GEDCOM X PlaceDescription: its names, type, point and enclosing place. */
+export function placeToGx(key, pl) {
+  const names = [{ value: pl.name }, ...(pl.names || []).map((n) => clean({ value: n.name, lang: n.lang }))];
+  return clean({
+    id: key, names, type: pl.type ? `${ft("place/")}${pl.type}` : undefined,
+    latitude: pl.approx ? undefined : pl.lat, longitude: pl.approx ? undefined : pl.lng,
+    jurisdiction: pl.parent ? { resource: `#${pl.parent}` } : undefined,
+    [ft("shortName")]: pl.short, [ft("otherNames")]: pl.names && pl.names.length ? pl.names : undefined, [ft("note")]: pl.note,
+  });
+}
 const pickName = (n) => pick(n, NAME_KEYS);
 const local = (who) => String(who || "").split("@")[0];
 const MIME = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif", pdf: "application/pdf" };
@@ -421,5 +434,13 @@ export function exportDoc(b, { now = new Date(), title = "Family tree" } = {}) {
   };
   walk(persons);
   sds.unshift({ id: "export", resourceType: GX + "Collection", titles: [{ value: title }], citations: [{ value: `${title}, exported ${now.toISOString().slice(0, 10)}` }], [ft("exportedAt")]: now.toISOString() });
-  return { description: "#export", attribution: { modified: now.getTime(), changeMessage: "Export from the family-tree app" }, persons, relationships, sourceDescriptions: sds, agents: [...agents.values()], documents };
+  // places the exported facts point at, with the places that enclose them
+  const used = new Set(), places = [];
+  const mark = (x) => { if (Array.isArray(x)) return x.forEach(mark); if (!x || typeof x !== "object") return; if (x.place && x.place.descriptionRef) used.add(x.place.descriptionRef.slice(1)); Object.values(x).forEach(mark); };
+  mark(persons); mark(relationships);
+  for (const k of [...used]) for (let at = (b.places || {})[k] && k; at && !places.some((p) => p.id === at); at = (b.places[at] || {}).parent) if (b.places[at]) places.push(placeToGx(at, b.places[at]));
+  const known = new Set(places.map((p) => p.id));
+  const unlink = (x) => { if (Array.isArray(x)) return x.forEach(unlink); if (!x || typeof x !== "object") return; if (x.place && x.place.descriptionRef && !known.has(x.place.descriptionRef.slice(1))) delete x.place.descriptionRef; Object.values(x).forEach(unlink); };
+  unlink(persons); unlink(relationships);
+  return { description: "#export", attribution: { modified: now.getTime(), changeMessage: "Export from the family-tree app" }, persons, relationships, sourceDescriptions: sds, places, agents: [...agents.values()], documents };
 }

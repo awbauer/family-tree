@@ -41,12 +41,35 @@ A photo or document's `place` is where it was made or what it shows; `places` (u
 
 ### Places
 
+Places are records of their own (D1 `place_records`, migration 0015), and they nest: a building in a street in a city in a country. A place record is `{name, type?, parent?, lat?, lng?, names?, texts?, match?, note?}`:
+
+- `name` is the place's own name ("Fenwick Row"). Its full name is built up the `parent` chain ("Fenwick Row, Leeds, England"), and that's how the site and the API show it (`/api/tree` → `places`: `name` the full name, `short` its own).
+- `type` is one of `country`, `region`, `county`, `city`, `district`, `street`, `building`, `cemetery`, `church`, `landmark` or `other`.
+- A place without a point of its own takes its nearest enclosing place's (`approx: true`), so a street can be added before anyone has found it on a map.
+- `names` are other and historical names, with the years they were used: `{name: "Christiania", to: 1924}`.
+
+**Facts point at places.** A fact keeps its place text exactly as the record wrote it, plus an optional `place_ref` (GEDCOM X `place.descriptionRef`). A fact is placed:
+
+1. by its `place_ref`, if it has one;
+2. else by an exact match of its text against a place's `texts` or its full name;
+3. else by the `match` patterns from `places.json`, in that file's order.
+
+Photos and documents are placed the same way by their `place` and `places` texts.
+
 | Op | Fields | Notes |
 |---|---|---|
-| `place.save` | `key`, `name?`, `lat?`, `lng?`, `texts?`, `add_texts?`, `remove_texts?` | A place on the maps. `key` is lower-case letters, digits and hyphens. A new key needs `name`, `lat` and `lng`; a key from `places.json` (or one saved before) takes only what changes. `texts` are place texts exactly as the tree writes them (case and spacing don't matter); they match this place before any `places.json` pattern, and a text belongs to one place, so saving it here takes it off any other place saved in the app. Look coordinates up (OpenStreetMap); never guess them |
-| `place.delete` | `key` | Takes the place off the maps. The facts keep their place text. A `places.json` key is hidden rather than deleted, and `place.save` brings it back |
+| `place.save` | `key`, `name?`, `type?`, `parent?`, `lat?`, `lng?`, `names?`, `note?`, `texts?`, `add_texts?`, `remove_texts?` | Creates or changes a place. `key` is lower-case letters, digits and hyphens. A new place needs `name`, and either `lat` and `lng` or a `parent`. `null` or an empty value clears a field. A place can't be inside itself, and places nest at most 12 deep. `texts` are matched with case, spacing and commas ignored. A text belongs to one place, so saving it here takes it off any other. Look coordinates up (OpenStreetMap); never guess them |
+| `place.merge` | `keep`, `drop` | One place recorded twice. Facts linked to `drop`, the places inside it, and its texts, patterns and name move to `keep` (the name becomes one of `keep`'s other names). `drop` goes |
+| `place.delete` | `key` | Only for a place with nothing inside it and no facts linked to it; merge it otherwise. Facts matched by text keep their text |
+| `event.add` / `event.update` | `place_ref` in the event or `set` | Links the fact to a place record. Changing `place` in an update without giving `place_ref` clears the link, since the new text may mean somewhere else |
 
-Place changes are stored in config `place_map`, shown in the history and reverted like any other change. Members' place changes are suggestions.
+Place changes are versioned records like people and sources: they show in the history and can be reverted, and members' changes are suggestions.
+
+A viewer whose tree view hides no one gets every place. Other viewers get only the places their records use, each with only the place texts those records carry, plus the places that enclose them (name, type and point only).
+
+Exports carry the places:
+- GEDCOM X has `PlaceDescription`s with `jurisdiction` for the enclosing place, and facts with `descriptionRef`.
+- GEDCOM 7 has `PLAC.MAP` coordinates for a place with its own point.
 
 A photo, scan, attachment or report can carry a `transcript`: what it says, word for word (a census page, a letter, a gravestone). Set it with `media.attach` or `media.update` (`set: {transcript}`), up to 100,000 characters; an empty value or `null` clears it. It belongs to each person's copy of the file, like the caption. Linking a document to more people copies it, and the MCP server's `set_transcript` sets it on every copy the caller can see. It's shown wherever the file is (the person in `/api/tree` → `research.media`; MCP `get_person`, `list_attachments`, `get_media`, `get_attachment`), only to viewers whose view shows media. Keyword search, AI Search and the agents' file reader use it, and the GEDCOM and GEDCOM X exports carry it (GEDCOM: in the media object's `NOTE`; GEDCOM X: `ft:transcript`).
 
