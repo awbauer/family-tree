@@ -12,14 +12,15 @@ import { withPlaceEdits, placeText } from "../worker/derive.js";
 import { places as listPlaces } from "../worker/mcp-views.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const OWNER = "owner@example.test", EDITOR = "editor@example.test", MEMBER = "member@example.test";
-let env, call, any;
+const OWNER = "owner@example.test", EDITOR = "editor@example.test", MEMBER = "member@example.test", NARROW = "narrow@example.test";
+let env, call, any, outside, branchOne;
 
 before(async () => {
   const dir = mkdtempSync(join(tmpdir(), "ft-pl-"));
   execFileSync("python3", ["tools/build.py", "--data", "example", "--out", dir, "--raw-out", join(dir, "raw.json")], { cwd: ROOT });
   const research = JSON.parse(readFileSync(join(ROOT, "example/research.json"), "utf8"));
-  research.trees = [{ id: "all", name: "Everyone", definition: { branches: ["*"] } }];
+  branchOne = research.branches[0].key;
+  research.trees = [{ id: "all", name: "Everyone", definition: { branches: ["*"] } }, { id: "one", name: "One branch", definition: { branches: [branchOne] } }];
   writeFileSync(join(dir, "research.json"), JSON.stringify(research));
   execFileSync("python3", ["tools/seed_app.py", "--raw", join(dir, "raw.json"), "--bundle", join(dir, "family.json"), "--research", join(dir, "research.json"), "--out", join(dir, "seed.sql"), "--owner", OWNER, "--cutover"], { cwd: ROOT });
   env = makeEnv();
@@ -30,6 +31,9 @@ before(async () => {
   await call("PUT", "/api/admin/grants", { body: { principal: MEMBER, tree_id: "all", role: "member" } });
   const ex = JSON.parse(readFileSync(join(dir, "family.json"), "utf8"));
   any = Object.values(ex.people).find((p) => !p.living).id;
+  await call("PUT", "/api/admin/grants", { body: { principal: NARROW, tree_id: "one", role: "member" } });
+  const narrow = (await call("GET", "/api/tree?tree=one", { as: NARROW })).data;
+  outside = Object.values(ex.people).find((p) => !p.living && !narrow.people[p.id]).id;
 });
 
 const tree = async (as = OWNER) => (await call("GET", "/api/tree?tree=all", { as })).data;
@@ -93,9 +97,9 @@ test("a text saved on one place moves off the place that had it", async () => {
   assert.equal(r.status, 200, JSON.stringify(r.data));
   r = await edit([{ op: "place.save", key: "mill-b", name: "Mill B", lat: 2, lng: 2, texts: ["the mill"] }]);
   assert.equal(r.status, 200, JSON.stringify(r.data));
-  const d = await tree();
-  assert.equal(d.places["mill-a"].texts, undefined);
-  assert.deepEqual(d.places["mill-b"].texts, ["the mill"]);
+  const map = JSON.parse((await env.DB.prepare("SELECT value FROM config WHERE key = 'place_map'").first()).value);
+  assert.equal(map["mill-a"].texts, undefined);
+  assert.deepEqual(map["mill-b"].texts, ["the mill"]);
 });
 
 test("bad place ops are refused", async () => {
@@ -136,3 +140,39 @@ test("photos and documents are placed by place and places, and list_places count
   assert.ok(unmapped.places.every((p) => !p.on_map));
   assert.equal(unmapped.unmapped_total, unmapped.places.length);
 });
+
+test("a viewer gets only the places, and place texts, that the records they can see use", async () => {
+  const ADDRESS = "7 Quarry Lane, Leeds, England";
+  let r = await edit([
+    { op: "event.add", entity: "person", id: outside, event: { type: "Residence", date: "1930", place: ADDRESS } },
+    { op: "place.save", key: "quarry-lane-7", name: "7 Quarry Lane, Leeds", lat: 53.81, lng: -1.56, texts: [ADDRESS] },
+    { op: "place.save", key: "unused-place", name: "Nothing here", lat: 1, lng: 1 },
+  ]);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const full = await tree();
+  assert.deepEqual(full.places["quarry-lane-7"].texts, [ADDRESS]);
+  assert.equal(full.places["unused-place"], undefined, "a place nothing uses isn't sent");
+
+  const narrow = (await call("GET", "/api/tree?tree=one", { as: NARROW })).data;
+  assert.equal(narrow.people[outside], undefined);
+  assert.equal(narrow.places["quarry-lane-7"], undefined, "the address of someone outside the view stays hidden");
+  assert.ok(!JSON.stringify(narrow).includes("Quarry Lane"));
+  assert.ok(Object.keys(narrow.places).length > 0, "places the view's own records use are still there");
+  for (const [k, pl] of Object.entries(narrow.places)) {
+    assert.ok(Object.values(narrow.people).some((p) => (p.events || []).some((e) => e.placeKey === k))
+      || Object.values(narrow.families).some((f) => (f.events || []).some((e) => e.placeKey === k))
+      || Object.values(narrow.research.media || {}).some((l) => l.some((m) => (m.placeKeys || []).includes(k))), k);
+    for (const t of pl.texts || []) assert.ok(JSON.stringify(narrow.people).includes(JSON.stringify(t).slice(1, -1)) || JSON.stringify(narrow.research.media || {}).includes(JSON.stringify(t).slice(1, -1)), t);
+  }
+});
+
+test("place texts move between places when they match events the same way (case, spacing, commas)", async () => {
+  let r = await edit([{ op: "place.save", key: "mill-c", name: "Mill C", lat: 3, lng: 3, texts: ["Old Mill,  Leeds,"] }]);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await edit([{ op: "place.save", key: "mill-d", name: "Mill D", lat: 4, lng: 4, texts: ["old mill, leeds", "OLD MILL ,LEEDS"] }]);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const map = JSON.parse((await env.DB.prepare("SELECT value FROM config WHERE key = 'place_map'").first()).value);
+  assert.equal(map["mill-c"].texts, undefined, "the text left the place that had it");
+  assert.deepEqual(map["mill-d"].texts.length, 1, "one text, however it was spaced");
+});
+

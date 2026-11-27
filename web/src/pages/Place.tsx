@@ -27,6 +27,7 @@ export function Place() {
   const pl = index[key] || (base ? { key, ...base, visits: [], people: [], artifacts: [], from: null, to: null, texts: [] } : null);
   useTitle(pl ? pl.name : null);
   const [editing, setEditing] = useState(false);
+  useEffect(() => { setEditing(false); }, [key]); // a form open on one place never saves onto the next
   const near = useMemo(() => pl ? Object.values(index).filter((o) => o.key !== key).map((o) => ({ o, d: km(pl, o) })).filter((x) => x.d <= NEAR_KM).sort((a, b) => a.d - b.d).slice(0, 12) : [], [index, key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const box = useRef<HTMLDivElement>(null);
@@ -72,7 +73,7 @@ export function Place() {
             {pl.texts.length > 0 && <><h4>{T.recordedAs}</h4><ul className="plain small">{pl.texts.map((t) => <li key={t}>{t}</li>)}</ul></>}
             {live && !editing && <div className="btn-row"><button className="btn sm" onClick={() => setEditing(true)}>{T.edit}</button></div>}
           </div>
-          {editing && <PlaceForm placeKey={key} onCancel={() => setEditing(false)} />}
+          {editing && <PlaceForm key={key} placeKey={key} onCancel={() => setEditing(false)} />}
         </aside>
         <div className="place-main">
           {pl.people.length > 0 && <section>

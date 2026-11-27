@@ -3,6 +3,7 @@
 // and record an audit trail that can be reverted.
 import { RANK } from "./research.js";
 import { documentType } from "./documents.ts";
+import { cleanPlace, placeText } from "./derive.js";
 import { S as Strings } from "../strings/index.ts";
 
 const M = Strings.api.ops; // `S` below is the working state
@@ -452,6 +453,8 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
         break;
       }
       case "place.save": {
+        // texts compare the way they match events (worker/derive.js): case, spacing, commas and Unicode form aside
+        const same = (t) => placeText(cleanPlace(String(t)));
         // A place on the maps (config place_map; docs/design/edit-ops.md). A key from places.json changes that place.
         const k = String(o.key || "");
         if (!PLACE_KEY.test(k)) throw new OpError(M.placeKey, i);
@@ -467,14 +470,14 @@ export function applyOps(state, ops, { actor = "unknown", knower = actor, now = 
         const texts = (x) => (Array.isArray(x) ? x : [x]).map((t) => String(t ?? "").replace(/\s+/g, " ").trim().slice(0, 300)).filter(Boolean);
         if (o.texts != null) next.texts = texts(o.texts);
         if (o.add_texts != null) next.texts = [...(next.texts || []), ...texts(o.add_texts)];
-        if (o.remove_texts != null) { const gone = new Set(texts(o.remove_texts).map((t) => t.toLowerCase())); next.texts = (next.texts || []).filter((t) => !gone.has(t.toLowerCase())); }
-        if (next.texts) { next.texts = [...new Map(next.texts.map((t) => [t.toLowerCase(), t])).values()]; if (next.texts.length > PLACE_TEXTS) throw new OpError(M.placeTexts(PLACE_TEXTS), i); if (!next.texts.length) delete next.texts; }
+        if (o.remove_texts != null) { const gone = new Set(texts(o.remove_texts).map(same)); next.texts = (next.texts || []).filter((t) => !gone.has(same(t))); }
+        if (next.texts) { next.texts = [...new Map(next.texts.map((t) => [same(t), t])).values()]; if (next.texts.length > PLACE_TEXTS) throw new OpError(M.placeTexts(PLACE_TEXTS), i); if (!next.texts.length) delete next.texts; }
         if (!known && (!next.name || next.lat == null || next.lng == null)) throw new OpError(M.placeNew, i);
         // a place's texts belong to it alone: saving them here takes them off any other place saved in the app
         for (const t of next.texts || []) for (const [other, v] of Object.entries(S.place_map)) {
-          if (other === k || !v || !(v.texts || []).some((x) => x.toLowerCase() === t.toLowerCase())) continue;
+          if (other === k || !v || !(v.texts || []).some((x) => same(x) === same(t))) continue;
           const o2 = touch("place_map", other);
-          S.place_map[other] = { ...o2, texts: (o2.texts || []).filter((x) => x.toLowerCase() !== t.toLowerCase()) };
+          S.place_map[other] = { ...o2, texts: (o2.texts || []).filter((x) => same(x) !== same(t)) };
           if (!S.place_map[other].texts.length) delete S.place_map[other].texts;
         }
         S.place_map[k] = next;

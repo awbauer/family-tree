@@ -3,6 +3,8 @@
 // that replaces any remaining name or ID of a hidden person inside free text (issue messages, event notes, story
 // bodies, findings). tests/scope.test.mjs asserts no hidden ID or name survives anywhere in the JSON.
 
+import { cleanPlace, placeText } from "./derive.js";
+
 export const DEFAULT_VIEW = { living: "full", research: true, notes: true, media: true, sources: true };
 
 const record = (v) => !!v && typeof v === "object" && !Array.isArray(v);
@@ -204,8 +206,9 @@ export function scopeBundle(full, { tree, view, viewerPersonId, helpers = {}, is
   for (const p of Object.values(people)) if (p.issues) p.issues = issues.filter((i) => i.person === p.id);
 
   const aliases = Object.fromEntries(Object.entries(full.aliases || {}).filter(([, to]) => ids.has(to)));
+  const places = scopePlaces(full.places, people, families, research.media);
   const out = { generated: full.generated, home, people, families, sources, media, issues, aliases, research,
-    places: full.places, scope: { tree: tree.id, treeName: tree.name, view: v } };
+    places, scope: { tree: tree.id, treeName: tree.name, view: v } };
 
   // ---- 8. text scrub: no hidden person's name or ID may survive in any string, nor an anonymous living person's name
   return scrub(out, hidden, full.people, people, v.living === "anonymous" ? reduced : new Set());
@@ -268,4 +271,31 @@ export function scrub(out, hidden, allPeople, visiblePeople, nameOnly = new Set(
     return x;
   };
   return walk(out);
+}
+
+/**
+ * Only the places this view's records use, each with only the place texts those records carry. A place saved in the
+ * app can be a street address (someone's home), so a place, its point and its texts show only to viewers who can see
+ * an event or a photo or document there. People this view hides, or shows as a name only, have no events here by now.
+ */
+function scopePlaces(all, people, families, mediaMap) {
+  const used = new Map();
+  const use = (key, texts) => {
+    if (!key || !all || !Object.hasOwn(all, key)) return;
+    const set = used.get(key) || new Set();
+    for (const t of texts) if (t) set.add(placeText(cleanPlace(String(t))));
+    used.set(key, set);
+  };
+  for (const p of Object.values(people)) for (const e of p.events || []) use(e.placeKey, [e.place]);
+  for (const f of Object.values(families)) for (const e of f.events || []) use(e.placeKey, [e.place]);
+  for (const list of Object.values(mediaMap || {})) for (const m of list || []) {
+    for (const k of (m && m.placeKeys) || []) use(k, [m.place, ...(Array.isArray(m.places) ? m.places : [])]);
+  }
+  const out = {};
+  for (const [key, set] of used) {
+    const { texts, ...pl } = all[key];
+    const shown = (texts || []).filter((t) => set.has(placeText(cleanPlace(String(t)))));
+    out[key] = shown.length ? { ...pl, texts: shown } : pl;
+  }
+  return out;
 }
