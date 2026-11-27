@@ -103,7 +103,7 @@ export function Place() {
             <div className="place-map" ref={box} aria-label={T.mapLabel}>
               {status === "error" && <div className="empty">{S.browse.map.failed}</div>}
             </div>
-            <p className="small muted" style={{ marginBottom: 0 }}>{pl.approx ? T.approx(places[pl.parent || ""]?.short || "") : `${pl.lat.toFixed(4)}, ${pl.lng.toFixed(4)}`} · <Link to={`/places?place=${encodeURIComponent(key)}`}>{T.bigMap}</Link></p>
+            <p className="small muted" style={{ marginBottom: 0 }}>{pl.approx ? T.approx(places[pl.parent || ""]?.short || "") : `${pl.lat.toFixed(4)}, ${pl.lng.toFixed(4)}`} · <Link to={`/places?${kids.length ? `in=${encodeURIComponent(key)}&` : ""}place=${encodeURIComponent(key)}`}>{T.bigMap}</Link></p>
             {kids.length > 0 && <><h4>{T.insideTitle}</h4><ul className="plain">{kids.map((k) => {
               const r = count(k);
               return <li key={k}><Link to={`/place/${k}`}>{places[k].short || places[k].name}</Link> <span className="small muted">{[places[k].type && T.types[places[k].type as keyof typeof T.types], r.people.length ? T.people(r.people.length) : ""].filter(Boolean).join(" · ")}</span></li>;
@@ -123,6 +123,7 @@ export function Place() {
         <div className="place-main">
           {all.people.length > 0 && <section>
             <h2>{T.whoTitle} <span className="count">{all.people.length}</span></h2>
+            <p className="small"><Link to={`/people?place=${encodeURIComponent(key)}`}>{T.inPeople}</Link> · <Link to={`/timeline?scope=all&place=${encodeURIComponent(key)}`}>{T.inTimeline}</Link></p>
             <div className="people-grid">{all.people.map((id) => <div key={id} className="p-where"><PCard p={D.people[id] as any} /><span className="small muted">{what(id)}</span></div>)}</div>
           </section>}
           {(photos.length > 0 || docs.length > 0) && <section>

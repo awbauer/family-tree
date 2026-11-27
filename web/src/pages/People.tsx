@@ -1,28 +1,32 @@
-// Everyone in the tree, grouped by surname, with filters kept in the URL (?q=&branch=&status=&direct=1).
+// Everyone in the tree, grouped by surname, with filters kept in the URL (?q=&branch=&status=&direct=1&place=).
+// `place` keeps people with a fact in that place or any place inside it (a country, a city, a street).
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import { isUnknown, norm, useTitle } from "../lib";
 import { STATUS_LABEL } from "../tree";
 import { PCard, useBrowse, type BPerson } from "./browse/shared";
+import { PlaceSelect } from "./browse/PlaceSelect";
+import { inPlace, placeIndex } from "../places";
 import { S } from "../../../strings/index.ts";
 
 const T = S.browse.people;
 
-interface Filters { q: string; b: string; s: string; d: boolean }
-const fromParams = (ps: URLSearchParams): Filters => ({ q: ps.get("q") || "", b: ps.get("branch") || "", s: ps.get("status") || "", d: !!ps.get("direct") });
+interface Filters { q: string; b: string; s: string; d: boolean; pl: string }
+const fromParams = (ps: URLSearchParams): Filters => ({ q: ps.get("q") || "", b: ps.get("branch") || "", s: ps.get("status") || "", d: !!ps.get("direct"), pl: ps.get("place") || "" });
 function toSearch(f: Filters) {
   const ps = new URLSearchParams();
   if (norm(f.q)) ps.set("q", f.q);
   if (f.b) ps.set("branch", f.b);
   if (f.s) ps.set("status", f.s);
   if (f.d) ps.set("direct", "1");
+  if (f.pl) ps.set("place", f.pl);
   const s = ps.toString();
   return s ? `?${s}` : "";
 }
 
 export function People() {
   useTitle(T.title);
-  const { people, branches } = useBrowse();
+  const { D, people, branches } = useBrowse();
   const [params, setParams] = useSearchParams();
   const loc = useLocation();
   const [f, setF] = useState<Filters>(() => fromParams(params));
@@ -41,10 +45,12 @@ export function People() {
   const branchOpts = useMemo(() => Object.values(branches).filter((b) => people.some((p) => p.branch === b.key)), [branches, people]);
   const list = useMemo(() => {
     const q = norm(f.q);
-    return people.filter((p) => !isUnknown(p) && (!f.b || p.branch === f.b) && (!f.s || p.status === f.s) && (!f.d || p.direct) &&
+    const keys = inPlace(D, people, f.pl), idx = placeIndex(D, people).index;
+    const there = keys ? new Set([...keys].flatMap((k) => idx[k]?.people || [])) : null;
+    return people.filter((p) => !isUnknown(p) && (!f.b || p.branch === f.b) && (!f.s || p.status === f.s) && (!f.d || p.direct) && (!there || there.has(p.id)) &&
       (!q || norm(p.name + " " + p.names.map((n) => n.given + " " + n.surname).join(" ") + " " + p.events.map((e) => e.place || "").join(" ")).includes(q)))
       .sort((x, y) => (x.surname || "~").localeCompare(y.surname || "~") || x.given.localeCompare(y.given));
-  }, [people, f]);
+  }, [D, people, f]);
   const groups = useMemo(() => {
     const out: { surname: string; people: BPerson[] }[] = [];
     for (const p of list) {
@@ -65,6 +71,7 @@ export function People() {
         <select id="pf-s" value={f.s} onChange={(e) => setF({ ...f, s: e.target.value })}>
           <option value="">{T.anyStatus}</option>{Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
+        <PlaceSelect id="pf-pl" value={f.pl} onChange={(pl) => setF({ ...f, pl })} />
         <label className="small"><input id="pf-d" type="checkbox" checked={f.d} onChange={(e) => setF({ ...f, d: e.target.checked })} /> {S.browse.filters.directOnly}</label>
         <span id="pf-n" className="muted small">{T.count(list.length)}</span>
       </div>

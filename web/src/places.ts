@@ -144,3 +144,40 @@ export function placeKeyFor(name: string, taken: Record<string, unknown>) {
   while (Object.hasOwn(taken, k)) k = `${base}-${n++}`;
   return k;
 }
+
+/** How deep a place sits: 0 for one inside no other (a country, usually). */
+export function depthOf(D: BTree, key: string) { return enclosing(D, key).length; }
+
+/** The place itself or the one enclosing it at `depth` (0 = outermost); a place shallower than that is itself. */
+export function atDepth(D: BTree, key: string, depth: number) {
+  const chain = [...enclosing(D, key), key];
+  return chain[Math.min(depth, chain.length - 1)];
+}
+
+/** The keys of a place and every place inside it, for "in this place" filters (empty key: no filter). */
+export function inPlace(D: BTree, people: BPerson[], key: string): Set<string> | null {
+  if (!key || !(D.places || {})[key]) return null;
+  return new Set(within(placeIndex(D, people), key));
+}
+
+/** Where a fact is on the map: its place key, or the key of a place whose texts or full name its text is. */
+export function placeOfEvent(b: Built, e: { placeKey?: string; place?: string }) {
+  return (e.placeKey && b.index[e.placeKey] ? e.placeKey : e.place ? b.byText.get(e.place) : undefined) || null;
+}
+
+/**
+ * The places as options for a "within" filter, nested (indented by depth) in hierarchy order: only places where
+ * something happened, in them or inside them, and only those with places inside them unless `leaves` is set.
+ */
+export function placeOptions(D: BTree, people: BPerson[], { leaves = false } = {}) {
+  const b = placeIndex(D, people), places = D.places || {};
+  const out: { key: string; label: string; depth: number }[] = [];
+  const busy = (k: string): boolean => !!b.index[k] || (b.kids[k] || []).some(busy);
+  const walk = (k: string, d: number) => {
+    if (!busy(k)) return;
+    if (leaves || (b.kids[k] || []).some(busy)) out.push({ key: k, label: places[k].short || places[k].name, depth: d });
+    for (const c of b.kids[k] || []) walk(c, d + 1);
+  };
+  for (const r of b.roots) walk(r, 0);
+  return out;
+}
