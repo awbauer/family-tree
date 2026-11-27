@@ -255,6 +255,46 @@ test("MCP cards render in a sandbox and open a record in the selected tree", asy
   }
 });
 
+test("MCP cards cope with hosts that don't follow the happy path", async () => {
+  const rpcCall = async (method, params) => (await (await page.request.post(`${srv.url}/mcp`, { data: { jsonrpc: "2.0", id: 1, method, params } })).json()).result;
+  const tools = await rpcCall("tools/list", {});
+  const html = (await rpcCall("resources/read", { uri: tools.tools.find((t) => t.name === "get_person")._meta.ui.resourceUri })).contents[0].text;
+  const result = await rpcCall("tools/call", { name: "get_person", arguments: { id: "I4" } });
+  const preview = await browser.newPage();
+  try {
+    await preview.goto(srv.url);
+    await preview.evaluate(({ html, result }) => {
+      // three hosts: one answers ui/initialize with an error, one sends the result before the handshake, one never sends it
+      for (const kind of ["error", "early", "silent"]) {
+        const frame = document.createElement("iframe");
+        frame.title = `host-${kind}`;
+        frame.sandbox.add("allow-scripts");
+        addEventListener("message", ({ data, source }) => {
+          if (source !== frame.contentWindow) return;
+          if (data.method !== "ui/initialize") return;
+          if (kind === "error") {
+            source.postMessage({ jsonrpc: "2.0", id: data.id, error: { code: -32602, message: "Unsupported protocol version" } }, "*");
+            source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: result }, "*");
+          } else if (kind === "early") {
+            source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: result }, "*");
+            source.postMessage({ jsonrpc: "2.0", id: data.id, result: {} }, "*");
+          } else source.postMessage({ jsonrpc: "2.0", id: data.id, result: {} }, "*");
+        });
+        frame.srcdoc = html;
+        document.body.append(frame);
+      }
+    }, { html, result });
+    for (const kind of ["error", "early"]) {
+      await preview.frameLocator(`iframe[title="host-${kind}"]`).getByRole("heading", { name: "George Hartley" }).first().waitFor({ timeout: 5000 });
+    }
+    const silent = preview.frameLocator('iframe[title="host-silent"]');
+    await silent.getByText("Loading records…").waitFor();
+    await silent.getByText("didn't load in this app").waitFor({ timeout: 12_000 });
+  } finally {
+    await preview.close();
+  }
+});
+
 test("a report linked to a source is readable from both pages", async () => {
   const response = await page.request.post(`${srv.url}/mcp`, { data: {
     jsonrpc: "2.0", id: 1, method: "tools/call",

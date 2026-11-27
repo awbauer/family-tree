@@ -36,6 +36,9 @@
   // "vars" block: any variable listed here would overwrite the dashboard value on every deploy.
   // Workers AI: the agents' models through AI Gateway, Cloudflare's Web Search API, and page-to-Markdown conversion.
   "ai": { "binding": "AI" },
+  // Cloudflare Images: scales photos and scans down before the MCP server returns them, so AI clients don't refuse
+  // them as too large (worker/mcp-images.js). Without it, large images are returned as links instead.
+  "images": { "binding": "IMAGES" },
   // AI Search: meaning-based search over the family history (worker/ai-search.js). Its own namespace keeps it apart
   // from the account's other projects; deploy creates the namespace and the Worker creates its instance on first sync.
   "ai_search_namespaces": [{ "binding": "AI_SEARCH", "namespace": "family-tree" }],

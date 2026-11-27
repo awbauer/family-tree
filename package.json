@@ -25,6 +25,9 @@
       },
       "AI": {
         "description": "Workers AI, used by the optional research agents and page assistant."
+      },
+      "IMAGES": {
+        "description": "Cloudflare Images, used to scale photos down before they're sent to AI clients over MCP. Within the free allowance for a family site."
       }
     }
   },
