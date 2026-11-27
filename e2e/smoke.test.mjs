@@ -271,13 +271,14 @@ test("MCP cards cope with hosts that don't follow the happy path", async () => {
         frame.sandbox.add("allow-scripts");
         addEventListener("message", ({ data, source }) => {
           if (source !== frame.contentWindow) return;
+          if (data.method === "ui/open-link") return location.assign(data.params.url);
           if (data.method !== "ui/initialize") return;
           if (kind === "error") {
             source.postMessage({ jsonrpc: "2.0", id: data.id, error: { code: -32602, message: "Unsupported protocol version" } }, "*");
             source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: result }, "*");
           } else if (kind === "early") {
             source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/tool-result", params: result }, "*");
-            source.postMessage({ jsonrpc: "2.0", id: data.id, result: {} }, "*");
+            source.postMessage({ jsonrpc: "2.0", id: data.id, result: { hostCapabilities: { openLinks: {} } } }, "*");
           } else source.postMessage({ jsonrpc: "2.0", id: data.id, result: {} }, "*");
         });
         frame.srcdoc = html;
@@ -290,6 +291,9 @@ test("MCP cards cope with hosts that don't follow the happy path", async () => {
     const silent = preview.frameLocator('iframe[title="host-silent"]');
     await silent.getByText("Loading records…").waitFor();
     await silent.getByText("didn't load in this app").waitFor({ timeout: 12_000 });
+    // the early card was drawn before the host said it opens links; its link still goes through the host
+    await preview.frameLocator('iframe[title="host-early"]').getByRole("link", { name: "Open on family tree" }).first().click();
+    await preview.waitForURL("**#/person/I4", { timeout: 5000 });
   } finally {
     await preview.close();
   }

@@ -50,7 +50,9 @@ function mountCards(labels) {
         open.href = card.page_url;
         open.target = "_blank";
         open.rel = "noopener noreferrer";
-        if (hostOpensLinks) open.addEventListener("click", (event) => {
+        // Checked at click time: a result can arrive before the initialize answer that says whether the host opens links.
+        open.addEventListener("click", (event) => {
+          if (!hostOpensLinks) return;
           event.preventDefault();
           send("ui/open-link", { url: card.page_url }, ++requestId);
         });
