@@ -5,6 +5,10 @@ const counts = (people: number, events: number, docs: number) =>
   [people ? plural(people, "person", "people") : "", events ? plural(events, "event", "events") : "", docs ? plural(docs, "photo or document", "photos and documents") : ""].filter(Boolean).join(" · ");
 
 export const places = {
+  filter: {
+    label: "In this place (and the places inside it)",
+    anywhere: "Anywhere",
+  },
   map: {
     title: "Places",
     heading: "Places",
@@ -14,6 +18,12 @@ export const places = {
     tabPlaces: (n: number) => `On the map (${n})`,
     tabUnplaced: (n: number) => `Not on the map (${n})`,
     tabTree: "By place",
+    panelFiltered: "Showing only what the filters let through.",
+    within: "Only places in",
+    inPlace: (name: string) => `in ${name}`,
+    group: "Group by country and region when zoomed out",
+    groupedCountries: "Grouped by country: zoom in, or choose one, to see the places in it.",
+    groupedRegions: "Grouped by region: zoom in, or choose one, to see the places in it.",
     treeHelp: "Every place, inside the places that contain it. Open one to see what's inside; choose one to see what happened there.",
     expand: (name: string) => `Show the places inside ${name}`,
     collapse: (name: string) => `Hide the places inside ${name}`,
@@ -62,6 +72,8 @@ export const places = {
     edit: "Edit this place",
     addInside: "Add a place inside it",
     whoTitle: "Who was here",
+    inPeople: "Everyone here on the People page",
+    inTimeline: "On the timeline",
     artifactsTitle: "Photos and documents",
     madeHere: "made here",
     namesHere: "names this place",

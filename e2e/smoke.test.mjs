@@ -289,6 +289,29 @@ test("places as a hierarchy: browse by place, breadcrumbs, and a place added ins
   await page.locator(".crumbs").getByRole("link", { name: "Leeds" }).click();
   await page.locator("h1").filter({ hasText: "Leeds" }).waitFor();
   await page.getByRole("link", { name: "Example Street" }).waitFor();
+
+  // filters follow the hierarchy: everything in England, on the Places page, People and the Timeline
+  await page.goto(`${srv.url}/#/places?in=england`);
+  await page.reload();
+  const names = async () => page.locator(".places-list .pl-name").allInnerTexts();
+  await page.locator(".places-list .pl-name").first().waitFor();
+  assert.ok((await names()).includes("Leeds"));
+  assert.ok(!(await names()).some((n) => /Portland|Duluth|Plzeň/.test(n)), "only places in England");
+  await page.locator(".places-list .pl-in").first().waitFor();
+  await page.getByRole("link", { name: "Leeds" }).count();
+  await page.goto(`${srv.url}/#/people?place=england`);
+  await page.locator("#pf-pl").waitFor();
+  assert.equal(await page.locator("#pf-pl").inputValue(), "england");
+  assert.match(await page.locator("#pf-n").innerText(), /^[1-9]\d* people$/);
+  assert.ok(await page.locator(".p-card").filter({ hasText: "Arthur Hartley" }).count() > 0, "born in Leeds, so in England");
+  await page.goto(`${srv.url}/#/timeline?scope=all&place=leeds`);
+  await page.locator(".tl-row").first().waitFor();
+  assert.ok((await page.locator(".tl-row").allInnerTexts()).every((t) => /Leeds/.test(t)), "only events in Leeds");
+  // zoomed out to the world, markers are grouped by country
+  await page.goto(`${srv.url}/#/places`);
+  await page.reload();
+  await page.waitForFunction(() => !!document.querySelector(".leaflet-interactive"), null, { timeout: 15000 }).catch(() => {}); // Leaflet comes from a CDN
+  if (await page.locator(".leaflet-interactive").count()) await page.locator(".map-hint").waitFor();
   assert.deepEqual(errors, []);
 });
 
