@@ -6,6 +6,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { join, dirname, resolve } from "node:path";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startDevServer } from "../tools/dev_server.mjs";
@@ -197,6 +198,24 @@ test("a new page starts at the top, back and forward included", async () => {
   await page.waitForFunction(() => document.querySelector(".person-head h1")?.textContent === "George Hartley");
   await page.waitForTimeout(150);
   assert.equal(await page.evaluate(() => window.scrollY), 0);
+});
+
+test("an attachment that is an image shows in the photo gallery, not the attachment list", async () => {
+  const photo = readFileSync(join(ROOT, "tests", "fixtures", "gps.jpg"));
+  const res = await page.request.post(`${srv.url}/api/attachments?person=I10&type=attachment`, { data: photo, headers: { "X-Document-Name": "Example scan.jpg", "X-Document-Title": encodeURIComponent("Example scan") } });
+  assert.equal(res.status(), 201, await res.text());
+  await page.goto(`${srv.url}/#/person/I10`);
+  await page.reload();
+  const fig = page.locator("#w-photos figure").filter({ hasText: "Example scan" });
+  await fig.waitFor();
+  await page.waitForFunction(() => [...document.querySelectorAll("#w-photos img")].some((i) => i.alt === "Example scan" && i.naturalWidth > 0));
+  assert.equal(await page.locator("#w-attachments").getByText("Example scan").count(), 0);
+  await fig.click();
+  const box = page.locator("dialog.lightbox");
+  await box.getByRole("link", { name: "Download" }).waitFor();
+  await box.getByRole("button", { name: "Link to more people" }).waitFor();
+  assert.equal(await box.locator("[data-a=main]").count(), 0, "an attachment can't be the main photo");
+  assert.deepEqual(errors, []);
 });
 
 test("person attachments download and Markdown reports open in the viewer", async () => {

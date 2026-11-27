@@ -48,10 +48,12 @@ export class FakeD1 {
 export class FakeR2 {
   constructor() { this.objects = new Map(); }
   async put(key, value, opts = {}) { this.objects.set(key, { body: value, httpMetadata: opts.httpMetadata || {} }); }
-  async get(key) {
+  async get(key, { range } = {}) {
     const o = this.objects.get(key);
     if (!o) return null;
-    const blob = new Blob([o.body]);
+    this.reads = (this.reads || 0) + 1;
+    const whole = new Blob([o.body]);
+    const blob = range ? whole.slice(range.offset || 0, range.length != null ? (range.offset || 0) + range.length : undefined) : whole;
     return { body: o.body, size: blob.size, arrayBuffer: () => blob.arrayBuffer(), httpEtag: `"${key}"`,
       writeHttpMetadata: (h) => o.httpMetadata.contentType && h.set("Content-Type", o.httpMetadata.contentType) };
   }

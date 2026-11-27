@@ -11,6 +11,8 @@ import { S } from "../strings/index.ts";
 import { now } from "./db.js";
 import { FILE_LIMIT } from "./documents.ts";
 import { stripImageMetadata } from "./image-meta.js";
+import { sniffType } from "./media-types.js";
+export { sniffType };
 
 const L = S.api.uploadLinks;
 export const SLOT_MINUTES = 15;
@@ -34,16 +36,6 @@ export async function createSlot(env, origin, { principal, tree, kind, params })
   await env.DB.prepare("INSERT INTO upload_slots (token_hash, principal, tree_id, kind, params, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .bind(await hash(text), principal, tree, kind, JSON.stringify(params), t, expires).run();
   return { url: `${origin}/upload/${text}`, expires_at: expires };
-}
-
-/** What a file is, from its first bytes: one of the photo types upload_media takes, or null. */
-export function sniffType(b) {
-  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
-  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
-  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return "image/gif";
-  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return "image/webp";
-  if (b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46) return "application/pdf";
-  return null;
 }
 
 async function readBody(request) {

@@ -104,7 +104,7 @@ function PeoplePicker({ chosen, setChosen, exclude, name }: { chosen: string[]; 
 }
 
 /** Link a document already on this person to more people. */
-function LinkMore({ item, others }: { item: DocumentItem; others: string[] }) {
+export function LinkMore({ item, others }: { item: DocumentItem; others: string[] }) {
   const { editor } = useData();
   const { id, change } = usePerson();
   const [open, setOpen] = useState(false), [chosen, setChosen] = useState<string[]>([]), [sent, setSent] = useState(false);
@@ -122,7 +122,8 @@ function LinkMore({ item, others }: { item: DocumentItem; others: string[] }) {
 export function Attachments() {
   const { D, live, editor, tree } = useData();
   const { id, p, change } = usePerson();
-  const list: DocumentItem[] = (((D.research as any).media || {})[id] || []).filter((m: DocumentItem) => documentType(m.file));
+  // image attachments are in the photo gallery instead (Photos.tsx)
+  const list: DocumentItem[] = (((D.research as any).media || {})[id] || []).filter((m: DocumentItem & { image?: boolean }) => documentType(m.file) && !m.image);
   const [kind, setKind] = useState<DocumentType | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

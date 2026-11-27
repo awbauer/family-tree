@@ -51,7 +51,8 @@ import * as AiSearch from "./ai-search.js";
 import { detailsVisible, familyVisible, batchVisible, editScopeError } from "./edit-access.js";
 import { followAlias, scrubFor, validTreeDefinition, validViewFilter } from "./scope.js";
 import * as Mcp from "./mcp.js";
-import { UPLOAD_TYPES, safeMediaType } from "./media-types.js";
+import { UPLOAD_TYPES, imageType, safeMediaType } from "./media-types.js";
+import { stripImageMetadata } from "./image-meta.js";
 import { documentType, FILE_LIMIT, REPORT_LIMIT } from "./documents.ts";
 import { isUploadPath, handleUpload } from "./upload-slots.js";
 import { S } from "../strings/index.ts";
@@ -124,7 +125,7 @@ async function route(c) {
   if (p === "/api/tree" && m === "GET") {
     const g = grantOrFail(c), pv = c.url.searchParams.get("preview_view");
     if (pv && !c.access.isOwner) fail(403, S.api.auth.ownerOnlyPreview);
-    return json(await scoped(c, pv ? { ...g, view_id: pv, role: "member" } : g), 200, { "Cache-Control": "private, no-store" });
+    return json(await markImageAttachments(c, await scoped(c, pv ? { ...g, view_id: pv, role: "member" } : g)), 200, { "Cache-Control": "private, no-store" });
   }
   if (p === "/api/todos" && m === "GET") return listTodos(c);
   if (p === "/api/todos" && m === "POST") return createTodo(c);
@@ -911,9 +912,13 @@ async function addDocument(c) {
 
   const key = `${report ? "reports" : "attachments"}/${crypto.randomUUID()}`;
   const contentType = report ? "text/markdown; charset=utf-8" : "application/octet-stream";
-  await c.env.MEDIA.put(key, bytes, { httpMetadata: { contentType } });
+  // An attachment that is a photo or scan loses its location data like any photo (the site's form only strips photos
+  // uploaded as photos), and is recorded as an image so the person page shows it in the gallery.
+  const image = !report && imageType(bytes);
+  const stored = image ? stripImageMetadata(bytes) : bytes;
+  await c.env.MEDIA.put(key, stored, { httpMetadata: { contentType } });
   await c.env.DB.prepare("INSERT INTO uploads (key, uploaded_by, uploaded_at, content_type, bytes, original_name) VALUES (?, ?, ?, ?, ?, ?)")
-    .bind(key, self(c), now(), contentType, bytes.byteLength, name).run();
+    .bind(key, self(c), now(), image || contentType, stored.byteLength, name).run();
   const reason = report ? S.api.uploads.addReport : S.api.uploads.addAttachment;
   const payload = { reason, ops: people.map((pid) => ({ op: "media.attach", person: pid, file: key, type, caption: title || name, ...(source ? { source } : {}) })) };
   const direct = can.review(g) && c.access.kind !== "agent";
@@ -1124,6 +1129,32 @@ function canSeeDocuments(b, person) {
   return b.scope.view.media && Object.hasOwn(b.people, person) && !b.people[person].private;
 }
 
+/** Mark attachments that are images (`image: true`) so the person page shows them in the gallery: recorded as an image
+ *  at upload, or, for files uploaded before that was recorded, named like one. /media serves them inline only after
+ *  checking the bytes themselves (downloadDocument). */
+const IMAGE_NAME = /\.(jpe?g|png|webp|gif)$/i;
+async function markImageAttachments(c, b) {
+  const media = b.research && b.research.media;
+  if (!media) return b;
+  const keys = new Set(Object.values(media).flat().filter((m) => m && documentType(m.file) === "attachment").map((m) => m.file));
+  if (!keys.size) return b;
+  const { results } = await c.env.DB.prepare("SELECT key, content_type, original_name FROM uploads WHERE key LIKE 'attachments/%'").all();
+  const rows = results.filter((r) => keys.has(r.key));
+  // Attachments uploaded before uploads recorded images: read their first bytes once and record what they are
+  // ("application/octet-stream; checked" when not an image), a few per load so a big backlog doesn't slow the page.
+  const unchecked = rows.filter((r) => r.content_type === "application/octet-stream" && !IMAGE_NAME.test(r.original_name || "")).slice(0, 25);
+  if (c.env.MEDIA) await Promise.all(unchecked.map(async (r) => {
+    const head = await c.env.MEDIA.get(r.key, { range: { offset: 0, length: 16 } }).catch(() => null);
+    if (!head) return;
+    r.content_type = imageType(new Uint8Array(await head.arrayBuffer())) || "application/octet-stream; checked";
+    await c.env.DB.prepare("UPDATE uploads SET content_type = ? WHERE key = ?").bind(r.content_type, r.key).run();
+  }));
+  const images = new Set(rows.filter((r) => /^image\//.test(r.content_type || "") || IMAGE_NAME.test(r.original_name || "")).map((r) => r.key));
+  if (!images.size) return b;
+  const marked = Object.fromEntries(Object.entries(media).map(([pid, list]) => [pid, list.map((m) => (m && images.has(m.file) ? { ...m, image: true } : m))]));
+  return { ...b, research: { ...b.research, media: marked } };
+}
+
 async function downloadDocument(c, key) {
   const g = grantOrFail(c);
   const preview = c.url.searchParams.get("preview_view");
@@ -1136,6 +1167,18 @@ async function downloadDocument(c, key) {
   const obj = upload && await c.env.MEDIA.get(key);
   if (!obj) fail(404, S.api.http.notFound);
   const filename = encodeURIComponent(upload.original_name).replace(/['()*]/g, (ch) => `%${ch.charCodeAt(0).toString(16)}`);
+  // ?inline=1 shows an attachment that is a photo or scan in the page, as an image; only when its bytes are a JPEG, PNG,
+  // WebP or GIF (never SVG or anything a browser would run), whatever its name says. Anything else is a download.
+  if (c.url.searchParams.get("inline") === "1" && documentType(key) === "attachment") {
+    const bytes = new Uint8Array(await obj.arrayBuffer());
+    const type = imageType(bytes);
+    return new Response(c.request.method === "HEAD" ? null : bytes, { headers: {
+      "Content-Type": type || "application/octet-stream",
+      "Content-Disposition": `${type ? "inline" : "attachment"}; filename*=UTF-8''${filename}`,
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+    } });
+  }
   return new Response(c.request.method === "HEAD" ? null : obj.body, { headers: {
     "Content-Type": "application/octet-stream",
     "Content-Disposition": `attachment; filename*=UTF-8''${filename}`,
